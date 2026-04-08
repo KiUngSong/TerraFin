@@ -342,11 +342,10 @@ See [caching.md](./caching.md) for the exact cache layout.
 Check that the chart page and the notebook seed request are using the same
 session id. The notebook helper should open `/chart?sessionId=default`.
 
-If env-backed data is unexpectedly missing in a notebook, remember that Jupyter
-does not auto-load TerraFin's `.env` on import. TerraFin now lazy-loads `.env`
-when an env-backed provider is first used, but notebook users can make startup
-deterministic with `from TerraFin import configure; configure()` or
-`configure(dotenv_path="/absolute/path/to/.env")`.
+If env-backed data is unexpectedly missing in a notebook, use the explicit
+startup pattern from [interface.md](./interface.md): call `configure()` once at
+the top of the notebook, and pass `dotenv_path=...` when the kernel is running
+outside the repo root.
 
 ### Chart shows stale series after rapid page actions
 

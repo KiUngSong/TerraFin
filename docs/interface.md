@@ -73,7 +73,7 @@ Runtime config comes from `src/TerraFin/interface/config.py`.
 
 | Method | Path | Behaviour |
 |--------|------|-----------|
-| `GET` | `/` | Redirect to the chart page, respecting `base_path` |
+| `GET` | `/` | Redirect to the dashboard page, respecting `base_path` |
 | `GET` | `/health` | Liveness endpoint |
 | `GET` | `/ready` | Readiness endpoint with cache-manager and private-data checks |
 
@@ -178,24 +178,23 @@ These helpers accept `TimeSeriesDataFrame` or `list[TimeSeriesDataFrame]`.
 Single OHLC series render as candlesticks; multi-series payloads render as
 comparison lines.
 
-Notebook note:
+Notebook and embedded use:
 
 - `import TerraFin` does not auto-load `.env`
-- env-backed TerraFin features lazy-load `.env` on first use
-- for deterministic notebook setup, call:
+- env-backed features lazy-load `.env` on first use unless
+  `TERRAFIN_DISABLE_DOTENV=1`
+- for deterministic notebook or script setup, call:
 
 ```python
-from TerraFin import configure, load_terrafin_config
+from TerraFin import configure
 
 configure()
-config = load_terrafin_config()
 ```
 
-- if the notebook kernel runs outside the repo root, use
+- if the kernel runs outside the repo root, use
   `configure(dotenv_path="/absolute/path/to/.env")`
-- set `TERRAFIN_DISABLE_DOTENV=1` to opt out of TerraFin's lazy autoloading
-- advanced embedding code can inspect `load_terrafin_config()` for the resolved
-  typed runtime settings instead of reading env vars directly
+- if you need the resolved typed settings, inspect
+  `load_terrafin_config()` instead of reading env vars directly
 
 ---
 
@@ -204,20 +203,16 @@ config = load_terrafin_config()
 Source: `src/TerraFin/interface/dashboard/`
 
 The dashboard is the main consumer of `PrivateDataService`. It mixes private
-source data, cache status, and a few valuation-style summary endpoints.
-If the private source is unavailable, TerraFin still serves a public/demo
-experience by falling back to bundled public-safe fixtures or empty defaults for
-those widgets. Public deployments should not rely on cached private-source
-responses as substitute public data unless the deployer has independently
-confirmed the right to store and serve them.
+source data, cache status, and a few valuation-style summary endpoints. If the
+private source is unavailable, TerraFin falls back to bundled public-safe
+fixtures or empty defaults for those widgets.
 
 Important boundary:
 
 - dashboard/widget payloads are not automatically chart-series contracts
-- if a private-source feature should get optimized chart serving, it should be
-  promoted into the data layer as a `TimeSeriesDataFrame` series and then
-  consumed by the interface as a normal chartable series
-- otherwise it should stay a widget/card payload in `PrivateDataService`
+- if a private-source feature needs optimized chart serving, promote it into
+  the data layer as a `TimeSeriesDataFrame` series first
+- otherwise keep it as a widget payload in `PrivateDataService`
 
 ### API endpoints
 

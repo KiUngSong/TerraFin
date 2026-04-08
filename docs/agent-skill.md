@@ -1,32 +1,50 @@
 ---
 title: Agent Skill
-summary: How agents should use TerraFin through the shared processing layer, Python client, CLI, HTTP API, and optional chart helpers.
+summary: How to use TerraFin from Python, CLI, or HTTP for agent-driven research workflows.
 read_when:
-  - Using TerraFin as a reusable agent skill
-  - Choosing between Python and HTTP transport
-  - Interpreting processing metadata
-  - Mapping common research tasks to TerraFin client methods
+  - Using TerraFin as a reusable agent tool
+  - Choosing between Python, CLI, and HTTP transport
+  - Interpreting `processing` metadata
+  - Mapping common research tasks to TerraFin entrypoints
 ---
 
-# TerraFin As An Agent Skill
+# TerraFin as an Agent Tool
 
-TerraFin is agent-friendly when agents use the same optimized processing path as
+TerraFin is most useful for agents when it stays on the same processing path as
 the product itself.
 
 That means:
 
-- market and macro tasks use the progressive-history aware data contract
+- market and macro requests share the progressive-history aware contract
 - view transforms match the chart stack
-- indicator computation matches chart math
-- the result always exposes `processing` metadata so an agent can decide whether
-  it needs a deeper rerun
+- indicator math matches the chart indicators
+- every response includes `processing` so an agent can decide whether to rerun
+  with deeper history
 
-The goal is not "a separate simplified API for bots." The goal is one shared
-pipeline with multiple entrypoints.
+If you are maintaining those surfaces, use [agent-runtime.md](./agent-runtime.md).
+This document is the usage guide.
 
-## Public entrypoints
+## What TerraFin is good at
 
-### 1. Python client
+Use TerraFin when you need:
+
+- market or macro time series
+- chart-matching technical indicators
+- company info, earnings, or financial statements
+- guru portfolio holdings
+- calendar events
+- optional chart opening tied to TerraFin's chart/session model
+
+## Choose an entrypoint
+
+| Entry point | Use it when... |
+|-------------|----------------|
+| Python client | TerraFin is importable locally and low-latency access is best |
+| HTTP API | TerraFin is already running as a service or only API access is available |
+| CLI | Shell-native composition is easier than Python imports |
+| Skill artifact | Another agent environment needs portable usage instructions |
+
+### Python client
 
 Source: `src/TerraFin/agent/client.py`
 
@@ -37,76 +55,61 @@ client = TerraFinAgentClient()
 snapshot = client.market_snapshot("AAPL")
 ```
 
-Use Python mode when:
-
-- TerraFin is installed in the current environment
-- the agent is running inside the same repo or Python environment
-- low-latency local access is preferred
-
-### 2. CLI
+### CLI
 
 Console script: `terrafin-agent`
 
 ```bash
-terrafin-agent market-data AAPL --json
+terrafin-agent snapshot AAPL --json
 terrafin-agent financials AAPL --statement income --period annual --json
 ```
 
-Use the CLI when:
-
-- the agent prefers shell tools over Python imports
-- the workflow already composes terminal commands
-- machine-readable stdout is needed with `--json`
-
-### 3. HTTP API
+### HTTP API
 
 Base route family: `/agent/api/*`
 
-Use HTTP mode when:
+```bash
+curl "http://127.0.0.1:8001/agent/api/market-snapshot?ticker=AAPL&depth=auto&view=daily"
+```
 
-- TerraFin is already running as a service
-- the agent is remote from the Python environment
-- OpenAPI or service boundaries matter more than direct imports
+### Skill artifact
 
-### 4. Skill artifact
-
-Shipped skill: `skills/terrafin/SKILL.md`
-
-That skill is the portable "how to use TerraFin" artifact for other agent
-environments. It points agents to the client, CLI, and task recipes below.
+The shipped portable instructions live in
+[`skills/terrafin/SKILL.md`](../skills/terrafin/SKILL.md).
 
 ## Transport rule
 
-Use this decision rule:
+Use this order:
 
-- prefer Python when TerraFin is importable locally
-- use HTTP when the server is already running elsewhere or only API access is available
-- use the CLI when shell-native composition is easier than imports
+1. Prefer Python when TerraFin is importable locally.
+2. Use HTTP when the server is already running elsewhere.
+3. Use the CLI when shell composition is the simplest fit.
 
-`TerraFinAgentClient(transport="auto")` follows that pattern:
+`TerraFinAgentClient(transport="auto")` follows that rule:
 
 - with no `base_url`, it uses Python mode
 - with a `base_url`, it uses HTTP mode
 
-## Shared processing model
+## Default request policy
 
-The agent layer lives in `src/TerraFin/agent/service.py`.
+For market and macro work:
 
-For market and macro series, it shares the optimized path already used by the
-chart stack:
+- start with `depth="auto"`
+- inspect the returned `processing`
+- rerun with `depth="full"` only when the user explicitly needs long-range,
+  backtest-style, or `ALL`-style context
 
-- `DataFactory.get_recent_history(...)`
-- `DataFactory.get(...)` when full depth is required
-- chart-style `apply_view(...)`
-- chart indicator adapters from `src/TerraFin/interface/chart/indicators/adapter.py`
+For company info, earnings, financials, portfolio, and calendar data:
 
-For non-progressive domains such as company info, earnings, financials,
-portfolio, and calendar, TerraFin returns complete results immediately but still
-includes `processing`.
+- the payload is expected to be complete immediately
+- `processing.isComplete` should already be `true`
+
+Charts are optional. Use `open_chart(...)` only when a chart is genuinely
+useful for the task.
 
 ## Processing metadata
 
-Every agent response includes a top-level `processing` field.
+Every agent response includes top-level `processing`.
 
 ```json
 {
@@ -123,53 +126,58 @@ Every agent response includes a top-level `processing` field.
 }
 ```
 
-Meaning:
+What the main fields mean:
 
-- `requestedDepth`: what the caller asked for: `auto`, `recent`, or `full`
-- `resolvedDepth`: what TerraFin actually returned: `recent` or `full`
-- `loadedStart` / `loadedEnd`: loaded time span for time-series tasks
-- `isComplete`: whether older data still exists outside the returned range
-- `hasOlder`: whether the caller can deepen the request
-- `sourceVersion`: provider/cache version hint
-- `view`: effective timeframe transform used on the response
+| Field | Meaning |
+|-------|---------|
+| `requestedDepth` | What the caller asked for: `auto`, `recent`, or `full` |
+| `resolvedDepth` | What TerraFin actually returned |
+| `loadedStart` / `loadedEnd` | Loaded time span for time-series tasks |
+| `isComplete` | Whether older data still exists outside the response |
+| `hasOlder` | Whether the request can be deepened |
+| `sourceVersion` | Provider/cache version hint |
+| `view` | Effective timeframe transform used on the response |
 
-Upgrade rule:
+## Common tasks
 
-- if the user asks for long-range context, full history, backtest-style work, or `ALL`-style analysis, rerun with `depth="full"`
-
-## Task defaults
-
-Default hybrid policy:
-
-- `ticker_brief`, `market_snapshot`, `compare_assets`, and `macro_context` start with `depth="auto"`
-- `company_info`, `earnings`, `financials`, `portfolio`, and `calendar_scan` are complete immediately
-- explicit long-range analysis should use `depth="full"`
-
-## Standard tasks
-
-These are the intended reusable recipes.
-
-| Task | Python helper | Client method(s) | CLI |
-|------|---------------|------------------|-----|
-| Ticker brief | `ticker_brief(...)` | `resolve`, `market_snapshot`, `company_info` | `resolve`, `snapshot`, `company` |
-| Market snapshot | `market_snapshot(...)` | `market_snapshot` | `snapshot` |
-| Compare assets | `compare_assets(...)` | repeated `market_snapshot` | repeated `snapshot` |
-| Macro context | `macro_context(...)` | `macro_focus` | `macro-focus` |
-| Portfolio context | `portfolio_context(...)` | `portfolio` | `portfolio` |
-| Stock fundamentals | `stock_fundamentals(...)` | `company_info`, `earnings`, `financials` | `company`, `earnings`, `financials` |
-| Calendar scan | `calendar_scan(...)` | `calendar_events` | `calendar` |
-| Bubble analysis | `bubble_analysis(...)` | `lppl_analysis` | `lppl` |
-| Open chart | `open_chart(...)` | `open_chart` | `open-chart` |
+| Task | Recommended entrypoint |
+|------|------------------------|
+| Ticker brief | `ticker_brief(...)` or `resolve(...)` then `market_snapshot(...)` |
+| Market snapshot | `market_snapshot(name, depth="auto", view="daily")` |
+| Compare assets | `compare_assets([...], depth="auto", view="daily")` |
+| Macro context | `macro_context(name, depth="auto", view="daily")` |
+| Portfolio context | `portfolio_context(guru)` |
+| Stock fundamentals | `stock_fundamentals(ticker, statement="income", period="annual")` |
+| Calendar scan | `calendar_scan(year=..., month=..., categories=..., limit=...)` |
+| Bubble analysis | `bubble_analysis(name, depth="auto", view="daily")` |
+| Open chart | `open_chart(...)` when a chart is explicitly useful |
 
 Task helpers live in `src/TerraFin/agent/tasks.py`.
 
 LPPL note:
-The shared `lppl_analysis` agent path uses TerraFin's calibrated default scan
-from `technical/lppl.py`, which is the same behavior used by the chart layer.
-The full article-style 750→50 ladder remains available only from the Python
-analytics helper via `lppl(..., n_windows=None)` while LPPL tuning continues.
 
-## HTTP surface
+- `lppl_analysis` uses TerraFin's calibrated default scan from
+  `technical/lppl.py`
+- the full article-style 750→50 ladder remains available from the Python
+  analytics helper via `lppl(..., n_windows=None)`
+
+## Key client methods
+
+- `resolve(query)`
+- `market_data(name, depth="auto", view="daily")`
+- `indicators(name, indicators, depth="auto", view="daily")`
+- `market_snapshot(name, depth="auto", view="daily")`
+- `economic(indicators)`
+- `portfolio(guru)`
+- `company_info(ticker)`
+- `earnings(ticker)`
+- `financials(ticker, statement="income", period="annual")`
+- `macro_focus(name, depth="auto", view="daily")`
+- `calendar_events(year=..., month=..., categories=..., limit=...)`
+- `lppl_analysis(name, depth="auto", view="daily")`
+- `open_chart(...)`
+
+## HTTP route summary
 
 Current agent routes:
 
@@ -186,25 +194,7 @@ Current agent routes:
 - `GET /agent/api/lppl`
 - `GET /agent/api/calendar`
 
-Time-series endpoints accept:
-
-- `depth=auto|recent|full`
-- `view=daily|weekly|monthly|yearly` where applicable
-
-OpenAPI is available from the server at `/openapi.json`.
-
-## Charts are optional
-
-Charts are supported, but they are not the main agent contract.
-
-Use `open_chart(...)` only when a chart is genuinely useful for the task.
-Structured analysis should usually come first.
-
-Chart rules:
-
-- lookup-name chart requests use the existing progressive chart routes
-- raw dataframe chart requests use the direct chart-data path
-- notebook and page flows keep using TerraFin's existing chart/session model
+OpenAPI is available at `/openapi.json`.
 
 ## Minimal examples
 
@@ -218,21 +208,21 @@ brief = client.market_snapshot("AAPL", depth="auto", view="daily")
 fundamentals = stock_fundamentals("AAPL", client=client)
 ```
 
-### HTTP
-
-```bash
-curl "http://127.0.0.1:8001/agent/api/market-snapshot?ticker=AAPL&depth=auto&view=daily"
-```
-
 ### CLI
 
 ```bash
 terrafin-agent snapshot AAPL --depth auto --view daily --json
 ```
 
-## See also
+### HTTP
 
-- `skills/terrafin/SKILL.md`
-- [interface.md](./interface.md)
-- [chart-architecture.md](./chart-architecture.md)
-- [analytics.md](./analytics.md)
+```bash
+curl "http://127.0.0.1:8001/agent/api/market-snapshot?ticker=AAPL&depth=auto&view=daily"
+```
+
+## Read next
+
+- [`skills/terrafin/SKILL.md`](../skills/terrafin/SKILL.md)
+- [agent-runtime.md](./agent-runtime.md) for the maintainer view
+- [interface.md](./interface.md) for the FastAPI surface
+- [chart-architecture.md](./chart-architecture.md) for shared chart/session flow

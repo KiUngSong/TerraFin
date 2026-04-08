@@ -167,7 +167,7 @@ This is the quickest way to understand what is already connected to the product:
 | Agent API indicators | Stable |
 | DCF | Stable on-demand UI/API feature in Market Insights and Stock Analysis |
 | Options / portfolio / GBM | Standalone, not yet first-class UI/API features |
-| Risk beta toolkit | Standalone Python analytics, not yet integrated into product flows |
+| Risk beta toolkit | Partially integrated — used as the stock DCF fallback and exposed through the stock beta-estimate API |
 | Trend signal (Delta-Straddle) | Stable — chart overlay and agent API |
 | Mandelbrot Fractal Dimension | Stable — chart overlay and agent API |
 | Vol regime (percentile rank + hysteresis) | Stable — chart overlay and agent API |
@@ -177,9 +177,9 @@ This is the quickest way to understand what is already connected to the product:
 
 Notebook demos live in `notebooks/analytics/`.
 They should stay as manual/exploratory notebooks, not `test_*.py` replacements.
-Each demo notebook should start with the explicit TerraFin bootstrap pattern:
-`from TerraFin import configure, load_terrafin_config`, then `configure()`,
-at the top of the notebook's first code cell.
+Each demo notebook should use the same explicit `configure()` bootstrap pattern
+described in the project [README](../README.md) and
+[interface.md](./interface.md) at the top of the first code cell.
 
 ## See also
 

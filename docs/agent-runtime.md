@@ -1,71 +1,65 @@
+---
+title: Agent Runtime
+summary: Maintainer guide for TerraFin's agent-facing service, client, CLI, route contract, and portability artifacts.
+read_when:
+  - Changing the agent service, models, CLI, or HTTP routes
+  - Debugging agent/chart behavior mismatches
+  - Updating the shipped skill or OpenAPI contract
+  - Reviewing agent-specific regression coverage
+---
+
 # Agent Runtime
 
-Use this document when you are maintaining TerraFin's agent-facing surfaces.
-If you are trying to consume TerraFin as a skill, start with
-[agent-skill.md](./agent-skill.md) and `skills/terrafin/SKILL.md` instead.
+This document is for maintainers.
 
-## Read first
+If you are trying to use TerraFin as an agent tool, start with
+[agent-skill.md](./agent-skill.md) and the shipped
+[`skills/terrafin/SKILL.md`](../skills/terrafin/SKILL.md).
 
-- [README.md](../README.md) for repo shape and install
-- [feature-integration.md](./feature-integration.md) for the "where should this logic live?" checklist
-- [data-layer.md](./data-layer.md) for `DataFactory` and provider contracts
-- [interface.md](./interface.md) for server and public routes
-- [chart-architecture.md](./chart-architecture.md) for progressive history and chart/session flow
-- [analytics.md](./analytics.md) for indicator math
-- [caching.md](./caching.md) for cache policy and provider storage
+## The rule that matters
 
-## Design rule
+Do not create an agent-only shortcut path.
 
-Do not create an agent-only shortcut path that bypasses TerraFin's optimized
-processing pipeline.
-
-Agent consumers should share the same core behavior as the product:
+Market and macro agent requests should share the same core behavior as the rest
+of the product:
 
 - progressive history where supported
 - the same view transforms
 - the same indicator math
-- explicit `processing` metadata on every response
+- explicit top-level `processing` metadata
 
-## Public agent surfaces
+If chart behavior changes, the agent path should usually change with it.
 
-### Python
+## Public surfaces to keep aligned
 
-- `TerraFin.agent.TerraFinAgentClient`
-- task helpers from `TerraFin.agent`
+| Surface | Source of truth |
+|---------|-----------------|
+| Python client | `src/TerraFin/agent/client.py` |
+| Task helpers | `src/TerraFin/agent/tasks.py` |
+| Shared service | `src/TerraFin/agent/service.py` |
+| HTTP routes | `src/TerraFin/interface/agent/data_routes.py` |
+| Response models | `src/TerraFin/agent/models.py` |
+| Portable skill | `skills/terrafin/SKILL.md` |
+| OpenAPI | `/openapi.json` from the FastAPI app |
 
-### CLI
+If one of these changes, check the rest before you call the work done.
 
-- `terrafin-agent`
+## Core runtime path
 
-### HTTP
-
-- `/agent/api/*`
-- `/openapi.json`
-
-### Skill artifact
-
-- `skills/terrafin/SKILL.md`
-- `skills/terrafin/agents/openai.yaml`
-
-## Shared implementation points
-
-Keep these layers aligned:
-
-- `src/TerraFin/agent/service.py`
-- `src/TerraFin/agent/client.py`
-- `src/TerraFin/agent/tasks.py`
-- `src/TerraFin/interface/agent/data_routes.py`
-
-For market and macro tasks, the service should rely on:
+For market and macro requests, the service should stay on TerraFin's shared
+processing path:
 
 - `DataFactory.get_recent_history(...)`
 - `DataFactory.get(...)` when full depth is required
 - `apply_view(...)`
-- chart indicator adapter functions
+- chart indicator adapters from
+  `src/TerraFin/interface/chart/indicators/adapter.py`
 
-If chart view logic or indicator math changes, check the agent service too.
+For company info, earnings, financials, portfolios, and calendar data, the
+response should still include `processing`, but the payload is expected to be
+complete immediately.
 
-## Processing metadata contract
+## Processing contract
 
 Every agent response should expose top-level `processing` with:
 
@@ -81,10 +75,11 @@ Every agent response should expose top-level `processing` with:
 Rules:
 
 - market and macro tasks may return recent/progressive results
-- company info, earnings, financials, portfolio, and calendar should be complete immediately
+- company info, earnings, financials, portfolio, and calendar should be
+  complete immediately
 - chart-opening helpers are optional utilities, not the core analysis contract
 
-## Current agent routes
+## Current HTTP contract
 
 | Method | Path | Purpose |
 |--------|------|---------|
@@ -98,19 +93,21 @@ Rules:
 | `GET` | `/agent/api/portfolio` | Guru portfolio holdings |
 | `GET` | `/agent/api/economic` | Economic indicator series |
 | `GET` | `/agent/api/macro-focus` | Macro summary plus series data |
+| `GET` | `/agent/api/lppl` | LPPL bubble-confidence summary |
 | `GET` | `/agent/api/calendar` | Calendar events |
 
-## Maintenance checklist
-
-When changing the agent runtime:
+## When you change the runtime
 
 1. Update `src/TerraFin/agent/models.py` if the public contract changes.
-2. Keep Python client, CLI, and HTTP routes aligned on method names and semantics.
-3. Keep `docs/agent-skill.md` and `skills/terrafin/SKILL.md` in sync with the real public entrypoints.
-4. Preserve backward compatibility for existing `/agent/api/*` routes unless the user explicitly wants a breaking change.
-5. Make sure `/openapi.json` still reflects the real response models.
+2. Keep service, client, CLI, and HTTP route semantics aligned.
+3. Keep [agent-skill.md](./agent-skill.md) and
+   [`skills/terrafin/SKILL.md`](../skills/terrafin/SKILL.md) aligned with the
+   real public entrypoints.
+4. Preserve backward compatibility for existing `/agent/api/*` routes unless
+   the user explicitly wants a breaking change.
+5. Make sure `/openapi.json` still reflects the actual response models.
 
-## Test surfaces
+## Regression surfaces
 
 Relevant tests:
 
@@ -127,16 +124,16 @@ ruff check src tests
 ruff format --check src tests
 ```
 
-## Safety defaults
+## Defaults worth defending
 
-- Do not add agent-specific logic that silently diverges from chart/view behavior.
-- Do not hide partial-history responses; surface them through `processing`.
-- Do not introduce new compatibility layers unless there is a clear migration need.
-- Do not commit secrets, internal endpoints, or provider credentials.
+- Do not hide partial-history responses. Surface them through `processing`.
+- Do not fork indicator logic away from the chart layer.
+- Do not add compatibility wrappers unless there is a clear migration need.
+- Do not commit secrets, private endpoints, or operator credentials.
 
-## See also
+## Read next
 
-- [data-layer.md](./data-layer.md) — DataFactory, providers, data types
-- [interface.md](./interface.md) — Server, API endpoints, chart client
-- [analytics.md](./analytics.md) — Analysis and simulation modules
-- [caching.md](./caching.md) — CacheManager, policies, configuration
+- [agent-skill.md](./agent-skill.md) for the consumer-facing usage guide
+- [interface.md](./interface.md) for the FastAPI route families
+- [chart-architecture.md](./chart-architecture.md) for shared chart/session flow
+- [data-layer.md](./data-layer.md) for `DataFactory` and provider contracts

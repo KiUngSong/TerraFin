@@ -28,7 +28,7 @@ educational, and agent-driven workflows.
 > displayed data.
 >
 > The maintainer-operated public demo Space at
-> [`https://huggingface.co/spaces/sk851/TerraFinDashboard`](https://huggingface.co/spaces/sk851/TerraFinDashboard)
+> [`https://huggingface.co/spaces/sk851/TerraFin`](https://huggingface.co/spaces/sk851/TerraFin)
 > is one such deployment and is referenced here because it is a publicly
 > accessible TerraFin demo. Access to that demo does not create any right to
 > upstream data. Nothing in this notice modifies the [LICENSE](LICENSE).
@@ -96,74 +96,42 @@ pip install -e ".[notebooks]"
 | Watchlist write mode | Requires operator-owned/private infrastructure | Configure MongoDB env vars |
 | Dashboard / market-insights private widgets | Requires operator-owned/private infrastructure | Optional private endpoint for proprietary extras |
 
-### Runtime configuration
+### Runtime setup
+
+Common runtime knobs:
 
 | Variable | Purpose |
 |----------|---------|
-| `FRED_API_KEY` | Required for FRED-backed economic series |
-| `TERRAFIN_SEC_USER_AGENT` | Required for SEC EDGAR filings and guru 13F access |
-| `TERRAFIN_HOST` | Interface host. Default: `127.0.0.1` |
-| `TERRAFIN_PORT` | Interface port. Default: `8001` |
+| `FRED_API_KEY` | Enable FRED-backed economic series |
+| `TERRAFIN_SEC_USER_AGENT` | Enable SEC EDGAR filings and guru 13F access |
+| `TERRAFIN_HOST` / `TERRAFIN_PORT` | Bind address for the FastAPI server |
 | `TERRAFIN_BASE_PATH` | Optional prefix for feature routes |
-| `TERRAFIN_CACHE_TIMEZONE` | IANA timezone for cache/date-bound scheduling. Default: `UTC` |
-| `TERRAFIN_PRIVATE_SOURCE_*` | Optional private endpoint credentials for dashboard and market-insights extras |
+| `TERRAFIN_CACHE_TIMEZONE` | IANA timezone for cache/date-bound scheduling |
+| `TERRAFIN_PRIVATE_SOURCE_*` | Optional authenticated private-source endpoint for dashboard and market-insights extras |
 | `TERRAFIN_MONGODB_URI` / `MONGODB_URI` | Optional MongoDB backend for writable watchlist mode |
-| `TERRAFIN_WATCHLIST_*` | Optional MongoDB collection/document overrides for watchlist mode |
+| `TERRAFIN_WATCHLIST_*` | Optional MongoDB collection and document overrides |
 
-See [docs/data-layer.md](docs/data-layer.md) for private-access behavior and
-[docs/caching.md](docs/caching.md) for cache-related settings.
-
-TerraFin keeps `import TerraFin` side-effect free:
-
-- explicit entrypoints auto-load `.env`:
-  - `terrafin-agent`
-  - `python src/TerraFin/interface/server.py ...`
-- notebook, script, and embedded usage lazy-load `.env` the first time an
-  env-backed feature needs it
-- set `TERRAFIN_DISABLE_DOTENV=1` to disable that lazy autoload behavior
-
-For deterministic setup in notebooks or scripts, use this bootstrap pattern:
-
-```python
-from TerraFin import configure, load_terrafin_config
-
-configure()
-config = load_terrafin_config()
-```
-
-If the notebook kernel is running from a different working directory, point
-TerraFin at the file explicitly:
+`import TerraFin` stays side-effect free. Explicit entrypoints such as
+`terrafin-agent` and `python src/TerraFin/interface/server.py ...` load `.env`
+themselves. For notebooks and scripts, call `configure()` once at startup:
 
 ```python
 from TerraFin import configure
 
-configure(dotenv_path="/absolute/path/to/.env")
+configure()
 ```
 
-You can also set `TERRAFIN_DOTENV_PATH=/absolute/path/to/.env` for a process.
+For explicit dotenv paths, lazy-load behavior, or typed config inspection, see
+[docs/interface.md](docs/interface.md). Private-source behavior lives in
+[docs/data-layer.md](docs/data-layer.md), and cache policy details live in
+[docs/caching.md](docs/caching.md).
 
-Tracked demo notebooks under `notebooks/` follow this same explicit bootstrap
-pattern in their first code cell so the runtime setup is visible without adding
-a dedicated bootstrap-only cell.
+### Public/demo mode
 
-If you are embedding TerraFin and want to inspect the resolved settings, use
-the typed config surface:
-
-```python
-from TerraFin import load_terrafin_config
-
-config = load_terrafin_config()
-print(config.runtime.base_url)
-print(config.sec_edgar.user_agent)
-```
-
-### Public demo mode
-
-TerraFin is designed to run in a public/demo mode without private access. Copy
-`.env.example` to `.env`, leave the private-access variables empty, and start the
-server. In this mode TerraFin uses public providers where available and falls
-back to bundled demo fixtures for widgets that would otherwise require the
-private endpoint.
+TerraFin can run without private infrastructure. Copy `.env.example` to `.env`,
+leave the private-access variables empty, and start the server. Public providers
+still work, and private-only widgets fall back to bundled public-safe fixtures
+or empty defaults.
 
 ```bash
 cp .env.example .env
@@ -172,9 +140,9 @@ cd src/TerraFin/interface
 python server.py run
 ```
 
-Private access is optional. When `TERRAFIN_PRIVATE_SOURCE_*` is configured,
+Private access remains optional. When `TERRAFIN_PRIVATE_SOURCE_*` is configured,
 TerraFin will use the authenticated endpoint for dashboard and market-insight
-data; otherwise it continues with public sources and fallback fixtures.
+data. Otherwise it stays on public sources and bundled fallbacks.
 
 ## Quickstart
 

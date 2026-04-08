@@ -216,16 +216,9 @@ The rule is:
   pipeline
 
 If TerraFin is deployed publicly, keep those private-source resources behind the
-authenticated endpoint. Authentication is necessary but not sufficient:
-upstream authentication does not by itself authorize downstream public caching,
-display, or redistribution of private-source responses. A private proxy or a
-successful authenticated fetch does not change the rights attached to the
-upstream data.
-
-For public deployments, do not treat cached private-source responses as
-public-safe fallback data unless your rights to do so are clear. Public/demo
-deployments should rely on public providers and bundled public-safe fixtures,
-not on cached restricted data.
+authenticated endpoint and treat fallback caches as an operational convenience,
+not as redistribution permission. Public/demo deployments should rely on public
+providers and bundled public-safe fixtures, not warmed private-source caches.
 
 ### Watchlist write mode
 
