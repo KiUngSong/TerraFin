@@ -1,0 +1,7 @@
+interface:
+  display_name: "TerraFin"
+  short_description: "Agent-ready market research skill"
+  default_prompt: "Use $terrafin to analyze a market, macro, stock, portfolio, or calendar question through TerraFin."
+
+policy:
+  allow_implicit_invocation: true

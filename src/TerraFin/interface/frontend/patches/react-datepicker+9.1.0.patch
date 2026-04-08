@@ -1,0 +1,38 @@
+diff --git a/node_modules/react-datepicker/dist/index.es.js b/node_modules/react-datepicker/dist/index.es.js
+index ebe2f53..8e1863e 100644
+--- a/node_modules/react-datepicker/dist/index.es.js
++++ b/node_modules/react-datepicker/dist/index.es.js
+@@ -129,13 +129,8 @@ function getDateFnsTz() {
+     }
+     dateFnsTzLoadAttempted = true;
+     try {
+-        // Dynamic require for date-fns-tz
+-        // Use a variable to prevent webpack from statically analyzing the require
+-        // and showing warnings when the optional dependency is not installed
+-        // See: https://github.com/Hacker0x01/react-datepicker/issues/6154
+-        var dateFnsTzModuleName = "date-fns-tz";
+         // eslint-disable-next-line @typescript-eslint/no-require-imports
+-        dateFnsTz = require(dateFnsTzModuleName);
++        dateFnsTz = require("date-fns-tz");
+     }
+     catch (_a) {
+         /* istanbul ignore next - only executes when date-fns-tz is not installed */
+diff --git a/node_modules/react-datepicker/dist/index.js b/node_modules/react-datepicker/dist/index.js
+index c2d62b3..8a412a6 100644
+--- a/node_modules/react-datepicker/dist/index.js
++++ b/node_modules/react-datepicker/dist/index.js
+@@ -138,13 +138,8 @@ function getDateFnsTz() {
+     }
+     dateFnsTzLoadAttempted = true;
+     try {
+-        // Dynamic require for date-fns-tz
+-        // Use a variable to prevent webpack from statically analyzing the require
+-        // and showing warnings when the optional dependency is not installed
+-        // See: https://github.com/Hacker0x01/react-datepicker/issues/6154
+-        var dateFnsTzModuleName = "date-fns-tz";
+         // eslint-disable-next-line @typescript-eslint/no-require-imports
+-        dateFnsTz = require(dateFnsTzModuleName);
++        dateFnsTz = require("date-fns-tz");
+     }
+     catch (_a) {
+         /* istanbul ignore next - only executes when date-fns-tz is not installed */

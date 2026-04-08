@@ -1,0 +1,47 @@
+{
+  "version": "2026-04-06",
+  "base_year": 2025,
+  "base_year_eps": 274.14,
+  "yearly_assumptions": [
+    {
+      "year_offset": 1,
+      "growth_pct": 14.40,
+      "payout_ratio_pct": 32.50,
+      "buyback_ratio_pct": 45.70,
+      "equity_risk_premium_pct": 4.50
+    },
+    {
+      "year_offset": 2,
+      "growth_pct": 11.50,
+      "payout_ratio_pct": 32.20,
+      "buyback_ratio_pct": 46.00,
+      "equity_risk_premium_pct": 4.40
+    },
+    {
+      "year_offset": 3,
+      "growth_pct": 9.50,
+      "payout_ratio_pct": 31.80,
+      "buyback_ratio_pct": 46.20,
+      "equity_risk_premium_pct": 4.30
+    },
+    {
+      "year_offset": 4,
+      "growth_pct": 7.50,
+      "payout_ratio_pct": 31.20,
+      "buyback_ratio_pct": 46.50,
+      "equity_risk_premium_pct": 4.20
+    },
+    {
+      "year_offset": 5,
+      "growth_pct": 5.80,
+      "payout_ratio_pct": 30.80,
+      "buyback_ratio_pct": 46.80,
+      "equity_risk_premium_pct": 4.10
+    }
+  ],
+  "terminal_growth_pct": 4.00,
+  "terminal_equity_risk_premium_pct": 4.00,
+  "terminal_roe_pct": 20.0,
+  "sensitivity_discount_rate_shifts_bps": [-100, -50, 0, 50, 100],
+  "sensitivity_terminal_growth_shifts_bps": [-100, -50, 0, 50, 100]
+}

@@ -1,0 +1,2 @@
+recursive-include src/TerraFin/interface/frontend/build *
+recursive-exclude src/TerraFin/interface/frontend/build *.map

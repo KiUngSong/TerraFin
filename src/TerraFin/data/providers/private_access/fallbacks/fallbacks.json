@@ -1,0 +1,55 @@
+{
+  "watchlist": {
+    "items": [
+      { "symbol": "AAPL", "name": "Apple", "move": "+0.82%" },
+      { "symbol": "AMZN", "name": "Amazon", "move": "+0.47%" },
+      { "symbol": "GOOGL", "name": "Alphabet", "move": "+0.69%" },
+      { "symbol": "META", "name": "Meta", "move": "+1.24%" },
+      { "symbol": "MSFT", "name": "Microsoft", "move": "+1.11%" },
+      { "symbol": "NVDA", "name": "NVIDIA", "move": "+2.54%" },
+      { "symbol": "TSLA", "name": "Tesla", "move": "-1.09%" }
+    ]
+  },
+  "market_breadth": {
+    "metrics": [
+      { "label": "Advancers", "value": "311", "tone": "#047857" },
+      { "label": "Decliners", "value": "187", "tone": "#b91c1c" },
+      { "label": "52W High", "value": "34", "tone": "#0369a1" },
+      { "label": "52W Low", "value": "12", "tone": "#7c3aed" }
+    ]
+  },
+  "calendar": {
+    "events": [
+      {
+        "id": "{year}-{month}-05-0",
+        "title": "US Nonfarm Payrolls",
+        "start": "{year}-{month}-05T08:30:00",
+        "category": "macro",
+        "importance": "high",
+        "displayTime": "08:30 ET",
+        "description": "Monthly U.S. payroll growth and unemployment release.",
+        "source": "BLS"
+      },
+      {
+        "id": "{year}-{month}-12-0",
+        "title": "CPI Inflation",
+        "start": "{year}-{month}-12T08:30:00",
+        "category": "macro",
+        "importance": "high",
+        "displayTime": "08:30 ET",
+        "description": "Consumer Price Index report.",
+        "source": "BLS"
+      },
+      {
+        "id": "{year}-{month}-25-0",
+        "title": "NVDA Earnings",
+        "start": "{year}-{month}-25T16:05:00",
+        "category": "earning",
+        "importance": "high",
+        "displayTime": "After market",
+        "description": "Quarterly earnings call and guidance.",
+        "source": "Company IR"
+      }
+    ]
+  }
+}

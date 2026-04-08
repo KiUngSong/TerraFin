@@ -1,0 +1,34 @@
+name: package-smoke
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  package-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install build tooling
+        run: python -m pip install --upgrade pip build
+
+      - name: Build wheel and sdist
+        run: python -m build
+
+      - name: Create clean smoke environment
+        run: python -m venv .venv-smoke
+
+      - name: Install built wheel
+        run: .venv-smoke/bin/pip install dist/*.whl
+
+      - name: Run package smoke test
+        run: .venv-smoke/bin/python scripts/package_smoke.py

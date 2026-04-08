@@ -1,0 +1,45 @@
+name: Sync TerraFin to Hugging Face Space
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  sync-to-space:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          lfs: true
+
+      - name: Prepare Space README
+        run: cp .hf-space/README.md README.md
+
+      - name: Configure Git identity
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Create sync commit for Hugging Face
+        run: |
+          git add README.md
+          if git diff --cached --quiet; then
+            echo "No Space-specific changes to commit."
+          else
+            git commit -m "Prepare Hugging Face Space sync"
+          fi
+
+      - name: Push to Hugging Face Space
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          if [ -z "$HF_TOKEN" ]; then
+            echo "HF_TOKEN secret is required."
+            exit 1
+          fi
+          git push --force https://sk851:${HF_TOKEN}@huggingface.co/spaces/sk851/TerraFin HEAD:main

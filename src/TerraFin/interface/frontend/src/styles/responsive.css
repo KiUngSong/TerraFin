@@ -1,0 +1,433 @@
+:root {
+  --tf-page-padding: 16px;
+  --tf-panel-gap: 16px;
+  --tf-header-padding-x: 20px;
+  --tf-header-padding-y: 14px;
+}
+
+@media (max-width: 1023px) {
+  :root {
+    --tf-page-padding: 14px;
+    --tf-panel-gap: 14px;
+    --tf-header-padding-x: 16px;
+    --tf-header-padding-y: 14px;
+  }
+}
+
+@media (max-width: 767px) {
+  :root {
+    --tf-page-padding: 12px;
+    --tf-panel-gap: 12px;
+    --tf-header-padding-x: 12px;
+    --tf-header-padding-y: 12px;
+  }
+}
+
+.tf-dashboard-page {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  overflow: auto;
+  background: linear-gradient(180deg, #f8fafc 0%, #f1f5f9 100%);
+  font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  color: #0f172a;
+}
+
+.tf-dashboard-main {
+  display: flex;
+  flex-direction: column;
+  gap: var(--tf-panel-gap);
+  padding: var(--tf-page-padding);
+}
+
+.tf-dashboard-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.9fr) minmax(280px, 1fr);
+  grid-template-areas:
+    "ticker ticker"
+    "heatmap fear"
+    "heatmap watchlist"
+    "calendar breadth"
+    "calendar pe";
+  gap: var(--tf-panel-gap);
+  align-items: start;
+}
+
+.tf-dashboard-card {
+  min-width: 0;
+}
+
+.tf-dashboard-card--ticker {
+  grid-area: ticker;
+}
+
+.tf-dashboard-card--heatmap {
+  grid-area: heatmap;
+}
+
+.tf-dashboard-card--calendar {
+  grid-area: calendar;
+}
+
+.tf-dashboard-card--fear {
+  grid-area: fear;
+}
+
+.tf-dashboard-card--watchlist {
+  grid-area: watchlist;
+}
+
+.tf-dashboard-card--breadth {
+  grid-area: breadth;
+}
+
+.tf-dashboard-card--pe {
+  grid-area: pe;
+}
+
+.tf-dashboard-watchlist-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.tf-dashboard-watchlist-link {
+  flex-shrink: 0;
+}
+
+.tf-dashboard-watchlist-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+}
+
+.tf-dashboard-watchlist-item > :last-child {
+  justify-self: end;
+}
+
+.tf-dashboard-breadth-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(128px, 1fr));
+  gap: 10px;
+}
+
+.tf-dashboard-empty-span {
+  grid-column: 1 / -1;
+}
+
+.tf-dashboard-pe-header {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: end;
+}
+
+.tf-dashboard-pe-header > :last-child {
+  text-align: right;
+}
+
+.tf-upcoming-catalysts-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.tf-fear-greed {
+  display: flex;
+  align-items: center;
+  gap: 28px;
+}
+
+.tf-fear-greed__history {
+  display: flex;
+  gap: 14px;
+  margin-top: 10px;
+  font-size: 11px;
+  color: #94a3b8;
+  flex-wrap: wrap;
+}
+
+.tf-dashboard-header {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  border-bottom: 1px solid #e2e8f0;
+  background: rgba(255, 255, 255, 0.95);
+  backdrop-filter: blur(6px);
+  padding: var(--tf-header-padding-y) var(--tf-header-padding-x);
+}
+
+.tf-dashboard-header__main {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(260px, 420px);
+  grid-template-areas: "brand search";
+  gap: 16px;
+  align-items: center;
+}
+
+.tf-dashboard-header__brand-nav {
+  grid-area: brand;
+  display: flex;
+  align-items: center;
+  gap: 22px;
+  min-width: 0;
+}
+
+.tf-dashboard-header__nav {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px;
+  border-radius: 10px;
+  border: 1px solid #e2e8f0;
+  background: #f8fafc;
+  min-width: 0;
+}
+
+.tf-dashboard-header__nav-scroll {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+
+.tf-dashboard-header__search {
+  grid-area: search;
+  position: relative;
+  width: 100%;
+  min-width: 0;
+}
+
+.tf-dashboard-header__right {
+  grid-area: right;
+  justify-self: end;
+}
+
+.tf-tradingview-embed {
+  width: 100%;
+  min-width: 0;
+  overflow-y: hidden;
+  overscroll-behavior-x: contain;
+}
+
+.tf-tradingview-embed--scrollable {
+  overflow-x: auto;
+}
+
+.tf-tradingview-embed__inner {
+  width: 100%;
+}
+
+.tf-chart-topbar {
+  position: relative;
+  flex-shrink: 0;
+  background: #f5f5f5;
+  border-bottom: 1px solid #e8e8e8;
+  display: flex;
+  align-items: center;
+  padding-left: 12px;
+  padding-right: 12px;
+}
+
+.tf-chart-topbar--compact {
+  display: grid;
+  gap: 6px;
+  padding: 6px 8px;
+}
+
+.tf-chart-topbar__row {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+
+.tf-chart-topbar__row--controls {
+  gap: 8px;
+}
+
+.tf-chart-scroll-row {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
+}
+
+.tf-chart-inline-badge {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  padding: 5px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(191, 219, 254, 0.96);
+  background: rgba(239, 246, 255, 0.96);
+  color: #1d4ed8;
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.tf-chart-search {
+  position: relative;
+  width: 220px;
+  min-width: 0;
+}
+
+.tf-chart-search--full {
+  width: 100%;
+}
+
+.tf-chart-bottom-bar {
+  flex-shrink: 0;
+  background: #f5f5f5;
+  border-top: 1px solid #e8e8e8;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+}
+
+.tf-chart-bottom-bar__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+  padding: 0 24px 0 12px;
+}
+
+.tf-chart-bottom-bar--compact {
+  display: grid;
+  gap: 0;
+}
+
+.tf-chart-bottom-bar--compact .tf-chart-bottom-bar__row {
+  padding: 5px 10px;
+}
+
+.tf-chart-bottom-bar__row--compact-controls {
+  align-items: center;
+}
+
+.tf-chart-bottom-bar__indicator-strip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
+}
+
+.tf-chart-series-tags {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
+  padding-bottom: 0;
+}
+
+@media (max-width: 1023px) {
+  .tf-dashboard-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-areas:
+      "ticker ticker"
+      "heatmap heatmap"
+      "calendar fear"
+      "watchlist breadth"
+      "pe pe";
+  }
+
+  .tf-dashboard-header__main {
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas:
+      "brand right"
+      "search search";
+    align-items: start;
+  }
+
+  .tf-dashboard-header__brand-nav {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 12px;
+  }
+
+  .tf-upcoming-catalysts-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 767px) {
+  .tf-dashboard-grid {
+    grid-template-columns: 1fr;
+    grid-template-areas:
+      "ticker"
+      "heatmap"
+      "calendar"
+      "fear"
+      "watchlist"
+      "breadth"
+      "pe";
+  }
+
+  .tf-dashboard-watchlist-summary {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .tf-dashboard-watchlist-link {
+    align-self: flex-start;
+  }
+
+  .tf-dashboard-watchlist-item,
+  .tf-dashboard-pe-header {
+    grid-template-columns: 1fr;
+  }
+
+  .tf-dashboard-watchlist-item > :last-child {
+    justify-self: start;
+  }
+
+  .tf-dashboard-pe-header > :last-child {
+    text-align: left;
+  }
+
+  .tf-upcoming-catalysts-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .tf-fear-greed {
+    flex-direction: column;
+    align-items: center;
+    gap: 18px;
+    text-align: center;
+  }
+
+  .tf-fear-greed__history {
+    justify-content: center;
+  }
+
+  .tf-dashboard-header__main {
+    grid-template-columns: 1fr;
+    grid-template-areas:
+      "brand"
+      "search"
+      "right";
+    gap: 12px;
+  }
+
+  .tf-dashboard-header__nav {
+    overflow: hidden;
+  }
+
+  .tf-dashboard-header__nav-scroll {
+    padding-bottom: 2px;
+  }
+}

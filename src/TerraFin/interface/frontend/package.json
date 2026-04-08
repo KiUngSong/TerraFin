@@ -1,0 +1,46 @@
+{
+  "name": "terrafin-frontend",
+  "version": "0.1.0",
+  "private": true,
+  "dependencies": {
+    "@fullcalendar/core": "^6.1.20",
+    "@fullcalendar/daygrid": "^6.1.20",
+    "@fullcalendar/interaction": "^6.1.20",
+    "@fullcalendar/list": "^6.1.20",
+    "@fullcalendar/react": "^6.1.20",
+    "date-fns-tz": "^3.2.0",
+    "lightweight-charts": "^5.1.0",
+    "react": "^19.2.4",
+    "react-datepicker": "^9.1.0",
+    "react-dom": "^19.2.4"
+  },
+  "devDependencies": {
+    "@types/react": "^19.2.14",
+    "@types/react-datepicker": "^7.0.0",
+    "@types/react-dom": "^19.2.3",
+    "patch-package": "^8.0.1",
+    "puppeteer": "^24.40.0",
+    "react-scripts": "^5.0.1",
+    "typescript": "^4.9.5"
+  },
+  "scripts": {
+    "start": "react-scripts start",
+    "build": "react-scripts build",
+    "smoke:responsive": "node scripts/responsive-smoke.js",
+    "postinstall": "patch-package",
+    "test": "react-scripts test",
+    "eject": "react-scripts eject"
+  },
+  "browserslist": {
+    "production": [
+      ">0.2%",
+      "not dead",
+      "not op_mini all"
+    ],
+    "development": [
+      "last 1 chrome version",
+      "last 1 firefox version",
+      "last 1 safari version"
+    ]
+  }
+}

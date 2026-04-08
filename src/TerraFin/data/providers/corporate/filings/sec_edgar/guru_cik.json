@@ -1,0 +1,34 @@
+{
+  "gurus": [
+    {
+      "name": "Warren Buffett",
+      "entity": "Berkshire Hathaway",
+      "cik": 1067983
+    },
+    {
+      "name": "Bill Ackman",
+      "entity": "Pershing Square",
+      "cik": 1336528
+    },
+    {
+      "name": "Michael Burry",
+      "entity": "Scion Asset Management",
+      "cik": 1649339
+    },
+    {
+      "name": "Howard Marks",
+      "entity": "Oaktree Capital",
+      "cik": 949509
+    },
+    {
+      "name": "Stanley Druckenmiller",
+      "entity": "Duquesne Family Office",
+      "cik": 1536411
+    },
+    {
+      "name": "Seth Klarman",
+      "entity": "Baupost Group",
+      "cik": 1061768
+    }
+  ]
+}
