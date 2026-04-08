@@ -268,8 +268,7 @@ const StockPage: React.FC = () => {
           <InsightCard
             title="Overview & Valuation"
             subtitle="Company identity, price context, and core metrics"
-            fillContent
-            minHeight={560}
+            minHeight={isNarrowLayout ? 0 : 560}
           >
               {companyInfo ? (
                 <div style={overviewPanelStyle}>
@@ -418,7 +417,7 @@ const overviewPanelStyle: React.CSSProperties = {
   display: 'flex',
   flexDirection: 'column',
   gap: 14,
-  height: '100%',
+  minWidth: 0,
 };
 
 const overviewDividerStyle: React.CSSProperties = {

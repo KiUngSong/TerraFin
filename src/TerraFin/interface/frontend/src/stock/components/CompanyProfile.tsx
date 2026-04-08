@@ -1,7 +1,9 @@
 import React from 'react';
+import { useViewportTier } from '../../shared/responsive';
 import type { CompanyInfo } from '../useStockData';
 
 const CompanyProfile: React.FC<{ info: CompanyInfo }> = ({ info }) => {
+  const { isMobile, isTablet } = useViewportTier();
   const metrics: { label: string; value: string }[] = [
     { label: 'Market Cap', value: formatMarketCap(info.marketCap) },
     { label: 'P/E (Trailing)', value: fmt(info.trailingPE) },
@@ -22,29 +24,43 @@ const CompanyProfile: React.FC<{ info: CompanyInfo }> = ({ info }) => {
     { label: 'Country', value: info.country || '-' },
   ];
 
+  const gridTemplateColumns = isMobile
+    ? '1fr'
+    : isTablet
+      ? 'repeat(3, minmax(0, 1fr))'
+      : 'repeat(auto-fit, minmax(136px, 1fr))';
+
+  const metricCardPadding = isMobile ? '12px 13px' : '10px 12px';
+  const valueFontSize = isMobile ? 16 : 15;
+
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 10 }}>
+    <div style={{ display: 'grid', gridTemplateColumns, gap: 10, minWidth: 0 }}>
       {metrics.map((m) => (
         <div
           key={m.label}
-          style={{
-            border: '1px solid #dbe4ef',
-            borderRadius: 12,
-            padding: '12px 13px',
-            background: 'linear-gradient(180deg, #ffffff 0%, #f8fafc 100%)',
-          }}
+          style={{ ...metricCardStyle, padding: metricCardPadding }}
         >
           <div style={{ fontSize: 11, color: '#64748b', fontWeight: 700, marginBottom: 6, letterSpacing: '0.02em' }}>{m.label}</div>
-          <div style={{ fontSize: 16, fontWeight: 800, color: '#0f172a', lineHeight: 1.25 }}>{m.value}</div>
+          <div
+            style={{
+              fontSize: valueFontSize,
+              fontWeight: 800,
+              color: '#0f172a',
+              lineHeight: 1.25,
+              overflowWrap: 'anywhere',
+              wordBreak: 'break-word',
+            }}
+          >
+            {m.value}
+          </div>
         </div>
       ))}
       {info.website && (
         <div
           style={{
-            border: '1px solid #dbe4ef',
-            borderRadius: 12,
-            padding: '12px 13px',
-            background: 'linear-gradient(180deg, #ffffff 0%, #f8fafc 100%)',
+            ...metricCardStyle,
+            padding: metricCardPadding,
+            gridColumn: isMobile ? 'auto' : '1 / -1',
           }}
         >
           <div style={{ fontSize: 11, color: '#64748b', fontWeight: 700, marginBottom: 6, letterSpacing: '0.02em' }}>Website</div>
@@ -53,7 +69,7 @@ const CompanyProfile: React.FC<{ info: CompanyInfo }> = ({ info }) => {
             target="_blank"
             rel="noopener noreferrer"
             style={{
-              fontSize: 13,
+              fontSize: isMobile ? 13 : 12,
               color: '#1d4ed8',
               textDecoration: 'none',
               fontWeight: 700,
@@ -67,6 +83,14 @@ const CompanyProfile: React.FC<{ info: CompanyInfo }> = ({ info }) => {
       )}
     </div>
   );
+};
+
+const metricCardStyle: React.CSSProperties = {
+  border: '1px solid #dbe4ef',
+  borderRadius: 12,
+  padding: '12px 13px',
+  background: 'linear-gradient(180deg, #ffffff 0%, #f8fafc 100%)',
+  minWidth: 0,
 };
 
 function formatMarketCap(val: number | null): string {

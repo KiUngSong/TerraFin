@@ -6,11 +6,22 @@ const StockHeader: React.FC<{ info: CompanyInfo }> = ({ info }) => {
   const changeSign = (info.changePercent ?? 0) >= 0 ? '+' : '';
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-      <div style={{ display: 'flex', alignItems: 'baseline', gap: 14, flexWrap: 'wrap' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 12, minWidth: 0 }}>
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 14, flexWrap: 'wrap', minWidth: 0 }}>
         <span style={{ fontSize: 20, lineHeight: 1, fontWeight: 800, color: '#0f172a' }}>{info.ticker}</span>
         {info.shortName && (
-          <span style={{ fontSize: 14, color: '#334155', fontWeight: 600 }}>{info.shortName}</span>
+          <span
+            style={{
+              fontSize: 14,
+              color: '#334155',
+              fontWeight: 600,
+              minWidth: 0,
+              overflowWrap: 'anywhere',
+              wordBreak: 'break-word',
+            }}
+          >
+            {info.shortName}
+          </span>
         )}
         {info.currentPrice != null && (
           <span style={{ fontSize: 17, fontWeight: 800, color: '#0f172a' }}>
@@ -23,7 +34,7 @@ const StockHeader: React.FC<{ info: CompanyInfo }> = ({ info }) => {
           </span>
         )}
       </div>
-      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', minWidth: 0 }}>
         {info.sector && <span style={pillStyle}>{info.sector}</span>}
         {info.industry && <span style={pillStyle}>{info.industry}</span>}
       </div>
@@ -39,6 +50,9 @@ const pillStyle: React.CSSProperties = {
   borderRadius: 999,
   padding: '5px 12px',
   border: '1px solid #e2e8f0',
+  maxWidth: '100%',
+  overflowWrap: 'anywhere',
+  wordBreak: 'break-word',
 };
 
 export default StockHeader;
