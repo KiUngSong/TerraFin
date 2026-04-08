@@ -175,7 +175,7 @@ const IndicatorSelector: React.FC<IndicatorSelectorProps> = ({ options, selected
   }, [infoTarget, infoTooltipPos]);
 
   return (
-    <div ref={wrapperRef} style={{ position: 'relative' }}>
+    <div ref={wrapperRef} style={{ position: 'relative', flexShrink: 0 }}>
       <button
         ref={buttonRef}
         type="button"
@@ -184,8 +184,6 @@ const IndicatorSelector: React.FC<IndicatorSelectorProps> = ({ options, selected
           fontFamily: FONT_FAMILY,
           padding: '5px 10px',
           minHeight: 28,
-          maxWidth: '100%',
-          minWidth: 0,
           fontSize: 12,
           fontWeight: 500,
           border: '1px solid #e0e0e0',
@@ -198,21 +196,13 @@ const IndicatorSelector: React.FC<IndicatorSelectorProps> = ({ options, selected
           color: '#333',
           lineHeight: 1,
           whiteSpace: 'nowrap',
-          flexShrink: 1,
+          flexShrink: 0,
         }}
         >
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
             <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
           </svg>
-        <span
-          style={{
-            minWidth: 0,
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
-          }}
-        >
-          {buttonLabel}
-        </span>
+        <span>{buttonLabel}</span>
         {localSelected.size > 0 && (
           <span
             style={{
