@@ -199,8 +199,8 @@ const ReverseDcfWorkbench: React.FC<{
               step="0.01"
               placeholder={formatPlaceholder(defaultBeta)}
               onChange={(value) => setForm((current) => ({ ...current, beta: value }))}
-              action={
-                <span style={fieldActionClusterStyle}>
+              utility={
+                <span style={fieldUtilityRowStyle}>
                   <button
                     type="button"
                     onClick={handleComputeBeta}
@@ -281,9 +281,11 @@ const NumericField: React.FC<{
   placeholder?: string;
   onChange: (value: string) => void;
   action?: React.ReactNode;
+  utility?: React.ReactNode;
   helperText?: React.ReactNode;
-}> = ({ label, value, step, placeholder, onChange, action, helperText }) => (
-  <label style={fieldStyle}>
+  fieldStyleOverride?: React.CSSProperties;
+}> = ({ label, value, step, placeholder, onChange, action, utility, helperText, fieldStyleOverride }) => (
+  <label style={{ ...fieldStyle, ...fieldStyleOverride }}>
     <span style={fieldLabelRowStyle}>
       <span style={fieldLabelStyle}>{label}</span>
       {action}
@@ -297,6 +299,7 @@ const NumericField: React.FC<{
       onChange={(event) => onChange(event.target.value)}
       style={inputStyle}
     />
+    {utility}
     {helperText ? <span style={fieldHelperTextStyle}>{helperText}</span> : null}
   </label>
 );
@@ -475,6 +478,7 @@ const fieldGridStyle: React.CSSProperties = {
 const fieldStyle: React.CSSProperties = {
   display: 'grid',
   gap: 6,
+  minWidth: 0,
   border: '1px solid #dbe4ef',
   borderRadius: 12,
   padding: '10px 12px',
@@ -503,7 +507,19 @@ const fieldActionClusterStyle: React.CSSProperties = {
   minWidth: 0,
 };
 
+const fieldUtilityRowStyle: React.CSSProperties = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  justifyContent: 'flex-start',
+  gap: 6,
+  flexWrap: 'wrap',
+  minWidth: 0,
+  paddingTop: 2,
+};
+
 const inputStyle: React.CSSProperties = {
+  width: '100%',
+  minWidth: 0,
   height: 36,
   border: '1px solid #cbd5e1',
   borderRadius: 10,
@@ -511,6 +527,7 @@ const inputStyle: React.CSSProperties = {
   fontSize: 14,
   color: '#0f172a',
   background: '#f8fafc',
+  boxSizing: 'border-box',
 };
 
 const helperTextStyle: React.CSSProperties = {

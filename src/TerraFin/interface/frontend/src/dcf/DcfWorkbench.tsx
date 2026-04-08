@@ -351,8 +351,8 @@ const DcfWorkbench: React.FC<{
                 value={stockForm.beta}
                 placeholder={formatPlaceholder(defaultBeta)}
                 onChange={(value) => setStockForm((current) => ({ ...current, beta: value }))}
-                action={
-                  <span style={fieldActionClusterStyle}>
+                utility={
+                  <span style={fieldUtilityRowStyle}>
                     <button
                       type="button"
                       onClick={handleComputeBeta}
@@ -405,9 +405,11 @@ const NumericField: React.FC<{
   placeholder?: string;
   onChange: (value: string) => void;
   action?: React.ReactNode;
+  utility?: React.ReactNode;
   footer?: React.ReactNode;
-}> = ({ label, info, value, step, placeholder, onChange, action, footer }) => (
-  <label style={fieldCardStyle}>
+  cardStyle?: React.CSSProperties;
+}> = ({ label, info, value, step, placeholder, onChange, action, utility, footer, cardStyle }) => (
+  <label style={{ ...fieldCardStyle, ...cardStyle }}>
     <span style={fieldLabelRowStyle}>
       <span style={fieldLabelClusterStyle}>
         <span style={fieldLabelStyle}>{label}</span>
@@ -424,6 +426,7 @@ const NumericField: React.FC<{
       onChange={(event) => onChange(event.target.value)}
       style={inputStyle}
     />
+    {utility}
     {footer ? <span style={fieldFooterStyle}>{footer}</span> : null}
   </label>
 );
@@ -650,6 +653,7 @@ const fieldsGridStyle: React.CSSProperties = {
 const fieldCardStyle: React.CSSProperties = {
   display: 'grid',
   gap: 6,
+  minWidth: 0,
   border: '1px solid #dbe4ef',
   borderRadius: 12,
   padding: '10px 12px',
@@ -660,6 +664,8 @@ const fieldLabelStyle: React.CSSProperties = {
   fontSize: 11,
   fontWeight: 700,
   color: '#64748b',
+  minWidth: 0,
+  lineHeight: 1.25,
 };
 
 const fieldLabelRowStyle: React.CSSProperties = {
@@ -671,11 +677,12 @@ const fieldLabelRowStyle: React.CSSProperties = {
 };
 
 const fieldLabelClusterStyle: React.CSSProperties = {
-  display: 'inline-flex',
-  alignItems: 'center',
+  display: 'grid',
+  gridTemplateColumns: 'minmax(0, 1fr) auto',
+  alignItems: 'start',
   gap: 6,
   minWidth: 0,
-  flexWrap: 'wrap',
+  width: '100%',
 };
 
 const fieldActionClusterStyle: React.CSSProperties = {
@@ -686,7 +693,19 @@ const fieldActionClusterStyle: React.CSSProperties = {
   minWidth: 0,
 };
 
+const fieldUtilityRowStyle: React.CSSProperties = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  justifyContent: 'flex-start',
+  gap: 6,
+  flexWrap: 'wrap',
+  minWidth: 0,
+  paddingTop: 2,
+};
+
 const inputStyle: React.CSSProperties = {
+  width: '100%',
+  minWidth: 0,
   height: 36,
   border: '1px solid #cbd5e1',
   borderRadius: 10,
@@ -694,6 +713,7 @@ const inputStyle: React.CSSProperties = {
   fontSize: 14,
   color: '#0f172a',
   background: '#f8fafc',
+  boxSizing: 'border-box',
 };
 
 const fieldFooterStyle: React.CSSProperties = {
