@@ -29,13 +29,16 @@ def test_private_access_client_raises_when_endpoint_unconfigured() -> None:
 def test_private_access_client_propagates_http_errors(monkeypatch) -> None:
     def _mock_get(*args, **kwargs):
         _ = args, kwargs
-        return _StubResponse(error=requests.HTTPError("500 server error"))
+        error = requests.HTTPError("500 server error")
+        error.response = _StubResponse()
+        error.response.status_code = 500
+        return _StubResponse(error=error)
 
     monkeypatch.setattr(requests, "get", _mock_get)
     client = PrivateAccessClient(
         PrivateAccessConfig(endpoint="https://example.test", access_key=None, access_value=None, timeout_seconds=1.0)
     )
-    with pytest.raises(requests.HTTPError):
+    with pytest.raises(RuntimeError, match="Private source request failed for resource 'market-breadth' with HTTP 500."):
         client.fetch_market_breadth()
 
 
@@ -48,8 +51,34 @@ def test_private_access_client_propagates_request_exceptions(monkeypatch) -> Non
     client = PrivateAccessClient(
         PrivateAccessConfig(endpoint="https://example.test", access_key=None, access_value=None, timeout_seconds=1.0)
     )
-    with pytest.raises(requests.Timeout):
+    with pytest.raises(RuntimeError, match="Private source request timed out for resource 'calendar-events'."):
         client.fetch_calendar_events()
+
+
+def test_private_access_client_redacts_endpoint_for_auth_failures(monkeypatch) -> None:
+    def _mock_get(*args, **kwargs):
+        _ = args, kwargs
+        error = requests.HTTPError("401 Client Error: Unauthorized for url: https://example.test/private/fear-greed")
+        error.response = _StubResponse()
+        error.response.status_code = 401
+        return _StubResponse(error=error)
+
+    monkeypatch.setattr(requests, "get", _mock_get)
+    client = PrivateAccessClient(
+        PrivateAccessConfig(
+            endpoint="https://example.test/private",
+            access_key="X-API-Key",
+            access_value="wrong",
+            timeout_seconds=1.0,
+        )
+    )
+
+    with pytest.raises(RuntimeError) as excinfo:
+        client.fetch_fear_greed()
+
+    message = str(excinfo.value)
+    assert "TERRAFIN_PRIVATE_SOURCE_ACCESS_VALUE" in message
+    assert "https://example.test/private/fear-greed" not in message
 
 
 def test_private_access_client_rejects_non_dict_payload(monkeypatch) -> None:

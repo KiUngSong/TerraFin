@@ -87,8 +87,35 @@ class PrivateAccessClient:
         headers = {"Accept": "application/json"}
         if self.config.access_key and self.config.access_value:
             headers[self.config.access_key] = self.config.access_value
-        response = requests.get(url, headers=headers, timeout=self.config.timeout_seconds)
-        response.raise_for_status()
+        try:
+            response = requests.get(url, headers=headers, timeout=self.config.timeout_seconds)
+            response.raise_for_status()
+        except requests.HTTPError as exc:
+            status_code = exc.response.status_code if exc.response is not None else None
+            if status_code == 401:
+                raise RuntimeError(
+                    f"Private source authentication failed for resource '{resource}'. "
+                    "Check TERRAFIN_PRIVATE_SOURCE_ACCESS_VALUE."
+                ) from exc
+            if status_code == 403:
+                raise RuntimeError(
+                    f"Private source access was denied for resource '{resource}'."
+                ) from exc
+            if status_code is not None:
+                raise RuntimeError(
+                    f"Private source request failed for resource '{resource}' with HTTP {status_code}."
+                ) from exc
+            raise RuntimeError(
+                f"Private source request failed for resource '{resource}'."
+            ) from exc
+        except requests.Timeout as exc:
+            raise RuntimeError(
+                f"Private source request timed out for resource '{resource}'."
+            ) from exc
+        except requests.RequestException as exc:
+            raise RuntimeError(
+                f"Private source request failed for resource '{resource}'."
+            ) from exc
         payload = response.json()
         if not isinstance(payload, dict):
             raise ValueError(f"Invalid payload for resource '{resource}'.")
