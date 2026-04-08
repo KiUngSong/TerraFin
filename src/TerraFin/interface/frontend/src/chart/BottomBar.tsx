@@ -191,20 +191,32 @@ const BottomBar: React.FC<BottomBarProps> = ({
   if (compact) {
     const compactRowStyle: React.CSSProperties = {
       flexShrink: 0,
-      height: 28,
+      minHeight: 28,
       background: '#f5f5f5',
       borderTop: '1px solid #e8e8e8',
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'space-between',
-      paddingLeft: 12,
-      paddingRight: 24,
+      flexWrap: 'wrap',
+      rowGap: 6,
+      columnGap: 8,
+      padding: '4px 12px',
       fontFamily: FONT_FAMILY,
     };
     return (
       <div style={{ flexShrink: 0 }}>
         <div style={compactRowStyle}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6,
+              minWidth: 0,
+              flex: '1 1 220px',
+              flexWrap: 'wrap',
+              overflow: 'hidden',
+            }}
+          >
             {indicatorOptions.length > 0 && onSelectedIndicatorsChange ? (
               <>
                 {selectedIndicators && selectedIndicators.size > 0 && onReset ? (
@@ -221,7 +233,7 @@ const BottomBar: React.FC<BottomBarProps> = ({
           </div>
 
           {!isEmpty ? (
-            <div style={{ display: 'flex', alignItems: 'center', flexShrink: 0 }}>
+            <div style={{ display: 'flex', alignItems: 'center', flex: '0 0 auto', marginLeft: 'auto' }}>
               <PriceScaleControls
                 mode={priceScaleMode}
                 onChange={onPriceScaleModeChange}
