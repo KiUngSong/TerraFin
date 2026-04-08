@@ -199,7 +199,6 @@ const BottomBar: React.FC<BottomBarProps> = ({
       justifyContent: 'space-between',
       paddingLeft: 12,
       paddingRight: 24,
-      gap: 8,
       overflow: 'hidden',
       fontFamily: FONT_FAMILY,
     };
@@ -235,7 +234,7 @@ const BottomBar: React.FC<BottomBarProps> = ({
           </div>
 
           {!isEmpty ? (
-            <div style={{ display: 'flex', alignItems: 'center', flexShrink: 0, marginLeft: 8 }}>
+            <div style={{ display: 'flex', alignItems: 'center', flexShrink: 0 }}>
               <PriceScaleControls
                 mode={priceScaleMode}
                 onChange={onPriceScaleModeChange}
