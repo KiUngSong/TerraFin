@@ -643,6 +643,53 @@ def test_chart_data_remove_keeps_forced_percentage_mode_when_raw_three_candles_r
     assert all(series["returnSeries"] is True for series in chart_payload["series"])
 
 
+def test_chart_view_preserves_two_candlestick_return_layout() -> None:
+    reset_private_data_service()
+    client = TestClient(create_app())
+    headers = {"X-Session-ID": "chart-two-candle-percent-view"}
+    source = {
+        "mode": "multi",
+        "series": [
+            {
+                "id": "SPY",
+                "seriesType": "candlestick",
+                "data": [
+                    {"time": "2022-01-03", "open": 100, "high": 102, "low": 99, "close": 101},
+                    {"time": "2023-01-03", "open": 110, "high": 112, "low": 109, "close": 111},
+                    {"time": "2024-01-03", "open": 120, "high": 122, "low": 119, "close": 121},
+                    {"time": "2025-01-03", "open": 130, "high": 132, "low": 129, "close": 131},
+                ],
+            },
+            {
+                "id": "QQQ",
+                "seriesType": "candlestick",
+                "data": [
+                    {"time": "2022-01-03", "open": 200, "high": 202, "low": 199, "close": 201},
+                    {"time": "2023-01-03", "open": 210, "high": 212, "low": 209, "close": 211},
+                    {"time": "2024-01-03", "open": 220, "high": 222, "low": 219, "close": 221},
+                    {"time": "2025-01-03", "open": 230, "high": 232, "low": 229, "close": 231},
+                ],
+            },
+        ],
+    }
+
+    write_response = client.post("/chart/api/chart-data", json=source, headers=headers)
+    assert write_response.status_code == 200
+    initial_payload = write_response.json()
+    assert initial_payload["forcePercentage"] is False
+    assert all(series["seriesType"] == "candlestick" for series in initial_payload["series"])
+    assert all(series["returnSeries"] is True for series in initial_payload["series"])
+
+    view_response = client.post("/chart/api/chart-view", json={"view": "weekly"}, headers=headers)
+    assert view_response.status_code == 200
+
+    chart_payload = client.get("/chart/api/chart-data", headers=headers).json()
+    assert chart_payload["forcePercentage"] is False
+    assert len(chart_payload["series"]) == 2
+    assert all(series["seriesType"] == "candlestick" for series in chart_payload["series"])
+    assert all(series["returnSeries"] is True for series in chart_payload["series"])
+
+
 def test_chart_data_write_initializes_standard_history_and_named_series(monkeypatch) -> None:
     def _fake_recent_history(self, name: str, *, period: str = "3y") -> HistoryChunk:
         _ = self

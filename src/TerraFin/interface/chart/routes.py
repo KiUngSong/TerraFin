@@ -630,9 +630,7 @@ def create_chart_router(build_dir: Path) -> APIRouter:
         sid = _session_id(request)
         view = (body.get("view") or "daily").lower()
         set_chart_view(view, sid)
-        transformed = apply_view(get_chart_source(sid), view)
-        display = _add_indicators(transformed)
-        set_chart_payload(display, sid)
+        display = _render_source_payload(get_chart_source(sid), sid)
         return {"ok": True, "view": view, **_chart_response(display, sid)}
 
     @router.get(f"{CHART_API_PATH}/chart-selection", response_model=dict | None)

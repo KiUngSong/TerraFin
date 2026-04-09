@@ -25,6 +25,118 @@ def _file_cache():
     return CacheManager
 
 
+def _safe_float(value) -> float | None:
+    if value is None:
+        return None
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return None if math.isnan(number) else number
+
+
+def _mapping_from_object(value) -> dict:
+    if isinstance(value, dict):
+        return dict(value)
+    if value is None:
+        return {}
+    keys = getattr(value, "keys", None)
+    if callable(keys):
+        try:
+            return {str(key): value[key] for key in keys()}
+        except Exception:
+            return {}
+    try:
+        return dict(value)
+    except Exception:
+        return {}
+
+
+def _first_available(mapping: dict, *keys: str):
+    for key in keys:
+        if key in mapping and mapping[key] is not None:
+            return mapping[key]
+    return None
+
+
+def _history_column(frame, *names: str):
+    if frame is None or getattr(frame, "empty", True):
+        return None
+    lowered = {str(column).lower(): column for column in frame.columns}
+    for name in names:
+        column = lowered.get(name.lower())
+        if column is not None:
+            return frame[column]
+    return None
+
+
+def _merge_missing(base: dict, fallback: dict) -> dict:
+    if not fallback:
+        return dict(base)
+    merged = dict(base)
+    for key, value in fallback.items():
+        if merged.get(key) is None:
+            merged[key] = value
+    return merged
+
+
+def _fast_info_fallback(ticker_obj) -> dict:
+    fallback: dict = {}
+
+    try:
+        fast_info = _mapping_from_object(getattr(ticker_obj, "fast_info", None))
+    except Exception:
+        fast_info = {}
+
+    current_price = _safe_float(_first_available(fast_info, "lastPrice", "last_price", "regularMarketPrice"))
+    previous_close = _safe_float(
+        _first_available(fast_info, "previousClose", "previous_close", "regularMarketPreviousClose")
+    )
+    market_cap = _safe_float(_first_available(fast_info, "marketCap", "market_cap"))
+    year_high = _safe_float(_first_available(fast_info, "yearHigh", "year_high"))
+    year_low = _safe_float(_first_available(fast_info, "yearLow", "year_low"))
+    exchange = _first_available(fast_info, "exchange")
+
+    history = None
+    try:
+        history = ticker_obj.history(period="1y", auto_adjust=True)
+    except Exception:
+        history = None
+
+    if history is not None and not history.empty:
+        close_series = _history_column(history, "close")
+        high_series = _history_column(history, "high", "close")
+        low_series = _history_column(history, "low", "close")
+
+        if close_series is not None and not close_series.empty:
+            if current_price is None:
+                current_price = _safe_float(close_series.iloc[-1])
+            if previous_close is None:
+                baseline = close_series.iloc[-2] if len(close_series) > 1 else close_series.iloc[-1]
+                previous_close = _safe_float(baseline)
+        if high_series is not None and not high_series.empty and year_high is None:
+            year_high = _safe_float(high_series.max())
+        if low_series is not None and not low_series.empty and year_low is None:
+            year_low = _safe_float(low_series.min())
+
+    if current_price is not None:
+        fallback["currentPrice"] = current_price
+        fallback["regularMarketPrice"] = current_price
+    if previous_close is not None:
+        fallback["previousClose"] = previous_close
+        fallback["regularMarketPreviousClose"] = previous_close
+    if market_cap is not None:
+        fallback["marketCap"] = market_cap
+    if year_high is not None:
+        fallback["fiftyTwoWeekHigh"] = year_high
+    if year_low is not None:
+        fallback["fiftyTwoWeekLow"] = year_low
+    if exchange is not None:
+        fallback["exchange"] = exchange
+
+    return fallback
+
+
 def get_ticker_info(ticker: str) -> dict:
     """Return yf.Ticker().info for a ticker, cached in memory + file."""
     ticker = ticker.upper()
@@ -37,10 +149,21 @@ def get_ticker_info(ticker: str) -> dict:
         _INFO_CACHE[ticker] = cached
         return dict(cached)
 
+    info: dict = {}
+    ticker_obj = None
     try:
-        info = yf.Ticker(ticker).info or {}
+        ticker_obj = yf.Ticker(ticker)
     except Exception:
-        info = {}
+        ticker_obj = None
+
+    if ticker_obj is not None:
+        try:
+            info = ticker_obj.info or {}
+        except Exception:
+            info = {}
+        if not isinstance(info, dict):
+            info = _mapping_from_object(info)
+        info = _merge_missing(info, _fast_info_fallback(ticker_obj))
 
     _INFO_CACHE[ticker] = info
 
