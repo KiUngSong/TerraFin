@@ -138,13 +138,23 @@ third-party proxies.
 
 ### Private access
 
-Private-access features provide proprietary or deployment-specific data behind an
-authenticated endpoint. They are optional: if the endpoint is unavailable,
+Private-access features are TerraFin's bridge beyond the public core. They let
+the same public interfaces connect to deployment-specific data and
+operator-side workflows without making those extensions part of the default
+open-source path.
+
+These are intentional private-access extensions, not arbitrary hidden features.
+They provide one authenticated boundary where operator-managed deployments can
+attach broader workflow-specific data while public/demo deployments continue to
+run on public providers and safe fallbacks.
+
+Private-access features provide proprietary or deployment-specific data behind
+an authenticated endpoint. They are optional: if the endpoint is unavailable,
 TerraFin may fall back to local file cache first and then to bundled fixtures
 or empty defaults, depending on the resource. This means local or private
 installs can continue to function without private credentials, with reduced
-coverage for private dashboard data. That fallback behavior should be treated as
-an operational convenience for controlled deployments, not as a blanket
+coverage for private dashboard data. That fallback behavior should be treated
+as an operational convenience for controlled deployments, not as a blanket
 permission to serve cached restricted data publicly.
 
 Configuration via env vars:

@@ -4,6 +4,10 @@
 interface for pulling financial data, normalizing it into chart-ready frames,
 running lightweight analytics, and serving browser-based views for research,
 educational, and agent-driven workflows.
+The public core is designed to stand on its own while still connecting cleanly
+to private-access extensions for deployment-specific data and operator-side
+workflows used in real deployments.
+
 
 ---
 
@@ -36,6 +40,10 @@ educational, and agent-driven workflows.
 ---
 
 ## What TerraFin Includes
+
+The table below describes the public core. Optional private-access support is
+part of that design so the same interfaces can connect to deployment-specific
+extensions without turning them into the default open-source path.
 
 | Area | Purpose |
 |------|---------|
