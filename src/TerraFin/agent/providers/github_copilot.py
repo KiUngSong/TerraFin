@@ -545,4 +545,5 @@ class TerraFinGithubCopilotResponsesProvider(TerraFinModelProvider):
         host = (parsed.hostname or "").strip().lower()
         if not host:
             return None
-        return f"https://{re.sub(r'^proxy\.', 'api.', host)}"
+        api_host = re.sub(r"^proxy\.", "api.", host)
+        return f"https://{api_host}"

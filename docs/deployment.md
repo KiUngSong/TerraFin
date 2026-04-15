@@ -102,6 +102,25 @@ GitHub Pages workflow:
 That keeps the docs static-hostable on GitHub without depending on a separate
 publish repo or docs SaaS.
 
+### GitHub Pages Source
+
+The workflow deploys through GitHub Actions, not by publishing the repository
+root or `docs/` folder directly.
+
+If `https://kiungsong.github.io/TerraFin/` is still showing the repository
+README instead of the MkDocs site, the repository is almost certainly still set
+to branch-based Pages publishing.
+
+For this workflow to take over, switch the repository once in:
+
+1. `Settings`
+2. `Pages`
+3. `Build and deployment`
+4. `Source = GitHub Actions`
+
+If that switch is not made, `actions/deploy-pages` may fail with a `404`, and
+the old branch-based README site will continue to be served.
+
 ## Related Docs
 
 - [Configuration](configuration.md)

@@ -1,5 +1,6 @@
 site_name: TerraFin Docs
 site_description: Formal documentation for TerraFin's data layer, interface, analytics, and hosted agent runtime.
+site_url: https://kiungsong.github.io/TerraFin/
 repo_url: https://github.com/KiUngSong/TerraFin
 repo_name: KiUngSong/TerraFin
 edit_uri: edit/main/docs/
