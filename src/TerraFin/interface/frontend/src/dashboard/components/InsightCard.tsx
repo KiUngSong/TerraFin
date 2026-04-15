@@ -8,6 +8,8 @@ interface InsightCardProps {
   fillContent?: boolean;
   href?: string;
   allowOverflow?: boolean;
+  className?: string;
+  contentClassName?: string;
 }
 
 const InsightCard: React.FC<InsightCardProps> = ({
@@ -18,46 +20,39 @@ const InsightCard: React.FC<InsightCardProps> = ({
   fillContent = false,
   href,
   allowOverflow = false,
+  className = '',
+  contentClassName = '',
 }) => {
-  const cardStyle: React.CSSProperties = {
-    background: '#ffffff',
-    borderRadius: 14,
-    border: '1px solid #e2e8f0',
-    boxShadow: '0 8px 20px rgba(15, 23, 42, 0.04)',
-    padding: 16,
-    display: 'flex',
-    flexDirection: 'column',
-    gap: 12,
-    minHeight,
-    minWidth: 0,
-    overflow: allowOverflow ? 'visible' : 'hidden',
-    ...(fillContent ? { height: '100%', boxSizing: 'border-box' as const } : {}),
-    ...(href
-      ? {
-          textDecoration: 'none',
-          color: 'inherit',
-          cursor: 'pointer',
-          transition: 'transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease',
-        }
-      : {}),
-  };
+  const cardClassName = [
+    'tf-insight-card',
+    href ? 'tf-insight-card--interactive' : '',
+    allowOverflow ? 'tf-insight-card--overflow' : '',
+    fillContent ? 'tf-insight-card--fill' : '',
+    className,
+  ]
+    .filter(Boolean)
+    .join(' ');
+
+  const contentClassNames = [
+    'tf-insight-card__content',
+    fillContent ? 'tf-insight-card__content--fill' : '',
+    allowOverflow ? 'tf-insight-card__content--overflow' : '',
+    contentClassName,
+  ]
+    .filter(Boolean)
+    .join(' ');
+
+  const cardStyle = {
+    ['--tf-insight-card-min-height' as const]: `${minHeight}px`,
+  } as React.CSSProperties;
 
   const content = (
     <>
-      <div>
-        <h3 style={{ margin: 0, fontSize: 15, fontWeight: 700, color: '#0f172a' }}>{title}</h3>
-        <p style={{ margin: '6px 0 0', fontSize: 12, color: '#64748b' }}>{subtitle}</p>
+      <div className="tf-insight-card__header">
+        <h3 className="tf-insight-card__title">{title}</h3>
+        <p className="tf-insight-card__subtitle">{subtitle}</p>
       </div>
-      <div
-        style={{
-          flex: 1,
-          minHeight: 0,
-          overflow: allowOverflow ? 'visible' : 'hidden',
-          ...(fillContent ? { display: 'flex', flexDirection: 'column' as const } : {}),
-        }}
-      >
-        {children}
-      </div>
+      <div className={contentClassNames}>{children}</div>
     </>
   );
 
@@ -66,24 +61,19 @@ const InsightCard: React.FC<InsightCardProps> = ({
       <a
         href={href}
         aria-label={`${title} - open in Market Insights`}
+        className={cardClassName}
         style={cardStyle}
-        onMouseEnter={(event) => {
-          event.currentTarget.style.transform = 'translateY(-1px)';
-          event.currentTarget.style.boxShadow = '0 14px 28px rgba(15, 23, 42, 0.08)';
-          event.currentTarget.style.borderColor = '#bfdbfe';
-        }}
-        onMouseLeave={(event) => {
-          event.currentTarget.style.transform = 'translateY(0)';
-          event.currentTarget.style.boxShadow = '0 8px 20px rgba(15, 23, 42, 0.04)';
-          event.currentTarget.style.borderColor = '#e2e8f0';
-        }}
       >
         {content}
       </a>
     );
   }
 
-  return <section style={cardStyle}>{content}</section>;
+  return (
+    <section className={cardClassName} style={cardStyle}>
+      {content}
+    </section>
+  );
 };
 
 export default InsightCard;

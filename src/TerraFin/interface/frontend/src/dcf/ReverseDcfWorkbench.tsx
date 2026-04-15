@@ -1,4 +1,5 @@
 import React from 'react';
+import { clearAgentViewContextSource, publishAgentViewContext } from '../agent/viewContext';
 import InfoHint from './InfoHint';
 import { BetaEstimatePayload, ReverseDcfPayload } from './types';
 import { useBetaEstimate } from './useBetaEstimate';
@@ -97,6 +98,78 @@ const ReverseDcfWorkbench: React.FC<{
       hasValuationState,
     });
   }, [data, error, hasValuationState, loading, onValuationStateChange]);
+
+  React.useEffect(() => {
+    const route = `${window.location.pathname}${window.location.search}`;
+    const pageType = inferViewContextPageType(window.location.pathname);
+    const contextSource = buildReverseDcfContextSource(window.location.pathname);
+    const label = symbolLabel || 'Stock';
+    void publishAgentViewContext({
+      source: contextSource,
+      scope: 'panel',
+      route,
+      pageType,
+      title: `${label} Reverse DCF`,
+      summary: `Viewing the reverse DCF workbench for ${label}.`,
+      selection: {
+        reverseDcfWorkbench: {
+          label,
+          endpoint,
+          enabled,
+          blockedMessage: enabled ? null : blockedMessage,
+          formError,
+          loading,
+          error,
+          hasValuationState,
+          requestMethod: request?.method || null,
+          form: sanitizeReverseDcfFormState(form),
+        },
+      },
+      entities: data
+        ? [
+            {
+              kind: 'reverse-dcf-valuation',
+              id: `reverse:${data.symbol}`,
+              label: `${data.symbol} Reverse DCF`,
+              attributes: {
+                symbol: data.symbol,
+                status: data.status,
+                currentPrice: data.currentPrice,
+                impliedGrowthPct: data.impliedGrowthPct,
+                projectionYears: data.projectionYears,
+                growthProfile: data.growthProfile,
+                terminalGrowthPct: data.terminalGrowthPct,
+                terminalDiscountRatePct: data.terminalDiscountRatePct,
+                warnings: data.warnings,
+              },
+            },
+          ]
+        : [],
+      metadata: {
+        source: contextSource,
+        warningsCount: data?.warnings.length || 0,
+      },
+    });
+  }, [
+    blockedMessage,
+    data,
+    enabled,
+    endpoint,
+    error,
+    form,
+    formError,
+    hasValuationState,
+    loading,
+    request,
+    symbolLabel,
+  ]);
+
+  React.useEffect(() => {
+    const contextSource = buildReverseDcfContextSource(window.location.pathname);
+    return () => {
+      void clearAgentViewContextSource(contextSource);
+    };
+  }, []);
 
   if (!enabled) {
     return <div style={{ fontSize: 13, color: '#475569' }}>{blockedMessage}</div>;
@@ -355,6 +428,32 @@ function compactRecord<T extends Record<string, unknown>>(record: T): Partial<T>
     }
   }
   return next;
+}
+
+function sanitizeReverseDcfFormState(form: ReverseDcfFormState) {
+  return {
+    currentPrice: form.currentPrice,
+    baseCashFlowPerShare: form.baseCashFlowPerShare,
+    terminalGrowthPct: form.terminalGrowthPct,
+    beta: form.beta,
+    equityRiskPremiumPct: form.equityRiskPremiumPct,
+    projectionYears: form.projectionYears,
+    growthProfile: form.growthProfile,
+  };
+}
+
+function inferViewContextPageType(pathname: string): string {
+  if (pathname.startsWith('/market-insights')) {
+    return 'market-insights';
+  }
+  if (pathname === '/stock' || pathname.startsWith('/stock/')) {
+    return 'stock';
+  }
+  return 'dcf';
+}
+
+function buildReverseDcfContextSource(pathname: string): string {
+  return pathname.startsWith('/stock') ? 'stock-reverse-dcf-workbench' : 'reverse-dcf-workbench';
 }
 
 function buildBetaHelper(

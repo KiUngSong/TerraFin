@@ -2,11 +2,17 @@ import React, { useEffect, useState } from 'react';
 import DashboardHeader from '../dashboard/components/DashboardHeader';
 import InsightCard from '../dashboard/components/InsightCard';
 import DcfWorkbench from '../dcf/DcfWorkbench';
+import { clearAgentViewContextSource, publishAgentViewContext } from '../agent/viewContext';
 import MacroFocusPanel from './components/MacroFocusPanel';
 import PortfolioHoldingDetails from './components/PortfolioHoldingDetails';
 import PortfolioTreemap from './components/PortfolioTreemap';
 import TopCompaniesTable from './components/TopCompaniesTable';
-import { PortfolioHoldingRow, getPortfolioRowKey } from './components/portfolioPositioning';
+import {
+  PortfolioHoldingRow,
+  getPortfolioRowKey,
+  parsePortfolioWeight,
+  splitPortfolioStockLabel,
+} from './components/portfolioPositioning';
 
 interface InvestorPositioningPayload {
   guru: string;
@@ -105,6 +111,90 @@ const MarketInsightsPage: React.FC = () => {
   }, [activeHoldingKey, positioning]);
 
   const activeHolding = (positioning?.rows || []).find((row) => getPortfolioRowKey(row) === activeHoldingKey) || null;
+
+  useEffect(() => {
+    const route = `${window.location.pathname}${window.location.search}`;
+    const rankedHoldings = [...(positioning?.rows || [])]
+      .sort((left, right) => parsePortfolioWeight(right['% of Portfolio']) - parsePortfolioWeight(left['% of Portfolio']))
+      .slice(0, 10)
+      .map((holding, index) => {
+        const label = splitPortfolioStockLabel(holding.Stock);
+        return {
+          rank: index + 1,
+          ticker: label.ticker,
+          company: label.company,
+          weight: parsePortfolioWeight(holding['% of Portfolio']),
+          recentActivity: holding['Recent Activity'],
+          updated: holding.Updated,
+        };
+      });
+    const activeLabel = activeHolding ? splitPortfolioStockLabel(activeHolding.Stock) : null;
+    void publishAgentViewContext({
+      source: 'market-insights-page',
+      scope: 'page',
+      route,
+      pageType: 'market-insights',
+      title: selectedGuru ? `${selectedGuru} Portfolio View` : 'Market Insights',
+      summary: selectedGuru
+        ? `Viewing market insights with ${selectedGuru}'s portfolio positioning.`
+        : 'Viewing market insights in TerraFin.',
+      selection: {
+        selectedGuru: selectedGuru || null,
+        activeHoldingTicker: activeLabel?.ticker || null,
+        activeHoldingCompany: activeLabel?.company || null,
+        investorPositioningEnabled,
+        macroChartReady,
+        topHoldingTickers: rankedHoldings.map((holding) => holding.ticker),
+      },
+      entities: [
+        ...(selectedGuru
+          ? [
+              {
+                kind: 'portfolio',
+                id: selectedGuru,
+                label: selectedGuru,
+                attributes: {
+                  period: positioning?.info?.Period || null,
+                  holdingCount: positioning?.rows?.length || 0,
+                  topHoldings: rankedHoldings,
+                },
+              },
+            ]
+          : []),
+        ...(activeLabel
+          ? [
+              {
+                kind: 'holding',
+                id: activeLabel.ticker,
+                label: activeLabel.company || activeLabel.ticker,
+                attributes: {
+                  ticker: activeLabel.ticker,
+                  stock: activeHolding?.Stock || null,
+                  weight: activeHolding ? parsePortfolioWeight(activeHolding['% of Portfolio']) : null,
+                  recentActivity: activeHolding?.['Recent Activity'] || null,
+                  updated: activeHolding?.Updated || null,
+                },
+              },
+            ]
+          : []),
+      ],
+      metadata: {
+        source: 'market-insights-page',
+        topCompaniesCount: topCompanies.length,
+        holdingCount: positioning?.rows?.length || 0,
+      },
+    });
+    return () => {
+      void clearAgentViewContextSource('market-insights-page');
+    };
+  }, [
+    activeHolding,
+    investorPositioningEnabled,
+    macroChartReady,
+    positioning,
+    selectedGuru,
+    topCompanies.length,
+  ]);
 
   return (
     <div

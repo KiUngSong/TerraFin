@@ -7,6 +7,7 @@ import ReverseDcfPanel from '../dcf/ReverseDcfPanel';
 import ReverseDcfWorkbench from '../dcf/ReverseDcfWorkbench';
 import { DcfValuationPayload, ReverseDcfPayload } from '../dcf/types';
 import { useViewportTier } from '../shared/responsive';
+import { clearAgentViewContextSource, publishAgentViewContext } from '../agent/viewContext';
 import StockHeader from './components/StockHeader';
 import StockChart from './components/StockChart';
 import CompanyProfile from './components/CompanyProfile';
@@ -117,6 +118,57 @@ const StockPage: React.FC = () => {
   React.useEffect(() => {
     setIsReverseDcfOpen(false);
   }, [ticker]);
+
+  React.useEffect(() => {
+    const route = window.location.pathname;
+    if (!ticker) {
+      void publishAgentViewContext({
+        source: 'stock-page',
+        scope: 'page',
+        route,
+        pageType: 'stock-search',
+        title: 'Stock Analysis',
+        summary: 'Viewing the stock search page in TerraFin.',
+        metadata: { source: 'stock-page' },
+      });
+      return () => {
+        void clearAgentViewContextSource('stock-page');
+      };
+    }
+    void publishAgentViewContext({
+      source: 'stock-page',
+      scope: 'page',
+      route,
+      pageType: 'stock',
+      title: `${ticker} Stock Analysis`,
+      summary: `Viewing stock analysis for ${ticker}.`,
+      selection: { ticker, panelsEnabled, reverseDcfOpen: isReverseDcfOpen },
+      entities: [
+        {
+          kind: 'ticker',
+          id: ticker,
+          label: companyInfo?.shortName || ticker,
+          attributes: {
+            exchange: companyInfo?.exchange || null,
+            sector: companyInfo?.sector || null,
+            industry: companyInfo?.industry || null,
+            currentPrice: companyInfo?.currentPrice || null,
+            changePercent: companyInfo?.changePercent || null,
+          },
+        },
+      ],
+      metadata: {
+        source: 'stock-page',
+        infoLoaded: !infoLoading,
+        earningsLoaded: !earningsLoading,
+        hasInfoError: Boolean(infoError),
+        earningsCount: earnings.length,
+      },
+    });
+    return () => {
+      void clearAgentViewContextSource('stock-page');
+    };
+  }, [companyInfo, earnings.length, earningsLoading, infoError, infoLoading, isReverseDcfOpen, panelsEnabled, ticker]);
 
   const handleSearchSubmit = (query: string) => {
     const trimmed = query.trim();

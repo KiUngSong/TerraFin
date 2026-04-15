@@ -1,4 +1,5 @@
 import React from 'react';
+import { clearAgentViewContextSource, publishAgentViewContext } from '../agent/viewContext';
 import DcfValuationPanel from './DcfValuationPanel';
 import InfoHint from './InfoHint';
 import { SP500_DCF_FORM_PRESET, Sp500DcfFormPreset, Sp500YearAssumptionFormValue } from './presets';
@@ -86,6 +87,85 @@ const DcfWorkbench: React.FC<{
       hasValuationState,
     });
   }, [data, error, hasValuationState, loading, onValuationStateChange]);
+
+  React.useEffect(() => {
+    const route = `${window.location.pathname}${window.location.search}`;
+    const pageType = inferViewContextPageType(window.location.pathname);
+    const contextSource = buildDcfContextSource(mode, window.location.pathname);
+    const label = symbolLabel || (mode === 'index' ? 'S&P 500' : 'Stock');
+    void publishAgentViewContext({
+      source: contextSource,
+      scope: 'panel',
+      route,
+      pageType,
+      title: `${label} DCF`,
+      summary:
+        mode === 'index'
+          ? `Viewing the ${label} DCF workbench.`
+          : `Viewing the equity DCF workbench for ${label}.`,
+      selection: {
+        dcfWorkbench: {
+          mode,
+          label,
+          endpoint,
+          enabled,
+          blockedMessage: enabled ? null : blockedMessage,
+          formError,
+          loading,
+          error,
+          hasValuationState,
+          requestMethod: request?.method || null,
+          stockForm: mode === 'stock' ? sanitizeStockFormState(stockForm) : null,
+          indexForm: mode === 'index' ? sanitizeIndexFormState(indexForm) : null,
+        },
+      },
+      entities: data
+        ? [
+            {
+              kind: 'dcf-valuation',
+              id: `${mode}:${data.symbol}`,
+              label: `${data.symbol} DCF`,
+              attributes: {
+                symbol: data.symbol,
+                status: data.status,
+                currentIntrinsicValue: data.currentIntrinsicValue,
+                currentPrice: data.currentPrice,
+                upsidePct: data.upsidePct,
+                warnings: data.warnings,
+                scenarios: summarizeDcfScenarios(data),
+              },
+            },
+          ]
+        : [],
+      metadata: {
+        source: contextSource,
+        showInlineResults,
+        scenarioCount: data ? Object.keys(data.scenarios || {}).length : 0,
+      },
+    });
+  }, [
+    blockedMessage,
+    data,
+    enabled,
+    endpoint,
+    error,
+    formError,
+    hasValuationState,
+    indexForm,
+    loading,
+    mode,
+    request,
+    showInlineResults,
+    stockForm,
+    symbolLabel,
+  ]);
+
+  React.useEffect(() => {
+    const contextSource = buildDcfContextSource(mode, window.location.pathname);
+    return () => {
+      void clearAgentViewContextSource(contextSource);
+    };
+  }, [mode]);
 
   if (!enabled) {
     return <div style={{ fontSize: 13, color: '#475569' }}>{blockedMessage}</div>;
@@ -518,6 +598,55 @@ function parseOptionalNumber(value: string): number | null {
   if (value.trim() === '') return null;
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : null;
+}
+
+function sanitizeStockFormState(form: StockFormState) {
+  return {
+    baseCashFlowPerShare: form.baseCashFlowPerShare,
+    baseGrowthPct: form.baseGrowthPct,
+    terminalGrowthPct: form.terminalGrowthPct,
+    beta: form.beta,
+    equityRiskPremiumPct: form.equityRiskPremiumPct,
+  };
+}
+
+function sanitizeIndexFormState(form: IndexFormState) {
+  return {
+    baseYearEps: form.baseYearEps,
+    terminalGrowthPct: form.terminalGrowthPct,
+    terminalEquityRiskPremiumPct: form.terminalEquityRiskPremiumPct,
+    terminalRoePct: form.terminalRoePct,
+    yearlyAssumptions: form.yearlyAssumptions.map((row) => ({ ...row })),
+  };
+}
+
+function summarizeDcfScenarios(payload: DcfValuationPayload) {
+  return Object.values(payload.scenarios || {}).map((scenario) => ({
+    key: scenario.key,
+    label: scenario.label,
+    status: scenario.status,
+    intrinsicValue: scenario.intrinsicValue,
+    upsidePct: scenario.upsidePct,
+    terminalGrowthPct: scenario.terminalGrowthPct,
+    terminalDiscountRatePct: scenario.terminalDiscountRatePct,
+  }));
+}
+
+function inferViewContextPageType(pathname: string): string {
+  if (pathname.startsWith('/market-insights')) {
+    return 'market-insights';
+  }
+  if (pathname === '/stock' || pathname.startsWith('/stock/')) {
+    return 'stock';
+  }
+  return 'dcf';
+}
+
+function buildDcfContextSource(mode: 'index' | 'stock', pathname: string): string {
+  if (mode === 'index') {
+    return pathname.startsWith('/market-insights') ? 'sp500-dcf-workbench' : 'index-dcf-workbench';
+  }
+  return pathname.startsWith('/stock') ? 'stock-dcf-workbench' : 'dcf-workbench';
 }
 
 function formatPlaceholder(value: number | null | undefined): string | undefined {

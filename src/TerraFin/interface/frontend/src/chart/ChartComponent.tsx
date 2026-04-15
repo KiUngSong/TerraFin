@@ -29,6 +29,7 @@ import type {
 } from './types';
 import { isChartMutation } from './updateUtils';
 import { getResponsiveTier } from '../shared/responsive';
+import { clearAgentViewContextSource, publishAgentViewContext } from '../agent/viewContext';
 
 const DEFAULT_INDICATORS = new Set(['ma-20', 'ma-60', 'ma-120']);
 const MAX_CHART_SERIES = 5;
@@ -148,6 +149,42 @@ const ChartComponentInner = React.forwardRef<ChartComponentHandle, ChartComponen
   const [visibleRange, setVisibleRange] = useState<{ from: string; to: string } | null>(null);
 
   const forcePercentage = payload?.forcePercentage === true;
+
+  useEffect(() => {
+    const series = entries.map((entry) => ({
+      kind: 'chart-series',
+      id: entry.name,
+      label: entry.name,
+      attributes: { pinned: entry.pinned },
+    }));
+    void publishAgentViewContext({
+      source: 'chart-component',
+      scope: 'panel',
+      route: `${window.location.pathname}${window.location.search}`,
+      pageType: 'chart',
+      title: series.length > 0 ? `Chart · ${entries.map((entry) => entry.name).join(', ')}` : 'Chart',
+      summary:
+        series.length > 0
+          ? `Viewing a TerraFin chart for ${entries.map((entry) => entry.name).join(', ')}.`
+          : 'Viewing the TerraFin chart workspace.',
+      selection: {
+        chartSessionId: sessionId,
+        activeView,
+        selectedRange,
+        selectedIndicators: Array.from(selectedIndicators).sort(),
+        visibleRange,
+        forcePercentage,
+      },
+      entities: series,
+      metadata: {
+        source: 'chart-component',
+        seriesCount: entries.length,
+      },
+    });
+    return () => {
+      void clearAgentViewContextSource('chart-component');
+    };
+  }, [activeView, entries, forcePercentage, selectedIndicators, selectedRange, sessionId, visibleRange]);
 
   useEffect(() => {
     if (initialHistoryBySeries === undefined) {
