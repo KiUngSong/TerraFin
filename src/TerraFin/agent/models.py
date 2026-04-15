@@ -222,3 +222,230 @@ class ChartOpenResponse(BaseModel):
             view=None,
         )
     )
+
+
+class HostedToolDefinitionResponse(BaseModel):
+    name: str
+    capabilityName: str
+    description: str
+    executionMode: Literal["invoke", "task"]
+    sideEffecting: bool
+    inputSchema: dict[str, Any]
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class HostedRuntimeModelResponse(BaseModel):
+    modelRef: str
+    providerId: str
+    providerLabel: str
+    modelId: str
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class HostedAgentDefinitionResponse(BaseModel):
+    name: str
+    description: str
+    allowedCapabilities: list[str]
+    defaultDepth: DepthMode
+    defaultView: ChartView
+    chartAccess: bool
+    allowBackgroundTasks: bool
+    runtimeModel: HostedRuntimeModelResponse | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    tools: list[HostedToolDefinitionResponse] = Field(default_factory=list)
+
+
+class HostedAgentCatalogResponse(BaseModel):
+    agents: list[HostedAgentDefinitionResponse]
+
+
+class HostedConversationMessageResponse(BaseModel):
+    role: Literal["system", "user", "assistant", "tool"]
+    content: str
+    createdAt: str
+    name: str | None = None
+    toolCallId: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class HostedAgentSessionSummaryResponse(BaseModel):
+    sessionId: str
+    agentName: str
+    createdAt: str
+    updatedAt: str
+    lastAccessedAt: str
+    runtimeModel: HostedRuntimeModelResponse | None = None
+    title: str | None = None
+    lastMessagePreview: str | None = None
+    lastMessageAt: str | None = None
+    messageCount: int = 0
+    pendingTaskCount: int = 0
+
+
+class HostedAgentSessionListResponse(BaseModel):
+    sessions: list[HostedAgentSessionSummaryResponse] = Field(default_factory=list)
+
+
+class HostedAgentSessionDeleteResponse(BaseModel):
+    sessionId: str
+    deletedAt: str
+
+
+class HostedTaskSummaryResponse(BaseModel):
+    taskId: str
+    status: str
+    description: str
+
+
+class HostedSessionPolicyResponse(BaseModel):
+    defaultDepth: DepthMode
+    defaultView: ChartView
+    chartAccess: bool
+    allowBackgroundTasks: bool
+    requireHumanApprovalForSideEffects: bool = False
+    requireHumanApprovalForBackgroundTasks: bool = False
+
+
+class HostedArtifactResponse(BaseModel):
+    artifactId: str
+    kind: str
+    title: str
+    capabilityName: str
+    createdAt: str
+    payload: dict[str, Any] = Field(default_factory=dict)
+
+
+class HostedCapabilityCallResponse(BaseModel):
+    capabilityName: str
+    calledAt: str
+    inputs: dict[str, Any] = Field(default_factory=dict)
+    outputKeys: list[str] = Field(default_factory=list)
+    focusItems: list[str] = Field(default_factory=list)
+    artifactIds: list[str] = Field(default_factory=list)
+
+
+class HostedPermissionAuditResponse(BaseModel):
+    eventId: str
+    createdAt: str
+    action: Literal["invoke", "task", "cancel_task", "approve", "deny"]
+    capabilityName: str | None = None
+    toolName: str | None = None
+    sideEffecting: bool
+    outcome: Literal["allowed", "denied", "pending"]
+    reason: str
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class HostedApprovalResponse(BaseModel):
+    approvalId: str
+    createdAt: str
+    updatedAt: str
+    resolvedAt: str | None = None
+    sessionId: str
+    agentName: str
+    action: Literal["invoke", "task"]
+    capabilityName: str
+    toolName: str | None = None
+    sideEffecting: bool
+    status: Literal["pending", "approved", "denied", "consumed"]
+    reason: str
+    inputPayload: dict[str, Any] = Field(default_factory=dict)
+    decisionNote: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class HostedTaskResponse(BaseModel):
+    taskId: str
+    capabilityName: str
+    status: str
+    description: str
+    sessionId: str | None = None
+    createdAt: str
+    startedAt: str | None = None
+    completedAt: str | None = None
+    inputPayload: dict[str, Any] = Field(default_factory=dict)
+    progress: dict[str, Any] = Field(default_factory=dict)
+    result: dict[str, Any] | None = None
+    error: str | None = None
+
+
+class HostedTaskListResponse(BaseModel):
+    sessionId: str
+    tasks: list[HostedTaskResponse] = Field(default_factory=list)
+
+
+class HostedApprovalListResponse(BaseModel):
+    sessionId: str
+    approvals: list[HostedApprovalResponse] = Field(default_factory=list)
+
+
+class HostedToolInvocationResponse(BaseModel):
+    toolName: str
+    capabilityName: str
+    executionMode: Literal["invoke", "task"]
+    payload: dict[str, Any]
+    task: HostedTaskSummaryResponse | None = None
+
+
+class HostedAgentSessionCreateRequest(BaseModel):
+    agentName: str = Field(min_length=1)
+    sessionId: str | None = None
+    systemPrompt: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class HostedAgentMessageRequest(BaseModel):
+    content: str = Field(min_length=1)
+
+
+class HostedApprovalDecisionRequest(BaseModel):
+    note: str | None = None
+
+
+class HostedViewContextUpdateRequest(BaseModel):
+    route: str = Field(min_length=1)
+    pageType: str = Field(min_length=1)
+    title: str | None = None
+    summary: str | None = None
+    selection: dict[str, Any] = Field(default_factory=dict)
+    entities: list[dict[str, Any]] = Field(default_factory=list)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class HostedViewContextResponse(BaseModel):
+    contextId: str
+    createdAt: str
+    updatedAt: str
+    route: str
+    pageType: str
+    title: str | None = None
+    summary: str | None = None
+    selection: dict[str, Any] = Field(default_factory=dict)
+    entities: list[dict[str, Any]] = Field(default_factory=list)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class HostedAgentSessionResponse(BaseModel):
+    sessionId: str
+    agentName: str
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    runtimeModel: HostedRuntimeModelResponse | None = None
+    policy: HostedSessionPolicyResponse | None = None
+    focusItems: list[str] = Field(default_factory=list)
+    artifacts: list[HostedArtifactResponse] = Field(default_factory=list)
+    capabilityCalls: list[HostedCapabilityCallResponse] = Field(default_factory=list)
+    tasks: list[HostedTaskResponse] = Field(default_factory=list)
+    approvals: list[HostedApprovalResponse] = Field(default_factory=list)
+    auditTrail: list[HostedPermissionAuditResponse] = Field(default_factory=list)
+    tools: list[HostedToolDefinitionResponse] = Field(default_factory=list)
+    messages: list[HostedConversationMessageResponse] = Field(default_factory=list)
+
+
+class HostedAgentRunResponse(BaseModel):
+    sessionId: str
+    agentName: str
+    steps: int
+    finalMessage: HostedConversationMessageResponse | None = None
+    messagesAdded: list[HostedConversationMessageResponse] = Field(default_factory=list)
+    toolResults: list[HostedToolInvocationResponse] = Field(default_factory=list)
+    session: HostedAgentSessionResponse

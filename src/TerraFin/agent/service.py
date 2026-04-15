@@ -18,13 +18,14 @@ from TerraFin.interface.chart.indicators.adapter import (
     compute_rsi,
     compute_trend_signal,
 )
-from TerraFin.interface.market_insights.data_routes import (
-    _build_macro_info_response,
-    _get_macro_description,
-    _resolve_macro_type,
+from TerraFin.interface.market_insights.payloads import (
+    build_macro_info_payload,
+    canonical_macro_name,
+    get_macro_description,
+    resolve_macro_type,
 )
 from TerraFin.interface.private_data_service import get_private_data_service
-from TerraFin.interface.stock.data_routes import (
+from TerraFin.interface.stock.payloads import (
     build_company_info_payload,
     build_earnings_payload,
     build_financial_statement_payload,
@@ -550,19 +551,20 @@ class TerraFinAgentService:
         }
 
     def macro_focus(self, name: str, *, depth: str = "auto", view: str = "daily") -> dict[str, Any]:
-        indicator_type = _resolve_macro_type(name)
+        resolved_name = canonical_macro_name(name)
+        indicator_type = resolve_macro_type(resolved_name)
         if indicator_type is None:
-            raise LookupError(f"Unknown macro instrument: '{name}'")
-        payload = self._market_series(name, depth=depth, view=view)
+            raise LookupError(f"Unknown macro instrument: '{resolved_name}'")
+        payload = self._market_series(resolved_name, depth=depth, view=view)
         frame = payload["frame"]
-        info = _build_macro_info_response(
-            name,
-            _get_macro_description(name),
+        info = build_macro_info_payload(
+            resolved_name,
+            get_macro_description(resolved_name),
             frame,
             indicator_type=indicator_type,
-        ).model_dump()
+        )
         return {
-            "name": name,
+            "name": resolved_name,
             "info": info,
             "seriesType": payload["series"].get("seriesType", "line"),
             "count": len(payload["series"].get("data", [])),

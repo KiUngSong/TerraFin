@@ -127,6 +127,7 @@ celerybeat.pid
 
 # Environments
 .env
+.terrafin/
 .venv
 *.pid
 env/
@@ -168,3 +169,6 @@ cython_debug/
 
 # Node.js
 node_modules/
+
+# macOS
+.DS_Store

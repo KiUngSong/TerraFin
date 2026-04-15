@@ -9,6 +9,7 @@ from threading import Lock
 _AUTOLOAD_ATTEMPTED = False
 _AUTOLOAD_LOADED = False
 _AUTOLOAD_LOCK = Lock()
+STATE_DIR_ENV = "TERRAFIN_STATE_DIR"
 
 
 def _dotenv_disabled() -> bool:
@@ -40,6 +41,31 @@ def _candidate_dotenv_paths(dotenv_path: str | os.PathLike[str] | None = None) -
         candidates.append(package_root_candidate)
 
     return candidates
+
+
+def _source_repo_root() -> Path | None:
+    candidate = Path(__file__).resolve().parents[2]
+    if (candidate / "pyproject.toml").is_file():
+        return candidate
+    return None
+
+
+def resolve_state_dir(env: Mapping[str, str] | None = None) -> Path:
+    """Resolve TerraFin's shared local state directory.
+
+    Defaults to the repo-root `.terrafin/` when running from source so the CLI,
+    hosted runtime, and provider caches share one location regardless of cwd.
+    Falls back to `~/.terrafin/` outside the source tree.
+    """
+
+    source = env if env is not None else os.environ
+    explicit = str(source.get(STATE_DIR_ENV, "") or "").strip()
+    if explicit:
+        return Path(explicit).expanduser()
+    repo_root = _source_repo_root()
+    if repo_root is not None:
+        return repo_root / ".terrafin"
+    return Path.home() / ".terrafin"
 
 
 def apply_api_keys(api_keys: Mapping[str, str] | None = None) -> None:

@@ -1,18 +1,19 @@
 """Stock Analysis API endpoints."""
 
-from collections.abc import Iterable
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Query
 from pydantic import BaseModel
 
 from TerraFin.analytics.analysis.fundamental import build_stock_dcf_payload, build_stock_reverse_dcf_payload
 from TerraFin.analytics.analysis.fundamental.dcf.models import StockDCFOverrides
 from TerraFin.analytics.analysis.risk import estimate_beta_5y_monthly, estimate_beta_5y_monthly_adjusted
-from TerraFin.data import DataFactory
-from TerraFin.data.providers.economic import indicator_registry
-from TerraFin.data.providers.market import INDEX_MAP, MARKET_INDICATOR_REGISTRY
-from TerraFin.data.providers.market.ticker_info import get_ticker_earnings, get_ticker_info
+from TerraFin.interface.stock.payloads import (
+    build_company_info_payload,
+    build_earnings_payload,
+    build_financial_statement_payload,
+    resolve_ticker_query,
+)
 from TerraFin.interface.valuation_models import (
     DCFValuationResponse,
     ReverseDCFResponse,
@@ -97,135 +98,6 @@ class BetaEstimateResponse(BaseModel):
     observations: int
     rSquared: float | None = None
     warnings: list[str]
-
-
-def _case_insensitive_match(name: str, candidates: Iterable[str]) -> str | None:
-    normalized = name.strip().casefold()
-    if not normalized:
-        return None
-    for candidate in candidates:
-        if candidate.casefold() == normalized:
-            return candidate
-    return None
-
-
-def _resolve_macro_name(name: str) -> str | None:
-    match = _case_insensitive_match(name, INDEX_MAP.keys())
-    if match:
-        return match
-    match = _case_insensitive_match(name, MARKET_INDICATOR_REGISTRY.keys())
-    if match:
-        return match
-    try:
-        return _case_insensitive_match(name, indicator_registry._indicators.keys())
-    except Exception:
-        return None
-
-
-def build_company_info_payload(ticker: str) -> dict[str, Any]:
-    normalized = ticker.upper()
-    info = get_ticker_info(normalized)
-    if not info:
-        raise HTTPException(status_code=404, detail=f"No data found for ticker '{ticker}'.")
-
-    current = info.get("currentPrice") or info.get("regularMarketPrice")
-    prev_close = info.get("previousClose") or info.get("regularMarketPreviousClose")
-    change_pct = None
-    if current and prev_close and prev_close != 0:
-        change_pct = round(((current / prev_close) - 1.0) * 100.0, 2)
-
-    return {
-        "ticker": normalized,
-        "shortName": info.get("shortName"),
-        "sector": info.get("sector"),
-        "industry": info.get("industry"),
-        "country": info.get("country"),
-        "website": info.get("website"),
-        "marketCap": info.get("marketCap"),
-        "trailingPE": info.get("trailingPE"),
-        "forwardPE": info.get("forwardPE"),
-        "trailingEps": info.get("trailingEps"),
-        "forwardEps": info.get("forwardEps"),
-        "dividendYield": info.get("dividendYield"),
-        "fiftyTwoWeekHigh": info.get("fiftyTwoWeekHigh"),
-        "fiftyTwoWeekLow": info.get("fiftyTwoWeekLow"),
-        "currentPrice": current,
-        "previousClose": prev_close,
-        "changePercent": change_pct,
-        "exchange": info.get("exchange"),
-        "beta": info.get("beta"),
-    }
-
-
-def build_earnings_payload(ticker: str) -> dict[str, Any]:
-    normalized = ticker.upper()
-    records = get_ticker_earnings(normalized)
-    return {
-        "ticker": normalized,
-        "earnings": [EarningsRecord(**record).model_dump() for record in records],
-    }
-
-
-def build_financial_statement_payload(
-    ticker: str,
-    statement: str = "income",
-    period: str = "annual",
-) -> dict[str, Any]:
-    normalized = ticker.upper()
-    try:
-        df = DataFactory().get_corporate_data(normalized, statement, period)
-    except Exception as exc:
-        raise HTTPException(status_code=502, detail=f"Failed to fetch financials: {exc}") from exc
-
-    if df is None or df.empty:
-        return {
-            "ticker": normalized,
-            "statement": statement,
-            "period": period,
-            "columns": [],
-            "rows": [],
-        }
-
-    if "date" in df.columns:
-        dates = df["date"].tolist()
-        data_cols = [column for column in df.columns if column != "date"]
-        rows = []
-        for column in data_cols:
-            values = {}
-            for idx, date in enumerate(dates):
-                value = df[column].iloc[idx]
-                values[str(date)] = value if value is not None else None
-            rows.append(FinancialRow(label=column, values=values).model_dump())
-        return {
-            "ticker": normalized,
-            "statement": statement,
-            "period": period,
-            "columns": [str(date) for date in dates],
-            "rows": rows,
-        }
-
-    columns = [str(column) for column in df.columns]
-    rows = [
-        FinancialRow(label=str(idx), values={str(column): df.at[idx, column] for column in df.columns}).model_dump()
-        for idx in df.index
-    ]
-    return {
-        "ticker": normalized,
-        "statement": statement,
-        "period": period,
-        "columns": columns,
-        "rows": rows,
-    }
-
-
-def resolve_ticker_query(query: str) -> dict[str, str]:
-    name = query.strip()
-    macro_name = _resolve_macro_name(name)
-    if macro_name:
-        return {"type": "macro", "name": macro_name, "path": f"/market-insights?ticker={macro_name}"}
-
-    upper = name.upper()
-    return {"type": "stock", "name": upper, "path": f"/stock/{upper}"}
 
 
 def build_beta_estimate_payload(ticker: str) -> dict[str, Any]:

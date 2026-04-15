@@ -5,7 +5,32 @@ from TerraFin.agent.models import (
     CompanyInfoResponse,
     EarningsResponse,
     EconomicResponse,
+    HostedApprovalDecisionRequest,
+    HostedApprovalListResponse,
+    HostedApprovalResponse,
     FinancialStatementResponse,
+    HostedAgentCatalogResponse,
+    HostedAgentDefinitionResponse,
+    HostedAgentMessageRequest,
+    HostedAgentRunResponse,
+    HostedAgentSessionDeleteResponse,
+    HostedAgentSessionCreateRequest,
+    HostedAgentSessionListResponse,
+    HostedAgentSessionResponse,
+    HostedAgentSessionSummaryResponse,
+    HostedArtifactResponse,
+    HostedCapabilityCallResponse,
+    HostedConversationMessageResponse,
+    HostedPermissionAuditResponse,
+    HostedRuntimeModelResponse,
+    HostedSessionPolicyResponse,
+    HostedTaskListResponse,
+    HostedTaskResponse,
+    HostedTaskSummaryResponse,
+    HostedToolDefinitionResponse,
+    HostedToolInvocationResponse,
+    HostedViewContextResponse,
+    HostedViewContextUpdateRequest,
     IndicatorsResponse,
     LPPLAnalysisResponse,
     MacroFocusResponse,
@@ -14,7 +39,25 @@ from TerraFin.agent.models import (
     PortfolioResponse,
     ResolveResponse,
 )
+from TerraFin.agent.hosted_runtime import (
+    TerraFinAgentApprovalRequiredError,
+    TerraFinAgentPolicyError,
+    TerraFinAgentSessionConflictError,
+)
+from TerraFin.agent.hosted_service import get_hosted_agent_loop
+from TerraFin.agent.loop import TerraFinConversationMessage, TerraFinHostedRunResult
+from TerraFin.agent.model_runtime import TerraFinModelConfigError, TerraFinModelResponseError
+from TerraFin.agent.openai_model import TerraFinOpenAIConfigError, TerraFinOpenAIResponseError
+from TerraFin.agent.session_store import (
+    TerraFinHostedApprovalRequest,
+    TerraFinHostedPermissionEvent,
+    TerraFinHostedSessionRecord,
+    TerraFinHostedViewContextRecord,
+)
+from TerraFin.agent.tools import TerraFinToolDefinition, TerraFinToolInvocationResult
+from TerraFin.agent.runtime import TerraFinArtifact, TerraFinCapabilityCall, TerraFinTaskRecord
 from TerraFin.agent.service import TerraFinAgentService
+from TerraFin.agent.conversation_state import RUNTIME_MODEL_METADATA_KEY
 from TerraFin.data.providers.corporate.filings.sec_edgar.filing import (
     SecEdgarConfigurationError,
     SecEdgarUnavailableError,
@@ -25,9 +68,332 @@ from TerraFin.interface.errors import AppRuntimeError
 AGENT_API_PREFIX = "/agent/api"
 
 
+def _message_response(message: TerraFinConversationMessage) -> HostedConversationMessageResponse:
+    return HostedConversationMessageResponse(
+        role=message.role,
+        content=message.content,
+        createdAt=message.created_at.isoformat(),
+        name=message.name,
+        toolCallId=message.tool_call_id,
+        metadata=dict(message.metadata),
+    )
+
+
+def _tool_response(tool: TerraFinToolDefinition) -> HostedToolDefinitionResponse:
+    return HostedToolDefinitionResponse(
+        name=tool.name,
+        capabilityName=tool.capability_name,
+        description=tool.description,
+        executionMode=tool.execution_mode,
+        sideEffecting=tool.side_effecting,
+        inputSchema=dict(tool.input_schema),
+        metadata=dict(tool.metadata),
+    )
+
+
+def _artifact_response(artifact: TerraFinArtifact) -> HostedArtifactResponse:
+    return HostedArtifactResponse(
+        artifactId=artifact.artifact_id,
+        kind=artifact.kind,
+        title=artifact.title,
+        capabilityName=artifact.capability_name,
+        createdAt=artifact.created_at.isoformat(),
+        payload=dict(artifact.payload),
+    )
+
+
+def _capability_call_response(call: TerraFinCapabilityCall) -> HostedCapabilityCallResponse:
+    return HostedCapabilityCallResponse(
+        capabilityName=call.capability_name,
+        calledAt=call.called_at.isoformat(),
+        inputs=dict(call.inputs),
+        outputKeys=list(call.output_keys),
+        focusItems=list(call.focus_items),
+        artifactIds=list(call.artifact_ids),
+    )
+
+
+def _audit_response(event: TerraFinHostedPermissionEvent) -> HostedPermissionAuditResponse:
+    return HostedPermissionAuditResponse(
+        eventId=event.event_id,
+        createdAt=event.created_at.isoformat(),
+        action=event.action,
+        capabilityName=event.capability_name,
+        toolName=event.tool_name,
+        sideEffecting=event.side_effecting,
+        outcome=event.outcome,
+        reason=event.reason,
+        metadata=dict(event.metadata),
+    )
+
+
+def _approval_response(approval: TerraFinHostedApprovalRequest) -> HostedApprovalResponse:
+    return HostedApprovalResponse(
+        approvalId=approval.approval_id,
+        createdAt=approval.created_at.isoformat(),
+        updatedAt=approval.updated_at.isoformat(),
+        resolvedAt=None if approval.resolved_at is None else approval.resolved_at.isoformat(),
+        sessionId=approval.session_id,
+        agentName=approval.agent_name,
+        action=approval.action,
+        capabilityName=approval.capability_name,
+        toolName=approval.tool_name,
+        sideEffecting=approval.side_effecting,
+        status=approval.status,
+        reason=approval.reason,
+        inputPayload=dict(approval.input_payload),
+        decisionNote=approval.decision_note,
+        metadata=dict(approval.metadata),
+    )
+
+
+def _view_context_response(record: TerraFinHostedViewContextRecord) -> HostedViewContextResponse:
+    return HostedViewContextResponse(
+        contextId=record.context_id,
+        createdAt=record.created_at.isoformat(),
+        updatedAt=record.updated_at.isoformat(),
+        route=record.route,
+        pageType=record.page_type,
+        title=record.title,
+        summary=record.summary,
+        selection=dict(record.selection),
+        entities=[dict(entity) for entity in record.entities],
+        metadata=dict(record.metadata),
+    )
+
+
+def _task_response(task: TerraFinTaskRecord) -> HostedTaskResponse:
+    return HostedTaskResponse(
+        taskId=task.task_id,
+        capabilityName=task.capability_name,
+        status=task.status,
+        description=task.description,
+        sessionId=task.session_id,
+        createdAt=task.created_at.isoformat(),
+        startedAt=None if task.started_at is None else task.started_at.isoformat(),
+        completedAt=None if task.completed_at is None else task.completed_at.isoformat(),
+        inputPayload=dict(task.input_payload),
+        progress=dict(task.progress),
+        result=None if task.result is None else dict(task.result),
+        error=task.error,
+    )
+
+
+def _runtime_model_response(payload: object) -> HostedRuntimeModelResponse | None:
+    if hasattr(payload, "to_payload"):
+        payload = payload.to_payload()
+    if not isinstance(payload, dict):
+        return None
+    model_ref = str(payload.get("modelRef") or "").strip()
+    provider_id = str(payload.get("providerId") or "").strip()
+    provider_label = str(payload.get("providerLabel") or "").strip()
+    model_id = str(payload.get("modelId") or "").strip()
+    if not model_ref or not provider_id or not provider_label or not model_id:
+        return None
+    return HostedRuntimeModelResponse(
+        modelRef=model_ref,
+        providerId=provider_id,
+        providerLabel=provider_label,
+        modelId=model_id,
+        metadata=dict(payload.get("metadata", {})),
+    )
+
+
+def _message_preview(content: str, *, limit: int = 96) -> str:
+    compact = " ".join(content.split())
+    if len(compact) <= limit:
+        return compact
+    return f"{compact[: limit - 1].rstrip()}…"
+
+
+def _session_summary_response(
+    record: TerraFinHostedSessionRecord,
+    *,
+    loop: object | None = None,
+) -> HostedAgentSessionSummaryResponse:
+    transcript_summary = None
+    if loop is not None:
+        transcript_store = getattr(getattr(loop, "runtime", None), "transcript_store", None)
+        if transcript_store is not None and transcript_store.session_exists(record.session_id):
+            transcript_summary = transcript_store.build_summary(record.session_id)
+    conversation = None
+    if transcript_summary is None and loop is not None:
+        try:
+            conversation = loop.get_conversation(record.session_id)
+        except Exception:
+            conversation = None
+    visible_messages = [] if conversation is None else [
+        message for message in conversation.snapshot() if message.role not in {"system", "tool"}
+    ]
+    last_message = visible_messages[-1] if visible_messages else None
+    first_user_message = next((message for message in visible_messages if message.role == "user"), None)
+    runtime_model = _runtime_model_response(record.context.session.metadata.get(RUNTIME_MODEL_METADATA_KEY))
+    if runtime_model is None and loop is not None:
+        runtime_model = _resolve_model_client_runtime_model(loop, session=record.context.session)
+    if transcript_summary is not None and transcript_summary.runtime_model is not None:
+        runtime_model = _runtime_model_response(transcript_summary.runtime_model) or runtime_model
+    pending_task_count = sum(
+        1
+        for task in record.context.task_registry.list_for_session(record.session_id)
+        if task.status not in {"completed", "failed", "cancelled"}
+    )
+    return HostedAgentSessionSummaryResponse(
+        sessionId=record.session_id,
+        agentName=record.agent_name,
+        createdAt=record.created_at.isoformat(),
+        updatedAt=record.updated_at.isoformat(),
+        lastAccessedAt=record.last_accessed_at.isoformat(),
+        runtimeModel=runtime_model,
+        title=(
+            transcript_summary.title
+            if transcript_summary is not None
+            else None if first_user_message is None else _message_preview(first_user_message.content, limit=72)
+        ),
+        lastMessagePreview=(
+            transcript_summary.last_message_preview
+            if transcript_summary is not None
+            else None if last_message is None else _message_preview(last_message.content)
+        ),
+        lastMessageAt=(
+            None
+            if (transcript_summary is not None and transcript_summary.last_message_at is None)
+            else transcript_summary.last_message_at.isoformat()
+            if transcript_summary is not None
+            else None if last_message is None else last_message.created_at.isoformat()
+        ),
+        messageCount=transcript_summary.message_count if transcript_summary is not None else len(visible_messages),
+        pendingTaskCount=pending_task_count,
+    )
+
+
+def _resolve_model_client_runtime_model(loop: object, *, session: object | None = None) -> HostedRuntimeModelResponse | None:
+    describe = getattr(getattr(loop, "model_client", None), "describe_runtime_model", None)
+    if not callable(describe):
+        return None
+    try:
+        payload = describe(session=session)
+    except TypeError:
+        payload = describe()
+    return _runtime_model_response(payload)
+
+
+def _session_response(
+    record: TerraFinHostedSessionRecord,
+    *,
+    loop: object | None = None,
+    tools: tuple[TerraFinToolDefinition, ...],
+) -> HostedAgentSessionResponse:
+    conversation = None
+    if loop is not None:
+        try:
+            conversation = loop.get_conversation(record.session_id)
+        except Exception:
+            conversation = None
+    else:
+        conversation = record.conversation
+    session_policy = record.context.session.metadata.get("agentPolicy", {})
+    runtime_model = _runtime_model_response(record.context.session.metadata.get(RUNTIME_MODEL_METADATA_KEY))
+    if runtime_model is None and loop is not None:
+        runtime_model = _resolve_model_client_runtime_model(loop, session=record.context.session)
+    return HostedAgentSessionResponse(
+        sessionId=record.session_id,
+        agentName=record.agent_name,
+        metadata=dict(record.context.session.metadata),
+        runtimeModel=runtime_model,
+        policy=HostedSessionPolicyResponse(**session_policy) if session_policy else None,
+        focusItems=list(record.context.session.snapshot().focus_items),
+        artifacts=[_artifact_response(artifact) for artifact in record.context.session.snapshot().artifacts],
+        capabilityCalls=[
+            _capability_call_response(call)
+            for call in record.context.session.snapshot().capability_calls
+        ],
+        tasks=[_task_response(task) for task in record.context.task_registry.list_for_session(record.session_id)],
+        approvals=[_approval_response(approval) for approval in record.approval_requests],
+        auditTrail=[_audit_response(event) for event in record.audit_log],
+        tools=[_tool_response(tool) for tool in tools],
+        messages=[] if conversation is None else [_message_response(message) for message in conversation.snapshot()],
+    )
+
+
+def _tool_invocation_response(result: TerraFinToolInvocationResult) -> HostedToolInvocationResponse:
+    task = None
+    if result.task is not None:
+        task = HostedTaskSummaryResponse(
+            taskId=result.task.task_id,
+            status=result.task.status,
+            description=result.task.description,
+        )
+    return HostedToolInvocationResponse(
+        toolName=result.tool_name,
+        capabilityName=result.capability_name,
+        executionMode=result.execution_mode,
+        payload=dict(result.payload),
+        task=task,
+    )
+
+
+def _run_response(
+    run_result: TerraFinHostedRunResult,
+    *,
+    record: TerraFinHostedSessionRecord,
+    loop: object | None = None,
+    tools: tuple[TerraFinToolDefinition, ...],
+) -> HostedAgentRunResponse:
+    return HostedAgentRunResponse(
+        sessionId=run_result.session_id,
+        agentName=run_result.agent_name,
+        steps=run_result.steps,
+        finalMessage=None if run_result.final_message is None else _message_response(run_result.final_message),
+        messagesAdded=[_message_response(message) for message in run_result.messages_added],
+        toolResults=[_tool_invocation_response(result) for result in run_result.tool_results],
+        session=_session_response(record, loop=loop, tools=tools),
+    )
+
+
 def _raise_http_error(exc: Exception) -> None:
     if isinstance(exc, HTTPException):
         raise exc
+    if isinstance(exc, TerraFinOpenAIConfigError):
+        raise AppRuntimeError(
+            str(exc),
+            code="hosted_agent_not_configured",
+            status_code=503,
+            details={"feature": "hosted_agent_runtime"},
+        ) from exc
+    if isinstance(exc, TerraFinModelConfigError):
+        raise AppRuntimeError(
+            str(exc),
+            code="hosted_agent_not_configured",
+            status_code=503,
+            details={"feature": "hosted_agent_runtime"},
+        ) from exc
+    if isinstance(exc, TerraFinOpenAIResponseError):
+        raise AppRuntimeError(
+            str(exc),
+            code="hosted_agent_provider_error",
+            status_code=502,
+            details={"feature": "hosted_agent_runtime"},
+        ) from exc
+    if isinstance(exc, TerraFinModelResponseError):
+        raise AppRuntimeError(
+            str(exc),
+            code="hosted_agent_provider_error",
+            status_code=502,
+            details={"feature": "hosted_agent_runtime"},
+        ) from exc
+    if isinstance(exc, TerraFinAgentPolicyError):
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    if isinstance(exc, TerraFinAgentSessionConflictError):
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    if isinstance(exc, TerraFinAgentApprovalRequiredError):
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "message": str(exc),
+                "approvalId": exc.approval.approval_id,
+                "status": exc.approval.status,
+            },
+        ) from exc
     if isinstance(exc, SecEdgarConfigurationError):
         raise AppRuntimeError(
             str(exc),
@@ -42,6 +408,8 @@ def _raise_http_error(exc: Exception) -> None:
             status_code=503,
             details={"feature": "agent_portfolio"},
         ) from exc
+    if isinstance(exc, KeyError):
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
     if isinstance(exc, LookupError):
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     if isinstance(exc, ValueError):
@@ -52,6 +420,227 @@ def _raise_http_error(exc: Exception) -> None:
 def create_agent_data_router() -> APIRouter:
     router = APIRouter()
     service = TerraFinAgentService()
+
+    @router.get(f"{AGENT_API_PREFIX}/runtime/agents", response_model=HostedAgentCatalogResponse)
+    def api_hosted_agent_catalog():
+        try:
+            loop = get_hosted_agent_loop()
+            default_runtime_model = _resolve_model_client_runtime_model(loop)
+            agents = []
+            for definition in loop.runtime.list_agents():
+                agents.append(
+                    HostedAgentDefinitionResponse(
+                        name=definition.name,
+                        description=definition.description,
+                        allowedCapabilities=list(definition.allowed_capabilities),
+                        defaultDepth=definition.default_depth,
+                        defaultView=definition.default_view,
+                        chartAccess=definition.chart_access,
+                        allowBackgroundTasks=definition.allow_background_tasks,
+                        runtimeModel=default_runtime_model,
+                        metadata=dict(definition.metadata),
+                        tools=[_tool_response(tool) for tool in loop.tool_adapter.list_tools_for_agent(definition.name)],
+                    )
+                )
+            return HostedAgentCatalogResponse(agents=agents)
+        except Exception as exc:
+            _raise_http_error(exc)
+
+    @router.post(f"{AGENT_API_PREFIX}/runtime/sessions", response_model=HostedAgentSessionResponse)
+    def api_hosted_agent_create_session(request: HostedAgentSessionCreateRequest):
+        try:
+            loop = get_hosted_agent_loop()
+            conversation = loop.create_session(
+                request.agentName,
+                session_id=request.sessionId,
+                metadata=request.metadata,
+                system_prompt=request.systemPrompt,
+            )
+            record = loop.runtime.get_session_record(conversation.session_id)
+            return _session_response(
+                record,
+                loop=loop,
+                tools=loop.tool_adapter.list_tools_for_session(conversation.session_id),
+            )
+        except Exception as exc:
+            _raise_http_error(exc)
+
+    @router.get(f"{AGENT_API_PREFIX}/runtime/sessions", response_model=HostedAgentSessionListResponse)
+    def api_hosted_agent_list_sessions():
+        try:
+            loop = get_hosted_agent_loop()
+            records = loop.runtime.list_sessions()
+            return HostedAgentSessionListResponse(
+                sessions=[_session_summary_response(record, loop=loop) for record in records],
+            )
+        except Exception as exc:
+            _raise_http_error(exc)
+
+    @router.get(f"{AGENT_API_PREFIX}/runtime/sessions/{{session_id}}", response_model=HostedAgentSessionResponse)
+    def api_hosted_agent_get_session(session_id: str):
+        try:
+            loop = get_hosted_agent_loop()
+            record = loop.runtime.get_session_record(session_id)
+            return _session_response(
+                record,
+                loop=loop,
+                tools=loop.tool_adapter.list_tools_for_session(session_id),
+            )
+        except Exception as exc:
+            _raise_http_error(exc)
+
+    @router.delete(
+        f"{AGENT_API_PREFIX}/runtime/sessions/{{session_id}}",
+        response_model=HostedAgentSessionDeleteResponse,
+    )
+    def api_hosted_agent_delete_session(session_id: str):
+        try:
+            loop = get_hosted_agent_loop()
+            removed = loop.runtime.delete_session(session_id)
+            forget_conversation = getattr(loop, "forget_conversation", None)
+            if callable(forget_conversation):
+                forget_conversation(session_id)
+            return HostedAgentSessionDeleteResponse(
+                sessionId=removed.session_id,
+                deletedAt=removed.updated_at.isoformat(),
+            )
+        except Exception as exc:
+            _raise_http_error(exc)
+
+    @router.put(
+        f"{AGENT_API_PREFIX}/runtime/view-contexts/{{context_id}}",
+        response_model=HostedViewContextResponse,
+    )
+    def api_hosted_agent_upsert_view_context(
+        context_id: str,
+        request: HostedViewContextUpdateRequest,
+    ):
+        try:
+            loop = get_hosted_agent_loop()
+            record = loop.runtime.upsert_view_context(
+                context_id,
+                route=request.route,
+                page_type=request.pageType,
+                title=request.title,
+                summary=request.summary,
+                selection=request.selection,
+                entities=request.entities,
+                metadata=request.metadata,
+            )
+            return _view_context_response(record)
+        except Exception as exc:
+            _raise_http_error(exc)
+
+    @router.get(
+        f"{AGENT_API_PREFIX}/runtime/view-contexts/{{context_id}}",
+        response_model=HostedViewContextResponse,
+    )
+    def api_hosted_agent_get_view_context(context_id: str):
+        try:
+            loop = get_hosted_agent_loop()
+            return _view_context_response(loop.runtime.get_view_context(context_id))
+        except Exception as exc:
+            _raise_http_error(exc)
+
+    @router.post(
+        f"{AGENT_API_PREFIX}/runtime/sessions/{{session_id}}/messages",
+        response_model=HostedAgentRunResponse,
+    )
+    def api_hosted_agent_submit_message(session_id: str, request: HostedAgentMessageRequest):
+        try:
+            loop = get_hosted_agent_loop()
+            run_result = loop.submit_user_message(session_id, request.content)
+            record = loop.runtime.get_session_record(session_id)
+            return _run_response(
+                run_result,
+                record=record,
+                loop=loop,
+                tools=loop.tool_adapter.list_tools_for_session(session_id),
+            )
+        except Exception as exc:
+            _raise_http_error(exc)
+
+    @router.get(
+        f"{AGENT_API_PREFIX}/runtime/sessions/{{session_id}}/tasks",
+        response_model=HostedTaskListResponse,
+    )
+    def api_hosted_agent_list_tasks(session_id: str):
+        try:
+            loop = get_hosted_agent_loop()
+            tasks = loop.runtime.list_session_tasks(session_id)
+            return HostedTaskListResponse(
+                sessionId=session_id,
+                tasks=[_task_response(task) for task in tasks],
+            )
+        except Exception as exc:
+            _raise_http_error(exc)
+
+    @router.get(
+        f"{AGENT_API_PREFIX}/runtime/sessions/{{session_id}}/approvals",
+        response_model=HostedApprovalListResponse,
+    )
+    def api_hosted_agent_list_approvals(session_id: str):
+        try:
+            loop = get_hosted_agent_loop()
+            approvals = loop.runtime.list_session_approvals(session_id)
+            return HostedApprovalListResponse(
+                sessionId=session_id,
+                approvals=[_approval_response(approval) for approval in approvals],
+            )
+        except Exception as exc:
+            _raise_http_error(exc)
+
+    @router.get(f"{AGENT_API_PREFIX}/runtime/tasks/{{task_id}}", response_model=HostedTaskResponse)
+    def api_hosted_agent_get_task(task_id: str):
+        try:
+            loop = get_hosted_agent_loop()
+            return _task_response(loop.runtime.get_task(task_id))
+        except Exception as exc:
+            _raise_http_error(exc)
+
+    @router.get(f"{AGENT_API_PREFIX}/runtime/approvals/{{approval_id}}", response_model=HostedApprovalResponse)
+    def api_hosted_agent_get_approval(approval_id: str):
+        try:
+            loop = get_hosted_agent_loop()
+            return _approval_response(loop.runtime.get_approval(approval_id))
+        except Exception as exc:
+            _raise_http_error(exc)
+
+    @router.post(f"{AGENT_API_PREFIX}/runtime/tasks/{{task_id}}/cancel", response_model=HostedTaskResponse)
+    def api_hosted_agent_cancel_task(task_id: str):
+        try:
+            loop = get_hosted_agent_loop()
+            return _task_response(loop.runtime.cancel_task(task_id))
+        except Exception as exc:
+            _raise_http_error(exc)
+
+    @router.post(
+        f"{AGENT_API_PREFIX}/runtime/approvals/{{approval_id}}/approve",
+        response_model=HostedApprovalResponse,
+    )
+    def api_hosted_agent_approve_approval(
+        approval_id: str,
+        request: HostedApprovalDecisionRequest,
+    ):
+        try:
+            loop = get_hosted_agent_loop()
+            return _approval_response(loop.runtime.approve_approval(approval_id, note=request.note))
+        except Exception as exc:
+            _raise_http_error(exc)
+
+    @router.post(
+        f"{AGENT_API_PREFIX}/runtime/approvals/{{approval_id}}/deny",
+        response_model=HostedApprovalResponse,
+    )
+    def api_hosted_agent_deny_approval(
+        approval_id: str,
+        request: HostedApprovalDecisionRequest,
+    ):
+        try:
+            loop = get_hosted_agent_loop()
+            return _approval_response(loop.runtime.deny_approval(approval_id, note=request.note))
+        except Exception as exc:
+            _raise_http_error(exc)
 
     @router.get(f"{AGENT_API_PREFIX}/resolve", response_model=ResolveResponse)
     def api_agent_resolve(q: str = Query(..., min_length=1)):

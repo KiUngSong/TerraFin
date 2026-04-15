@@ -49,7 +49,7 @@ def test_agent_cli_main_loads_dotenv_from_explicit_entrypoint(monkeypatch, tmp_p
 
     monkeypatch.setattr(cli_module, "_make_client", lambda args: _FakeClient())
 
-    assert cli_module.main(["--json", "resolve", "AAPL"]) == 0
+    assert cli_module.main(["resolve", "AAPL"]) == 0
     assert os.getenv("TERRAFIN_TEST_AGENT_DOTENV") == "cli-loaded"
 
 

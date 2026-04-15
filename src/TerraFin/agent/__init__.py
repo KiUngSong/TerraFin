@@ -1,7 +1,74 @@
 """Agent-facing client, service, and task helpers for TerraFin."""
 
 from .client import TerraFinAgentClient
+from .definitions import (
+    DEFAULT_HOSTED_AGENT_DESCRIPTION,
+    DEFAULT_HOSTED_AGENT_NAME,
+    TerraFinAgentDefinition,
+    TerraFinAgentDefinitionRegistry,
+    build_default_agent_definition_registry,
+)
+from .hosted_runtime import (
+    TerraFinAgentApprovalRequiredError,
+    TerraFinAgentPolicyError,
+    TerraFinHostedAgentRuntime,
+)
+from .loop import (
+    TerraFinConversationMessage,
+    TerraFinHostedAgentLoop,
+    TerraFinHostedConversation,
+    TerraFinHostedModelClient,
+    TerraFinHostedRunResult,
+    TerraFinModelTurn,
+    TerraFinToolCall,
+    build_default_system_prompt,
+)
+from .model_runtime import (
+    TerraFinModelConfigError,
+    TerraFinModelProvider,
+    TerraFinModelProviderRegistry,
+    TerraFinModelResponseError,
+    TerraFinProviderRoutedModelClient,
+    TerraFinRuntimeModel,
+)
+from .openai_model import (
+    TerraFinOpenAIConfigError,
+    TerraFinOpenAIModelConfig,
+    TerraFinOpenAIResponseError,
+    TerraFinOpenAIResponsesModelClient,
+)
+from .providers import (
+    TerraFinGithubCopilotConfig,
+    TerraFinGithubCopilotConfigError,
+    TerraFinGithubCopilotResponseError,
+    TerraFinGithubCopilotResponsesProvider,
+    TerraFinGoogleModelConfig,
+    TerraFinGoogleModelConfigError,
+    TerraFinGoogleModelResponseError,
+    TerraFinGoogleResponsesProvider,
+    TerraFinOpenAIResponsesProvider,
+)
+from .runtime import (
+    TerraFinAgentContext,
+    TerraFinAgentSession,
+    TerraFinArtifact,
+    TerraFinCapability,
+    TerraFinCapabilityRegistry,
+    TerraFinTaskRecord,
+    TerraFinTaskRegistry,
+    build_default_capability_registry,
+    create_agent_context,
+)
+from .runtime_helpers import TerraFinRuntimeSessionClient, ask_agent, create_runtime_session
 from .service import TerraFinAgentService
+from .session_store import (
+    HostedSessionStore,
+    InMemoryHostedSessionStore,
+    SQLiteHostedSessionStore,
+    TerraFinHostedApprovalRequest,
+    TerraFinHostedPermissionEvent,
+    TerraFinHostedSessionRecord,
+)
 from .tasks import (
     calendar_scan,
     compare_assets,
@@ -12,11 +79,72 @@ from .tasks import (
     stock_fundamentals,
     ticker_brief,
 )
+from .tools import (
+    TerraFinHostedToolAdapter,
+    TerraFinToolDefinition,
+    TerraFinToolInvocationResult,
+)
 
 
 __all__ = [
     "TerraFinAgentClient",
     "TerraFinAgentService",
+    "DEFAULT_HOSTED_AGENT_NAME",
+    "DEFAULT_HOSTED_AGENT_DESCRIPTION",
+    "TerraFinAgentDefinition",
+    "TerraFinAgentDefinitionRegistry",
+    "TerraFinHostedAgentRuntime",
+    "TerraFinAgentPolicyError",
+    "TerraFinAgentApprovalRequiredError",
+    "TerraFinHostedAgentLoop",
+    "TerraFinHostedConversation",
+    "TerraFinHostedRunResult",
+    "TerraFinHostedModelClient",
+    "TerraFinConversationMessage",
+    "TerraFinModelTurn",
+    "TerraFinToolCall",
+    "build_default_system_prompt",
+    "TerraFinRuntimeModel",
+    "TerraFinModelProvider",
+    "TerraFinModelProviderRegistry",
+    "TerraFinProviderRoutedModelClient",
+    "TerraFinModelConfigError",
+    "TerraFinModelResponseError",
+    "TerraFinOpenAIModelConfig",
+    "TerraFinOpenAIResponsesModelClient",
+    "TerraFinOpenAIResponsesProvider",
+    "TerraFinOpenAIConfigError",
+    "TerraFinOpenAIResponseError",
+    "TerraFinGoogleModelConfig",
+    "TerraFinGoogleModelConfigError",
+    "TerraFinGoogleModelResponseError",
+    "TerraFinGoogleResponsesProvider",
+    "TerraFinGithubCopilotConfig",
+    "TerraFinGithubCopilotConfigError",
+    "TerraFinGithubCopilotResponseError",
+    "TerraFinGithubCopilotResponsesProvider",
+    "TerraFinHostedToolAdapter",
+    "TerraFinToolDefinition",
+    "TerraFinToolInvocationResult",
+    "TerraFinCapability",
+    "TerraFinCapabilityRegistry",
+    "TerraFinAgentSession",
+    "TerraFinAgentContext",
+    "TerraFinTaskRegistry",
+    "TerraFinTaskRecord",
+    "TerraFinArtifact",
+    "HostedSessionStore",
+    "InMemoryHostedSessionStore",
+    "SQLiteHostedSessionStore",
+    "TerraFinHostedApprovalRequest",
+    "TerraFinHostedPermissionEvent",
+    "TerraFinHostedSessionRecord",
+    "build_default_agent_definition_registry",
+    "build_default_capability_registry",
+    "create_agent_context",
+    "TerraFinRuntimeSessionClient",
+    "create_runtime_session",
+    "ask_agent",
     "ticker_brief",
     "market_snapshot",
     "compare_assets",
