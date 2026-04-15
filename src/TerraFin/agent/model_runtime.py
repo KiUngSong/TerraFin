@@ -178,6 +178,23 @@ class TerraFinProviderRoutedModelClient:
             return self.default_model
         return self.registry.coerce_runtime_model(payload)
 
+    def describe_runtime_status(self, *, session: "TerraFinAgentSession" | None = None) -> dict[str, Any]:
+        runtime_model = self.describe_runtime_model(session=session)
+        provider = self.registry.get(runtime_model.provider_id)
+        try:
+            getattr(provider, "config")
+        except TerraFinModelConfigError as exc:
+            return {
+                "runtimeModel": runtime_model.to_payload(),
+                "configured": False,
+                "message": str(exc),
+            }
+        return {
+            "runtimeModel": runtime_model.to_payload(),
+            "configured": True,
+            "message": None,
+        }
+
     def complete(
         self,
         *,

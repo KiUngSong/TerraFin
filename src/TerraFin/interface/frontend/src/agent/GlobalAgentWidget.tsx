@@ -25,6 +25,8 @@ interface HostedAgentDefinition {
   chartAccess: boolean;
   allowBackgroundTasks: boolean;
   runtimeModel?: HostedRuntimeModel | null;
+  runtimeConfigured?: boolean;
+  runtimeSetupMessage?: string | null;
   tools: HostedToolDefinition[];
 }
 
@@ -403,9 +405,14 @@ const GlobalAgentWidget: React.FC = () => {
   const currentAgent = useMemo(() => agents[0] || null, [agents]);
   const activeSession = session;
   const activeSessionId = activeSession?.sessionId || null;
+  const isRuntimeConfigured = currentAgent?.runtimeConfigured !== false;
+  const runtimeSetupMessage =
+    (typeof currentAgent?.runtimeSetupMessage === 'string' && currentAgent.runtimeSetupMessage.trim()) ||
+    LOCAL_SETUP_MESSAGE;
   const defaultRuntimeModel = currentAgent?.runtimeModel || null;
-  const activeRuntimeModel = activeSession?.runtimeModel || defaultRuntimeModel || null;
+  const activeRuntimeModel = isRuntimeConfigured ? activeSession?.runtimeModel || defaultRuntimeModel || null : null;
   const newChatRuntimeModel =
+    isRuntimeConfigured &&
     activeSession?.runtimeModel &&
     defaultRuntimeModel &&
     activeSession.runtimeModel.modelRef !== defaultRuntimeModel.modelRef
@@ -452,8 +459,8 @@ const GlobalAgentWidget: React.FC = () => {
     [orderedApprovals]
   );
   const needsLocalSetup = useMemo(
-    () => error === LOCAL_SETUP_MESSAGE,
-    [error]
+    () => !isRuntimeConfigured || error === LOCAL_SETUP_MESSAGE || error === runtimeSetupMessage,
+    [error, isRuntimeConfigured, runtimeSetupMessage]
   );
   const hasPendingTaskRequest = useMemo(
     () => recentTaskResults.some((result) => result.task && !isTerminalTaskStatus(result.task.status)),
@@ -485,6 +492,7 @@ const GlobalAgentWidget: React.FC = () => {
   const newChatRuntimeModelLabel = newChatRuntimeModel
     ? `Default: ${newChatRuntimeModel.providerLabel} / ${newChatRuntimeModel.modelId}`
     : '';
+  const chatAvailable = Boolean(currentAgent && isRuntimeConfigured);
 
   const toggleDrawer = useCallback((drawer: Exclude<AgentShellDrawer, null>) => {
     setActiveDrawer((current) => (current === drawer ? null : drawer));
@@ -614,9 +622,11 @@ const GlobalAgentWidget: React.FC = () => {
         lastCatalogLoadedAtRef.current = Date.now();
         setAgents(nextAgents);
         setError(
-          nextAgents.length > 0
-            ? null
-            : LOCAL_SETUP_MESSAGE
+          nextAgents.length === 0
+            ? LOCAL_SETUP_MESSAGE
+            : nextAgents[0]?.runtimeConfigured === false
+              ? nextAgents[0]?.runtimeSetupMessage || LOCAL_SETUP_MESSAGE
+              : null
         );
       } catch (payload) {
         if (!background) {
@@ -662,6 +672,19 @@ const GlobalAgentWidget: React.FC = () => {
       window.clearInterval(timer);
     };
   }, [isOpen, loadCatalog]);
+
+  useEffect(() => {
+    if (isRuntimeConfigured) {
+      return;
+    }
+    setSession(null);
+    setHistoryPinnedSession(false);
+    setToolResults([]);
+    setActiveDrawer(null);
+    setShowPromptSuggestions(false);
+    writeStoredActiveSessionId(null);
+    setError(runtimeSetupMessage);
+  }, [isRuntimeConfigured, runtimeSetupMessage]);
 
   useEffect(() => {
     if (
@@ -827,7 +850,8 @@ const GlobalAgentWidget: React.FC = () => {
       return existing;
     }
     const agentName = currentAgent?.name;
-    if (!agentName) {
+    if (!agentName || !chatAvailable) {
+      setError(runtimeSetupMessage);
       return null;
     }
     setCreatingSession(true);
@@ -862,6 +886,10 @@ const GlobalAgentWidget: React.FC = () => {
 
   const handleSend = async (content: string) => {
     if (!currentAgent || !content.trim()) {
+      return;
+    }
+    if (!chatAvailable) {
+      setError(runtimeSetupMessage);
       return;
     }
     setSending(true);
@@ -1021,7 +1049,9 @@ const GlobalAgentWidget: React.FC = () => {
   const runtimeState = currentAgent
     ? sending
       ? 'Working'
-      : 'Ready'
+      : isRuntimeConfigured
+        ? 'Ready'
+        : 'Local setup required'
     : needsLocalSetup
       ? 'Local setup required'
       : loadingCatalog
@@ -1093,7 +1123,7 @@ const GlobalAgentWidget: React.FC = () => {
                 isSessionsDrawerOpen ? 'tf-agent-widget__header-button--active' : ''
               }`}
               onClick={() => toggleDrawer('sessions')}
-              disabled={loadingHistory}
+              disabled={loadingHistory || !chatAvailable}
             >
               Sessions
             </button>
@@ -1112,7 +1142,7 @@ const GlobalAgentWidget: React.FC = () => {
               type="button"
               className="tf-agent-widget__header-button"
               onClick={handleClear}
-              disabled={sending || creatingSession}
+              disabled={sending || creatingSession || !chatAvailable}
             >
               New
             </button>
@@ -1355,19 +1385,19 @@ const GlobalAgentWidget: React.FC = () => {
               {visibleMessages.length === 0 && !loadingCatalog && !creatingSession && !sending ? (
                 <div className="tf-agent-widget__placeholder">
                   <div className="tf-agent-widget__placeholder-title">
-                    {agents.length > 0
+                    {chatAvailable
                       ? 'Start with a question'
                       : needsLocalSetup
                         ? `Set up ${AGENT_UI_NAME} locally`
                         : `${AGENT_UI_NAME} not ready`}
                   </div>
                   <div className="tf-agent-widget__placeholder-copy">
-                    {agents.length > 0
+                    {chatAvailable
                       ? 'Ask directly below, or open the ? button if you want a few examples.'
                       : error ||
                         'The hosted agent runtime is not responding on this deployment yet.'}
                   </div>
-                  {agents.length === 0 ? (
+                  {!chatAvailable ? (
                     <div className="tf-agent-widget__placeholder-actions">
                       <button
                         type="button"
@@ -1390,9 +1420,13 @@ const GlobalAgentWidget: React.FC = () => {
               <textarea
                 value={draft}
                 onChange={(event) => setDraft(event.target.value)}
-                placeholder="Ask about a stock, portfolio, DCF, chart, or macro setup."
+                placeholder={
+                  chatAvailable
+                    ? 'Ask about a stock, portfolio, DCF, chart, or macro setup.'
+                    : `${AGENT_UI_NAME} requires a local hosted model setup on this deployment.`
+                }
                 rows={3}
-                disabled={!currentAgent || sending || creatingSession || loadingCatalog}
+                disabled={!chatAvailable || sending || creatingSession || loadingCatalog}
                 className="tf-agent-composer__input"
               />
               <div className="tf-agent-composer__actions">
@@ -1406,7 +1440,7 @@ const GlobalAgentWidget: React.FC = () => {
                               key={prompt}
                               type="button"
                               className="tf-agent-suggestion"
-                              disabled={!currentAgent || sending || creatingSession || loadingCatalog}
+                              disabled={!chatAvailable || sending || creatingSession || loadingCatalog}
                               onClick={() => void handleSend(prompt)}
                             >
                               {prompt}
@@ -1422,7 +1456,7 @@ const GlobalAgentWidget: React.FC = () => {
                         onClick={() => setShowPromptSuggestions((current) => !current)}
                         aria-label={showPromptSuggestions ? 'Hide example prompts' : 'Show example prompts'}
                         aria-expanded={showPromptSuggestions}
-                        disabled={sending || creatingSession || loadingCatalog}
+                        disabled={!chatAvailable || sending || creatingSession || loadingCatalog}
                       >
                         ?
                       </button>
@@ -1442,7 +1476,7 @@ const GlobalAgentWidget: React.FC = () => {
                     type="button"
                     className="tf-agent-primary"
                     onClick={() => void handleSend(draft)}
-                    disabled={!currentAgent || !draft.trim() || sending || creatingSession || loadingCatalog}
+                    disabled={!chatAvailable || !draft.trim() || sending || creatingSession || loadingCatalog}
                   >
                     {sending ? 'Running...' : 'Send'}
                   </button>

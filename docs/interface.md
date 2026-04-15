@@ -365,8 +365,8 @@ or the `terrafin-agent` CLI over calling raw routes directly.
 | `GET` | `/agent/api/macro-focus` | `name`, `depth`, `view` | Macro instrument summary plus series data |
 | `GET` | `/agent/api/lppl` | `name`, `depth`, `view` | LPPL bubble-confidence summary from the shared agent/chart processing pipeline |
 | `GET` | `/agent/api/calendar` | `year`, `month`, `categories`, `limit` | Calendar events with processing metadata |
-| `GET` | `/agent/api/runtime/agents` | - | Hosted runtime agent catalog plus exposed tools |
-| `POST` | `/agent/api/runtime/sessions` | body: `agentName`, optional `sessionId`, `systemPrompt`, `metadata` | Create a hosted runtime conversation session |
+| `GET` | `/agent/api/runtime/agents` | - | Hosted runtime agent catalog plus exposed tools and runtime readiness metadata |
+| `POST` | `/agent/api/runtime/sessions` | body: `agentName`, optional `sessionId`, `systemPrompt`, `metadata` | Create a hosted runtime conversation session when the selected hosted model is configured |
 | `GET` | `/agent/api/runtime/sessions` | - | List hosted sessions from the transcript-derived session index |
 | `GET` | `/agent/api/runtime/sessions/{session_id}` | - | Read hosted runtime session state, transcript-derived message history, and tools |
 | `DELETE` | `/agent/api/runtime/sessions/{session_id}` | - | Archive a hosted session transcript and remove it from active history |

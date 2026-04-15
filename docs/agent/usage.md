@@ -34,6 +34,13 @@ There are two agent-facing HTTP families:
 In the browser, the hosted runtime is exposed through the floating **TerraFin Agent**
 widget available on main interface pages such as `/dashboard`, `/chart`, and `/stock/<ticker>`.
 
+If the deployment does not have a usable hosted model configured, the widget
+stays in an info-only state:
+
+- it shows the local setup warning
+- it does not create a runtime session
+- it does not accept chat input until the hosted model credentials are valid
+
 Hosted runtime chat history is local transcript history:
 
 - each session is stored as an append-only JSONL transcript

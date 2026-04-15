@@ -338,7 +338,7 @@ class _FakeHostedToolAdapter:
 
 
 class _FakeHostedLoop:
-    def __init__(self) -> None:
+    def __init__(self, *, runtime_configured: bool = True, runtime_setup_message: str | None = None) -> None:
         self.definition = TerraFinAgentDefinition(
             name=DEFAULT_HOSTED_AGENT_NAME,
             description="General market agent.",
@@ -364,14 +364,20 @@ class _FakeHostedLoop:
         self.runtime = _FakeHostedRuntime(self.definition)
         self.tool_adapter = _FakeHostedToolAdapter(self.tools)
         self._conversations: dict[str, TerraFinHostedConversation] = {}
+        runtime_model = {
+            "modelRef": "openai/gpt-4.1-mini",
+            "providerId": "openai",
+            "providerLabel": "OpenAI",
+            "modelId": "gpt-4.1-mini",
+            "metadata": {},
+        }
         self.model_client = SimpleNamespace(
-            describe_runtime_model=lambda session=None: {
-                "modelRef": "openai/gpt-4.1-mini",
-                "providerId": "openai",
-                "providerLabel": "OpenAI",
-                "modelId": "gpt-4.1-mini",
-                "metadata": {},
-            }
+            describe_runtime_model=lambda session=None: runtime_model,
+            describe_runtime_status=lambda session=None: {
+                "runtimeModel": runtime_model,
+                "configured": runtime_configured,
+                "message": runtime_setup_message,
+            },
         )
 
     def create_session(
@@ -616,6 +622,8 @@ def test_hosted_agent_runtime_routes(monkeypatch) -> None:
     assert catalog_payload["agents"][0]["name"] == DEFAULT_HOSTED_AGENT_NAME
     assert catalog_payload["agents"][0]["tools"][0]["name"] == "market_snapshot"
     assert catalog_payload["agents"][0]["runtimeModel"]["modelRef"] == "openai/gpt-4.1-mini"
+    assert catalog_payload["agents"][0]["runtimeConfigured"] is True
+    assert catalog_payload["agents"][0]["runtimeSetupMessage"] is None
 
     create_resp = client.post(
         "/agent/api/runtime/sessions",
@@ -730,6 +738,32 @@ def test_hosted_agent_runtime_routes(monkeypatch) -> None:
 
     deleted_session_resp = client.get("/agent/api/runtime/sessions/hosted:http-test")
     assert deleted_session_resp.status_code == 404
+
+
+def test_hosted_agent_runtime_routes_report_unconfigured_runtime(monkeypatch) -> None:
+    loop = _FakeHostedLoop(
+        runtime_configured=False,
+        runtime_setup_message="OPENAI_API_KEY is required for the hosted OpenAI agent runtime.",
+    )
+    client = _client(monkeypatch, hosted_loop=loop)
+
+    catalog = client.get("/agent/api/runtime/agents")
+    assert catalog.status_code == 200
+    payload = catalog.json()
+    assert payload["agents"][0]["runtimeConfigured"] is False
+    assert payload["agents"][0]["runtimeSetupMessage"] == (
+        "OPENAI_API_KEY is required for the hosted OpenAI agent runtime."
+    )
+
+    create_resp = client.post(
+        "/agent/api/runtime/sessions",
+        json={
+            "agentName": DEFAULT_HOSTED_AGENT_NAME,
+            "sessionId": "hosted:http-test",
+        },
+    )
+    assert create_resp.status_code == 503
+    assert create_resp.json()["error"]["code"] == "hosted_agent_not_configured"
 
 
 def test_agent_page_route_is_not_registered(monkeypatch) -> None:

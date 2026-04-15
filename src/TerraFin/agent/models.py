@@ -251,6 +251,8 @@ class HostedAgentDefinitionResponse(BaseModel):
     chartAccess: bool
     allowBackgroundTasks: bool
     runtimeModel: HostedRuntimeModelResponse | None = None
+    runtimeConfigured: bool = True
+    runtimeSetupMessage: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
     tools: list[HostedToolDefinitionResponse] = Field(default_factory=list)
 

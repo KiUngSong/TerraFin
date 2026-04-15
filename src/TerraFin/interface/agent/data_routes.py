@@ -277,6 +277,37 @@ def _resolve_model_client_runtime_model(loop: object, *, session: object | None 
     return _runtime_model_response(payload)
 
 
+def _resolve_model_client_runtime_status(
+    loop: object,
+    *,
+    session: object | None = None,
+) -> tuple[HostedRuntimeModelResponse | None, bool, str | None]:
+    describe = getattr(getattr(loop, "model_client", None), "describe_runtime_status", None)
+    if callable(describe):
+        try:
+            payload = describe(session=session)
+        except TypeError:
+            payload = describe()
+        runtime_model = _runtime_model_response((payload or {}).get("runtimeModel"))
+        configured = bool((payload or {}).get("configured", False))
+        message = (payload or {}).get("message")
+        return runtime_model, configured, None if message is None else str(message)
+    runtime_model = _resolve_model_client_runtime_model(loop, session=session)
+    return runtime_model, runtime_model is not None, None
+
+
+def _raise_if_hosted_runtime_unavailable(loop: object, *, session: object | None = None) -> None:
+    _runtime_model, configured, setup_message = _resolve_model_client_runtime_status(loop, session=session)
+    if configured:
+        return
+    raise AppRuntimeError(
+        setup_message or "A hosted model provider must be configured before TerraFin Agent can run.",
+        code="hosted_agent_not_configured",
+        status_code=503,
+        details={"feature": "hosted_agent_runtime"},
+    )
+
+
 def _session_response(
     record: TerraFinHostedSessionRecord,
     *,
@@ -351,6 +382,8 @@ def _run_response(
 
 
 def _raise_http_error(exc: Exception) -> None:
+    if isinstance(exc, AppRuntimeError):
+        raise exc
     if isinstance(exc, HTTPException):
         raise exc
     if isinstance(exc, TerraFinOpenAIConfigError):
@@ -425,7 +458,7 @@ def create_agent_data_router() -> APIRouter:
     def api_hosted_agent_catalog():
         try:
             loop = get_hosted_agent_loop()
-            default_runtime_model = _resolve_model_client_runtime_model(loop)
+            default_runtime_model, runtime_configured, runtime_setup_message = _resolve_model_client_runtime_status(loop)
             agents = []
             for definition in loop.runtime.list_agents():
                 agents.append(
@@ -438,6 +471,8 @@ def create_agent_data_router() -> APIRouter:
                         chartAccess=definition.chart_access,
                         allowBackgroundTasks=definition.allow_background_tasks,
                         runtimeModel=default_runtime_model,
+                        runtimeConfigured=runtime_configured,
+                        runtimeSetupMessage=runtime_setup_message,
                         metadata=dict(definition.metadata),
                         tools=[_tool_response(tool) for tool in loop.tool_adapter.list_tools_for_agent(definition.name)],
                     )
@@ -450,6 +485,7 @@ def create_agent_data_router() -> APIRouter:
     def api_hosted_agent_create_session(request: HostedAgentSessionCreateRequest):
         try:
             loop = get_hosted_agent_loop()
+            _raise_if_hosted_runtime_unavailable(loop)
             conversation = loop.create_session(
                 request.agentName,
                 session_id=request.sessionId,
@@ -549,6 +585,8 @@ def create_agent_data_router() -> APIRouter:
     def api_hosted_agent_submit_message(session_id: str, request: HostedAgentMessageRequest):
         try:
             loop = get_hosted_agent_loop()
+            record = loop.runtime.get_session_record(session_id)
+            _raise_if_hosted_runtime_unavailable(loop, session=record.context.session)
             run_result = loop.submit_user_message(session_id, request.content)
             record = loop.runtime.get_session_record(session_id)
             return _run_response(
