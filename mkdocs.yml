@@ -1,0 +1,106 @@
+site_name: TerraFin Docs
+site_description: Formal documentation for TerraFin's data layer, interface, analytics, and hosted agent runtime.
+repo_url: https://github.com/KiUngSong/TerraFin
+repo_name: KiUngSong/TerraFin
+edit_uri: edit/main/docs/
+docs_dir: docs
+site_dir: site
+exclude_docs: |
+  agent/README.md
+
+theme:
+  name: material
+  logo: assets/terrafin-mark.svg
+  favicon: assets/terrafin-mark.svg
+  font:
+    text: IBM Plex Sans
+    code: IBM Plex Mono
+  features:
+    - navigation.sections
+    - navigation.expand
+    - navigation.top
+    - navigation.indexes
+    - toc.follow
+    - search.highlight
+    - search.suggest
+    - content.code.copy
+    - content.action.edit
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: custom
+      accent: custom
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: custom
+      accent: custom
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+
+plugins:
+  - search
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - def_list
+  - footnotes
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.details
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.keys
+  - pymdownx.smartsymbols
+  - pymdownx.snippets
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+
+extra_css:
+  - stylesheets/extra.css
+
+extra_javascript:
+  - javascripts/header-home-link.js
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/KiUngSong/TerraFin
+    - icon: fontawesome/solid/book-open
+      link: https://github.com/KiUngSong/TerraFin/tree/main/docs
+
+nav:
+  - Home: index.md
+  - Getting Started:
+      - Overview: getting-started.md
+      - Configuration: configuration.md
+      - Deployment & Operations: deployment.md
+  - Product Guides:
+      - Interface Overview: interface.md
+      - API Reference: api-reference.md
+      - Examples & Workflows: examples.md
+  - Agent Docs:
+      - Overview: agent/index.md
+      - Usage: agent/usage.md
+      - Model Management: agent/models.md
+      - Architecture: agent/architecture.md
+      - Hosted Runtime: agent/hosted-runtime.md
+  - Reference:
+      - Data Layer: data-layer.md
+      - Analytics: analytics.md
+      - Analytics Notes: analytics-notes.md
+      - Caching: caching.md
+      - Chart Architecture: chart-architecture.md
+      - Feature Integration: feature-integration.md
+  - Development:
+      - Development Guide: development.md
+      - Notebooks: notebooks.md
+      - License & Data Rights: legal.md

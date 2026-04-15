@@ -14,8 +14,8 @@ The data layer lives under `src/TerraFin/data/`. Its job is to hide provider
 differences behind a small set of entry points and return predictable output
 shapes.
 
-For deployment and upstream data-usage responsibilities, see the `Important`
-notice in the project [README](../README.md).
+For deployment and upstream data-usage responsibilities, see
+[License & Data Rights](./legal.md).
 
 For most callers, the important pieces are:
 

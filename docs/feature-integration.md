@@ -280,7 +280,7 @@ When a feature becomes public, check each box deliberately.
 
 ### Skill and docs
 
-- `docs/agent-skill.md` updated if agent usage changed
+- `docs/agent/usage.md` updated if agent usage changed
 - `skills/terrafin/SKILL.md` updated if the skill should teach the new feature
 - `docs/interface.md`, `docs/data-layer.md`, `docs/chart-architecture.md`, or `docs/analytics.md` updated where appropriate
 - `README.md` updated if the feature changes the public product story
@@ -363,5 +363,7 @@ That separation keeps TerraFin fast to extend without creating duplicate logic p
 - [analytics.md](./analytics.md)
 - [interface.md](./interface.md)
 - [chart-architecture.md](./chart-architecture.md)
-- [agent-skill.md](./agent-skill.md)
-- [agent-runtime.md](./agent-runtime.md)
+- [agent/index.md](./agent/index.md)
+- [agent/usage.md](./agent/usage.md)
+- [agent/architecture.md](./agent/architecture.md)
+- [agent/hosted-runtime.md](./agent/hosted-runtime.md)

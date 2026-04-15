@@ -13,7 +13,7 @@ Read this file first when working inside the TerraFin repository.
 Start with:
 
 - [skills/terrafin/SKILL.md](./skills/terrafin/SKILL.md)
-- [docs/agent-skill.md](./docs/agent-skill.md)
+- [docs/agent/usage.md](./docs/agent/usage.md)
 
 Use these when the goal is to consume TerraFin through:
 
@@ -25,7 +25,8 @@ Use these when the goal is to consume TerraFin through:
 
 Start with:
 
-- [docs/agent-runtime.md](./docs/agent-runtime.md)
+- [docs/agent/hosted-runtime.md](./docs/agent/hosted-runtime.md)
+- [docs/agent/architecture.md](./docs/agent/architecture.md)
 
 Use this when changing:
 

@@ -37,7 +37,7 @@ client = TerraFinAgentClient()
 CLI:
 
 ```bash
-terrafin-agent snapshot AAPL --json
+terrafin-agent snapshot AAPL
 ```
 
 HTTP:
@@ -169,4 +169,4 @@ Task helpers are also exported from `TerraFin.agent`.
 - Indicator math matches TerraFin's chart indicators.
 - Charts are optional. Structured analysis should usually come first.
 
-For full details and examples, read `../../docs/agent-skill.md`.
+For full details and examples, read `../../docs/agent/usage.md`.

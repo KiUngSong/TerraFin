@@ -4,10 +4,10 @@
 interface for pulling financial data, normalizing it into chart-ready frames,
 running lightweight analytics, and serving browser-based views for research,
 educational, and agent-driven workflows.
+
 The public core is designed to stand on its own while still connecting cleanly
 to private-access extensions for deployment-specific data and operator-side
 workflows used in real deployments.
-
 
 ---
 
@@ -50,21 +50,25 @@ extensions without turning them into the default open-source path.
 | Data layer | Fetch market, economic, corporate, and private-access data through a single entry point |
 | Analytics | Compute technical indicators and run standalone valuation, options, portfolio, and simulation models |
 | Interface | Serve chart, dashboard, market insights, and calendar pages from one FastAPI app |
-| Agent runtime | Expose an agent client, CLI, reusable skill, and JSON API over the same optimized processing pipeline used by charts |
+| Agent harness | Expose a shared financial capability kernel, hosted runtime, transcript-first local session history, tool adapter, and conversation loop through Python, CLI, skills, and HTTP adapters |
 | Cache system | Keep provider data warm in memory and on disk with background refresh or lazy invalidation |
 
 ## Documentation Map
 
 | Doc | Read this when... |
 |-----|-------------------|
+| [docs/index.md](docs/index.md) | You want the main docs entrypoint and a quick route into setup, interface, agent, and reference guides |
 | [data-layer.md](docs/data-layer.md) | You need to fetch data, add a provider, or understand output types |
 | [interface.md](docs/interface.md) | You are running the server, calling APIs, or editing the UI |
 | [chart-architecture.md](docs/chart-architecture.md) | You need to understand chart sessions, progressive loading, notebook flow, or chart state management |
-| [agent-skill.md](docs/agent-skill.md) | You want to use TerraFin as an agent skill through Python, CLI, HTTP, or OpenAPI |
+| [agent/index.md](docs/agent/index.md) | You need the agent doc map and want the right entrypoint quickly |
+| [agent/usage.md](docs/agent/usage.md) | You want to use TerraFin through Python, CLI, HTTP, OpenAPI, or the hosted assistant widget |
+| [agent/models.md](docs/agent/models.md) | You want to list providers, save model auth, or switch the hosted runtime model from the CLI |
 | [feature-integration.md](docs/feature-integration.md) | You are adding a new feature and need to know which logic layer and public surfaces must be updated |
 | [analytics.md](docs/analytics.md) | You are using indicators or the standalone analysis modules |
 | [caching.md](docs/caching.md) | You are tuning refresh behavior or registering a cached source |
-| [agent-runtime.md](docs/agent-runtime.md) | You are maintaining the agent service, client, skill, or API contract |
+| [agent/architecture.md](docs/agent/architecture.md) | You are designing TerraFin's shared agent kernel and deciding how hosted and external modes should fit together |
+| [agent/hosted-runtime.md](docs/agent/hosted-runtime.md) | You are maintaining the current hosted runtime, tool loop, adapters, or widget |
 
 ## Install
 
@@ -118,6 +122,10 @@ Common runtime knobs:
 | `TERRAFIN_PRIVATE_SOURCE_*` | Optional authenticated private-source endpoint for dashboard and market-insights extras |
 | `TERRAFIN_MONGODB_URI` / `MONGODB_URI` | Optional MongoDB backend for writable watchlist mode |
 | `TERRAFIN_WATCHLIST_*` | Optional MongoDB collection and document overrides |
+| `TERRAFIN_AGENT_MODEL_REF` | Optional explicit hosted model ref in `provider/model` format |
+| `TERRAFIN_AGENT_MODELS_PATH` | Optional path for TerraFin's saved CLI model/auth state |
+| `TERRAFIN_AGENT_SESSION_DB_PATH` | Optional path for hosted task/approval/view-context state |
+| `TERRAFIN_AGENT_TRANSCRIPT_DIR` | Optional root for hosted transcript JSONL history |
 
 `import TerraFin` stays side-effect free. Explicit entrypoints such as
 `terrafin-agent` and `python src/TerraFin/interface/server.py ...` load `.env`
@@ -188,18 +196,51 @@ snapshot = agent.market_snapshot("AAPL")
 macro = agent.macro_focus("Nasdaq", depth="auto", view="weekly")
 ```
 
+Hosted runtime:
+
+```python
+from TerraFin.agent import TerraFinAgentClient
+
+agent = TerraFinAgentClient()
+session = agent.runtime_create_session("terrafin-assistant")
+run = agent.runtime_message(session["sessionId"], "Give me a compact AAPL market snapshot.")
+```
+
+Notebook/script helper:
+
+```python
+from TerraFin.agent import create_runtime_session
+
+session = create_runtime_session("terrafin-assistant")
+session.send("Compare the S&P 500 and Nasdaq.")
+session.display_notebook()
+```
+
 CLI:
 
 ```bash
-terrafin-agent snapshot AAPL --json
-terrafin-agent macro-focus "S&P 500" --view weekly --json
+terrafin-agent snapshot AAPL
+terrafin-agent macro-focus "S&P 500" --view weekly
+terrafin-agent runtime-create-session terrafin-assistant
+terrafin-agent models list --all
+terrafin-agent models auth login-github-copilot --set-default
 ```
 
+`login-github-copilot` uses a GitHub device-login flow by default and saves the
+result locally for later Copilot token exchange. Use `--token` in CI or other
+non-interactive shells.
+
+The model-management CLI and canonical `provider/model` refs were inspired by
+OpenClaw's provider UX. TerraFin's runtime binding, saved-state format, and
+hosted assistant integration are TerraFin-specific; see
+[docs/agent/models.md](docs/agent/models.md) for the attribution boundary.
+
 The client, CLI, and `/agent/api/*` routes all use the same optimized
-processing layer. For market and macro requests they return `processing`
+capability layer. For market and macro requests they return `processing`
 metadata that tells an agent whether the response is recent/progressive or
-already complete. See [docs/agent-skill.md](docs/agent-skill.md) and the shipped
-skill at [skills/terrafin/SKILL.md](skills/terrafin/SKILL.md).
+already complete. For the full agent docs, start with
+[docs/agent/README.md](docs/agent/README.md) and the shipped skill at
+[skills/terrafin/SKILL.md](skills/terrafin/SKILL.md).
 
 ### Run the interface
 
@@ -229,6 +270,10 @@ Default pages:
 | `http://127.0.0.1:8001/calendar` | Earnings and macro calendar |
 | `http://127.0.0.1:8001/stock/AAPL` | Stock Analysis example page |
 | `http://127.0.0.1:8001/watchlist` | Watchlist page |
+
+The hosted agent UI is a floating assistant widget that appears across the
+interface pages above. It uses the same `/agent/api/runtime/*` session surface
+as the Python helper, CLI, and external agent-facing HTTP routes.
 
 ### Frontend build policy
 
@@ -260,7 +305,7 @@ Testing and demo rule:
 |------|------------------|
 | `src/TerraFin/data/` | DataFactory, provider integrations, cache utilities, output types |
 | `src/TerraFin/analytics/` | Technical indicators and standalone analysis/simulation modules |
-| `src/TerraFin/agent/` | Shared agent processing layer, client, task helpers, and CLI |
+| `src/TerraFin/agent/` | Shared agent capability layer, kernel/runtime primitives, client, task helpers, and CLI |
 | `src/TerraFin/interface/` | FastAPI server, route handlers, session state, React frontend |
 | `skills/` | Reusable skill artifacts for external agents |
 | `tests/` | Automated pytest coverage for data, analytics, agent, and interface layers |

@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-label="TerraFin">
+  <defs>
+    <linearGradient id="bg" x1="0%" x2="100%" y1="0%" y2="100%">
+      <stop offset="0%" stop-color="#4f8768"/>
+      <stop offset="100%" stop-color="#2f5f49"/>
+    </linearGradient>
+    <linearGradient id="line" x1="0%" x2="100%" y1="0%" y2="0%">
+      <stop offset="0%" stop-color="#f4fff8"/>
+      <stop offset="100%" stop-color="#b8e8cb"/>
+    </linearGradient>
+  </defs>
+  <rect width="128" height="128" rx="28" fill="url(#bg)"/>
+  <path d="M18 84c15-3 25-18 36-18 8 0 12 8 19 8 11 0 15-19 37-29v47H18z" fill="#d9f2e4" opacity=".15"/>
+  <path d="M20 88h88" stroke="#e6f8ef" stroke-linecap="round" stroke-opacity=".46" stroke-width="6"/>
+  <path d="M28 78l18-14 13 9 15-23 12 8 16-20" fill="none" stroke="url(#line)" stroke-linecap="round" stroke-linejoin="round" stroke-width="8"/>
+  <circle cx="28" cy="78" r="5" fill="#fbfffd"/>
+  <circle cx="46" cy="64" r="5" fill="#fbfffd"/>
+  <circle cx="59" cy="73" r="5" fill="#fbfffd"/>
+  <circle cx="74" cy="50" r="5" fill="#fbfffd"/>
+  <circle cx="86" cy="58" r="5" fill="#fbfffd"/>
+  <circle cx="102" cy="38" r="5" fill="#fbfffd"/>
+</svg>

@@ -103,8 +103,8 @@ DCF is exposed through the product and API endpoints:
 - `GET /stock/api/dcf?ticker=...`
 - `GET /stock/api/reverse-dcf?ticker=...`
 
-Current DCF assumption notes now live next to the analytics code in
-[`analytics/analysis/README.md`](../src/TerraFin/analytics/analysis/README.md).
+Current DCF assumption notes now live in
+[Analytics Notes](./analytics-notes.md).
 
 ## Risk analysis
 
@@ -121,8 +121,8 @@ the stock DCF and reverse DCF fallback when provider beta is unavailable.
 Stock Analysis also exposes `GET /stock/api/beta-estimate?ticker=...` for the
 manual beta-compute action in the DCF workbenches.
 
-Beta-method and benchmark-mapping notes live in the same file:
-[`analytics/analysis/README.md`](../src/TerraFin/analytics/analysis/README.md).
+Beta-method and benchmark-mapping notes also live in
+[Analytics Notes](./analytics-notes.md).
 
 ## Options analysis
 
@@ -178,8 +178,8 @@ This is the quickest way to understand what is already connected to the product:
 Notebook demos live in `notebooks/analytics/`.
 They should stay as manual/exploratory notebooks, not `test_*.py` replacements.
 Each demo notebook should use the same explicit `configure()` bootstrap pattern
-described in the project [README](../README.md) and
-[interface.md](./interface.md) at the top of the first code cell.
+described in [Getting Started](./getting-started.md) and
+[Interface Overview](./interface.md) at the top of the first code cell.
 
 ## See also
 

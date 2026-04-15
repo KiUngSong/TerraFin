@@ -16,8 +16,8 @@ routes, and several API families. It lives under `src/TerraFin/interface/`.
 The key design choice is that interactive state is session-scoped. Unless a
 request says otherwise, TerraFin uses the `default` session.
 
-For deployment and upstream data-usage responsibilities, see the `Important`
-notice in the project [README](../README.md).
+For deployment and upstream data-usage responsibilities, see
+[License & Data Rights](./legal.md).
 
 ## Server
 
@@ -365,6 +365,18 @@ or the `terrafin-agent` CLI over calling raw routes directly.
 | `GET` | `/agent/api/macro-focus` | `name`, `depth`, `view` | Macro instrument summary plus series data |
 | `GET` | `/agent/api/lppl` | `name`, `depth`, `view` | LPPL bubble-confidence summary from the shared agent/chart processing pipeline |
 | `GET` | `/agent/api/calendar` | `year`, `month`, `categories`, `limit` | Calendar events with processing metadata |
+| `GET` | `/agent/api/runtime/agents` | - | Hosted runtime agent catalog plus exposed tools |
+| `POST` | `/agent/api/runtime/sessions` | body: `agentName`, optional `sessionId`, `systemPrompt`, `metadata` | Create a hosted runtime conversation session |
+| `GET` | `/agent/api/runtime/sessions` | - | List hosted sessions from the transcript-derived session index |
+| `GET` | `/agent/api/runtime/sessions/{session_id}` | - | Read hosted runtime session state, transcript-derived message history, and tools |
+| `DELETE` | `/agent/api/runtime/sessions/{session_id}` | - | Archive a hosted session transcript and remove it from active history |
+| `POST` | `/agent/api/runtime/sessions/{session_id}/messages` | body: `content` | Append a user turn and run the hosted model/tool loop |
+| `GET` | `/agent/api/runtime/sessions/{session_id}/approvals` | - | List approval requests for a hosted session |
+| `GET` | `/agent/api/runtime/tasks/{task_id}` | - | Read a hosted background task |
+| `POST` | `/agent/api/runtime/tasks/{task_id}/cancel` | - | Cancel a hosted background task |
+| `GET` | `/agent/api/runtime/approvals/{approval_id}` | - | Read one approval request |
+| `POST` | `/agent/api/runtime/approvals/{approval_id}/approve` | body: optional `note` | Approve a pending request |
+| `POST` | `/agent/api/runtime/approvals/{approval_id}/deny` | body: optional `note` | Deny a pending request |
 
 Time-series endpoints use `depth=auto|recent|full`.
 
@@ -375,6 +387,14 @@ LPPL route note:
 `/agent/api/lppl` uses TerraFin's calibrated default LPPL scan from the shared
 analytics helper. The full article-style 750→50 ladder is kept as a notebook /
 research option via `lppl(..., n_windows=None)` and is not exposed over HTTP.
+
+Runtime route note:
+`/agent/api/runtime/*` is the stateful hosted-agent family. It uses the same
+shared capability kernel as the Python client, CLI, and stateless
+`/agent/api/*` routes, but persists conversation history through append-only
+local transcripts plus a transcript-derived session index. Tasks, approvals,
+audit, and published view context remain in the hosted runtime store. Hosted
+model execution is provider-driven rather than OpenAI-only.
 
 Supported `view` values:
 

@@ -1,0 +1,110 @@
+---
+title: Deployment & Operations
+summary: Running TerraFin in local, demo, and operator-managed environments.
+---
+
+# Deployment & Operations
+
+This page is the operational companion to [Getting Started](getting-started.md).
+It focuses on running the interface safely and predictably.
+
+## Start Modes
+
+Run the interface from `src/TerraFin/interface/`.
+
+```bash
+python server.py run
+python server.py start
+python server.py stop
+python server.py status
+python server.py restart
+```
+
+| Command | Use when... |
+|---------|-------------|
+| `run` | You want a foreground dev server |
+| `start` | You want a simple background process on one machine |
+| `stop` | You need to stop the background process if it exists |
+| `status` | You are checking whether the PID-managed process is alive |
+| `restart` | You changed env vars or saved model credentials |
+
+## Health And Readiness
+
+These endpoints stay at the root even when `TERRAFIN_BASE_PATH` is set:
+
+| Path | Purpose |
+|------|---------|
+| `/health` | Liveness check |
+| `/ready` | Readiness check with cache-manager and private-data validation |
+
+Use `/ready` for orchestration and smoke checks when the deployment depends on
+private-access features or cache startup.
+
+## Base Paths
+
+`TERRAFIN_BASE_PATH` prefixes the feature routes, but not the health endpoints.
+
+Example:
+
+- `TERRAFIN_BASE_PATH=/terrafin`
+- page routes become `/terrafin/chart`, `/terrafin/dashboard`, and so on
+- `/health` and `/ready` remain unchanged
+
+## Public / Demo Mode
+
+TerraFin can run without private infrastructure.
+
+Recommended public-safe baseline:
+
+1. copy `.env.example` to `.env`
+2. leave `TERRAFIN_PRIVATE_SOURCE_*` unset
+3. optionally configure `FRED_API_KEY`
+4. set `TERRAFIN_SEC_USER_AGENT` if you want SEC-backed features
+
+In this mode:
+
+- public market and economic providers still work
+- private-only widgets fall back to bundled fixtures or empty defaults
+- writable watchlists stay disabled unless MongoDB is configured
+
+## Operator-Managed Mode
+
+Use operator-managed mode when you want:
+
+- private market-insight or dashboard data
+- writable watchlists
+- explicit hosted model/provider control
+- a deployment-specific auth and persistence boundary
+
+At minimum, define:
+
+- `TERRAFIN_PRIVATE_SOURCE_*` for the private endpoint
+- `TERRAFIN_MONGODB_URI` if you want watchlist writes
+- provider credentials or `terrafin-agent models ...` state for hosted agent use
+
+## Hosted Agent Operational Notes
+
+- Restart the server after changing saved model-manager state.
+- Sessions pin a resolved `provider/model` on creation, so new env changes do
+  not silently rewrite existing sessions.
+- GitHub Copilot login stores the GitHub token locally, then exchanges it for a
+  short-lived Copilot API token at runtime.
+
+## Formal Docs Hosting
+
+This repo now includes a formal docs site scaffold using MkDocs Material and a
+GitHub Pages workflow:
+
+- site config: `mkdocs.yml`
+- local preview: `mkdocs serve`
+- CI build/deploy: `.github/workflows/docs-pages.yml`
+
+That keeps the docs static-hostable on GitHub without depending on a separate
+publish repo or docs SaaS.
+
+## Related Docs
+
+- [Configuration](configuration.md)
+- [Interface Overview](interface.md)
+- [Agent Model Management](agent/models.md)
+- [License & Data Rights](legal.md)
