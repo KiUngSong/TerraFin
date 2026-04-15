@@ -1,15 +1,16 @@
 # TerraFin
 
-**TerraFin** — *terraform finance*. An agent-ready Python toolkit and FastAPI
-interface for pulling financial data, normalizing it into chart-ready frames,
-running lightweight analytics, and serving browser-based views for research,
-educational, and agent-driven workflows.
+**TerraFin** — *terraform finance*.
 
-The public core is designed to stand on its own while still connecting cleanly
-to private-access extensions for deployment-specific data and operator-side
-workflows used in real deployments.
+TerraFin is an agent-ready Python toolkit and FastAPI interface for
+financial research workflows.
 
----
+It combines:
+
+- market, macro, and filings data access
+- chart-first browser pages
+- DCF and research tooling
+- a hosted TerraFin Agent runtime for local personal use
 
 > [!IMPORTANT]
 > **TerraFin is MIT-licensed open-source software, and the MIT license applies to the software only.**
@@ -37,117 +38,25 @@ workflows used in real deployments.
 > accessible TerraFin demo. Access to that demo does not create any right to
 > upstream data. Nothing in this notice modifies the [LICENSE](LICENSE).
 
----
+## Docs
 
-## What TerraFin Includes
+- Formal docs site: <https://kiungsong.github.io/TerraFin/>
+- Getting started: <https://kiungsong.github.io/TerraFin/getting-started/>
+- Agent usage: <https://kiungsong.github.io/TerraFin/agent/usage/>
+- Interface guide: <https://kiungsong.github.io/TerraFin/interface/>
+- Hosted runtime details: <https://kiungsong.github.io/TerraFin/agent/hosted-runtime/>
 
-The table below describes the public core. Optional private-access support is
-part of that design so the same interfaces can connect to deployment-specific
-extensions without turning them into the default open-source path.
+Public demo:
 
-| Area | Purpose |
-|------|---------|
-| Data layer | Fetch market, economic, corporate, and private-access data through a single entry point |
-| Analytics | Compute technical indicators and run standalone valuation, options, portfolio, and simulation models |
-| Interface | Serve chart, dashboard, market insights, and calendar pages from one FastAPI app |
-| Agent harness | Expose a shared financial capability kernel, hosted runtime, transcript-first local session history, tool adapter, and conversation loop through Python, CLI, skills, and HTTP adapters |
-| Cache system | Keep provider data warm in memory and on disk with background refresh or lazy invalidation |
+- Hugging Face Space: <https://huggingface.co/spaces/sk851/TerraFin>
 
-## Documentation Map
+## Quickstart
 
-| Doc | Read this when... |
-|-----|-------------------|
-| [docs/index.md](docs/index.md) | You want the main docs entrypoint and a quick route into setup, interface, agent, and reference guides |
-| [data-layer.md](docs/data-layer.md) | You need to fetch data, add a provider, or understand output types |
-| [interface.md](docs/interface.md) | You are running the server, calling APIs, or editing the UI |
-| [chart-architecture.md](docs/chart-architecture.md) | You need to understand chart sessions, progressive loading, notebook flow, or chart state management |
-| [agent/index.md](docs/agent/index.md) | You need the agent doc map and want the right entrypoint quickly |
-| [agent/usage.md](docs/agent/usage.md) | You want to use TerraFin through Python, CLI, HTTP, OpenAPI, or the hosted assistant widget |
-| [agent/models.md](docs/agent/models.md) | You want to list providers, save model auth, or switch the hosted runtime model from the CLI |
-| [feature-integration.md](docs/feature-integration.md) | You are adding a new feature and need to know which logic layer and public surfaces must be updated |
-| [analytics.md](docs/analytics.md) | You are using indicators or the standalone analysis modules |
-| [caching.md](docs/caching.md) | You are tuning refresh behavior or registering a cached source |
-| [agent/architecture.md](docs/agent/architecture.md) | You are designing TerraFin's shared agent kernel and deciding how hosted and external modes should fit together |
-| [agent/hosted-runtime.md](docs/agent/hosted-runtime.md) | You are maintaining the current hosted runtime, tool loop, adapters, or widget |
-
-## Install
-
-### Prerequisites
+Prerequisite:
 
 - Python 3.11+
 
-### Core install
-
-```bash
-pip install .
-```
-
-### Editable install
-
-```bash
-pip install -e .
-```
-
-### Optional extras
-
-```bash
-pip install -e ".[dev]"
-pip install -e ".[db]"
-pip install -e ".[notebooks]"
-```
-
-## Feature Matrix
-
-| Feature area | Status | Notes |
-|--------------|--------|-------|
-| Market charts and stock pages | Works out of the box | Uses yfinance-backed market data |
-| Corporate financial statements | Works out of the box | Uses TerraFin's yfinance-backed fundamentals adapter |
-| Stock and index DCF tools | Works out of the box | No separate fundamentals API key required |
-| FRED economic series | Requires public API/config | Set `FRED_API_KEY` |
-| SEC EDGAR filings and guru 13F portfolios | Requires public API/config | Set `TERRAFIN_SEC_USER_AGENT` to a descriptive contact string |
-| Watchlist write mode | Requires operator-owned/private infrastructure | Configure MongoDB env vars |
-| Dashboard / market-insights private widgets | Requires operator-owned/private infrastructure | Optional private endpoint for proprietary extras |
-
-### Runtime setup
-
-Common runtime knobs:
-
-| Variable | Purpose |
-|----------|---------|
-| `FRED_API_KEY` | Enable FRED-backed economic series |
-| `TERRAFIN_SEC_USER_AGENT` | Enable SEC EDGAR filings and guru 13F access |
-| `TERRAFIN_HOST` / `TERRAFIN_PORT` | Bind address for the FastAPI server |
-| `TERRAFIN_BASE_PATH` | Optional prefix for feature routes |
-| `TERRAFIN_CACHE_TIMEZONE` | IANA timezone for cache/date-bound scheduling |
-| `TERRAFIN_PRIVATE_SOURCE_*` | Optional authenticated private-source endpoint for dashboard and market-insights extras |
-| `TERRAFIN_MONGODB_URI` / `MONGODB_URI` | Optional MongoDB backend for writable watchlist mode |
-| `TERRAFIN_WATCHLIST_*` | Optional MongoDB collection and document overrides |
-| `TERRAFIN_AGENT_MODEL_REF` | Optional explicit hosted model ref in `provider/model` format |
-| `TERRAFIN_AGENT_MODELS_PATH` | Optional path for TerraFin's saved CLI model/auth state |
-| `TERRAFIN_AGENT_SESSION_DB_PATH` | Optional path for hosted task/approval/view-context state |
-| `TERRAFIN_AGENT_TRANSCRIPT_DIR` | Optional root for hosted transcript JSONL history |
-
-`import TerraFin` stays side-effect free. Explicit entrypoints such as
-`terrafin-agent` and `python src/TerraFin/interface/server.py ...` load `.env`
-themselves. For notebooks and scripts, call `configure()` once at startup:
-
-```python
-from TerraFin import configure
-
-configure()
-```
-
-For explicit dotenv paths, lazy-load behavior, or typed config inspection, see
-[docs/interface.md](docs/interface.md). Private-source behavior lives in
-[docs/data-layer.md](docs/data-layer.md), and cache policy details live in
-[docs/caching.md](docs/caching.md).
-
-### Public/demo mode
-
-TerraFin can run without private infrastructure. Copy `.env.example` to `.env`,
-leave the private-access variables empty, and start the server. Public providers
-still work, and private-only widgets fall back to bundled public-safe fixtures
-or empty defaults.
+Install and run:
 
 ```bash
 cp .env.example .env
@@ -156,47 +65,28 @@ cd src/TerraFin/interface
 python server.py run
 ```
 
-Private access remains optional. When `TERRAFIN_PRIVATE_SOURCE_*` is configured,
-TerraFin will use the authenticated endpoint for dashboard and market-insight
-data. Otherwise it stays on public sources and bundled fallbacks.
+Useful optional env vars:
 
-## Quickstart
+| Variable | Use |
+|----------|-----|
+| `FRED_API_KEY` | Enable FRED-backed economic data |
+| `TERRAFIN_SEC_USER_AGENT` | Enable SEC EDGAR filings and guru 13F access |
+| `TERRAFIN_AGENT_MODEL_REF` | Choose the hosted model in `provider/model` format |
+| `OPENAI_API_KEY` / `GEMINI_API_KEY` / `COPILOT_GITHUB_TOKEN` | Provider credentials for TerraFin Agent |
 
-### Use TerraFin from Python
+## Quick Examples
+
+Python:
 
 ```python
 from TerraFin.data import DataFactory
 
 data = DataFactory()
-
 spy = data.get("S&P 500")
-aapl = data.get("AAPL")
-vix = data.get("VIX")
-
 unrate = data.get_fred_data("UNRATE")
-income = data.get_corporate_data("AAPL", "income", "annual")
-portfolio = data.get_portfolio_data("Warren Buffett")
 ```
 
-`get_corporate_data(...)` uses TerraFin's yfinance-backed statement adapter, so
-it does not require a separate fundamentals API key.
-
-`get_portfolio_data(...)` and other SEC EDGAR helpers require
-`TERRAFIN_SEC_USER_AGENT` to be set.
-
-### Use TerraFin as an agent skill
-
-Python client:
-
-```python
-from TerraFin.agent import TerraFinAgentClient
-
-agent = TerraFinAgentClient()
-snapshot = agent.market_snapshot("AAPL")
-macro = agent.macro_focus("Nasdaq", depth="auto", view="weekly")
-```
-
-Hosted runtime:
+Hosted agent:
 
 ```python
 from TerraFin.agent import TerraFinAgentClient
@@ -206,82 +96,35 @@ session = agent.runtime_create_session("terrafin-assistant")
 run = agent.runtime_message(session["sessionId"], "Give me a compact AAPL market snapshot.")
 ```
 
-Notebook/script helper:
-
-```python
-from TerraFin.agent import create_runtime_session
-
-session = create_runtime_session("terrafin-assistant")
-session.send("Compare the S&P 500 and Nasdaq.")
-session.display_notebook()
-```
-
 CLI:
 
 ```bash
 terrafin-agent snapshot AAPL
-terrafin-agent macro-focus "S&P 500" --view weekly
-terrafin-agent runtime-create-session terrafin-assistant
 terrafin-agent models list --all
 terrafin-agent models auth login-github-copilot --set-default
 ```
 
-`login-github-copilot` uses a GitHub device-login flow by default and saves the
-result locally for later Copilot token exchange. Use `--token` in CI or other
-non-interactive shells.
+## TerraFin Agent
 
-The model-management CLI and canonical `provider/model` refs were inspired by
-OpenClaw's provider UX. TerraFin's runtime binding, saved-state format, and
-hosted assistant integration are TerraFin-specific; see
-[docs/agent/models.md](docs/agent/models.md) for the attribution boundary.
+The browser UI is exposed through the floating **TerraFin Agent** panel on the
+main interface pages.
 
-The client, CLI, and `/agent/api/*` routes all use the same optimized
-capability layer. For market and macro requests they return `processing`
-metadata that tells an agent whether the response is recent/progressive or
-already complete. For the full agent docs, start with
-[docs/agent/README.md](docs/agent/README.md) and the shipped skill at
-[skills/terrafin/SKILL.md](skills/terrafin/SKILL.md).
+If the deployment does not have a valid hosted model configured, the widget
+stays in warning/info mode:
 
-### Run the interface
+- it shows setup guidance
+- it does not create a session
+- it does not accept chat input until provider credentials are valid
 
-Run the server from `src/TerraFin/interface/`:
+Model management follows canonical `provider/model` refs such as
+`openai/gpt-4.1-mini`, `google/gemini-3.1-pro-preview`, or
+`github-copilot/gpt-4o`.
 
-```bash
-python server.py run
-```
-
-Useful commands:
-
-| Command | Description |
-|---------|-------------|
-| `python server.py run` | Run in the foreground |
-| `python server.py start` | Start in the background |
-| `python server.py stop` | Stop the background process |
-| `python server.py status` | Show whether the server is running |
-| `python server.py restart` | Restart the background process |
-
-Default pages:
-
-| URL | Page |
-|-----|------|
-| `http://127.0.0.1:8001/chart` | Interactive chart |
-| `http://127.0.0.1:8001/dashboard` | Watchlist, breadth, cache status |
-| `http://127.0.0.1:8001/market-insights` | Regime summary and guru portfolios |
-| `http://127.0.0.1:8001/calendar` | Earnings and macro calendar |
-| `http://127.0.0.1:8001/stock/AAPL` | Stock Analysis example page |
-| `http://127.0.0.1:8001/watchlist` | Watchlist page |
-
-The hosted agent UI is a floating assistant widget that appears across the
-interface pages above. It uses the same `/agent/api/runtime/*` session surface
-as the Python helper, CLI, and external agent-facing HTTP routes.
-
-### Frontend build policy
-
-The generated frontend assets under
-`src/TerraFin/interface/frontend/build/` are committed on purpose so the server
-can run without a Node.js install at runtime. If you change frontend source
-files, rebuild the app and commit the refreshed build output together with the
-source change.
+The CLI model-management UX was inspired by OpenClaw. TerraFin's runtime
+binding, saved-state format, hosted session model, and widget integration are
+TerraFin-specific. See
+<https://kiungsong.github.io/TerraFin/agent/models/> for the explicit
+attribution boundary.
 
 ## Development
 
@@ -292,22 +135,17 @@ ruff check src tests
 ruff format --check src tests
 ```
 
-Testing and demo rule:
+Frontend note:
 
-- keep automated regression coverage in `tests/` as `test_*.py`
-- keep manual or exploratory notebooks in `notebooks/`
-- do not place `.ipynb` files under `tests/`
-- do not name manual notebooks with a misleading `test_` prefix
+- `src/TerraFin/interface/frontend/build/` is committed on purpose
+- if you change frontend source, rebuild and commit the generated assets too
 
-## Project Layout
+## License And Data Rights
 
-| Path | What lives there |
-|------|------------------|
-| `src/TerraFin/data/` | DataFactory, provider integrations, cache utilities, output types |
-| `src/TerraFin/analytics/` | Technical indicators and standalone analysis/simulation modules |
-| `src/TerraFin/agent/` | Shared agent capability layer, kernel/runtime primitives, client, task helpers, and CLI |
-| `src/TerraFin/interface/` | FastAPI server, route handlers, session state, React frontend |
-| `skills/` | Reusable skill artifacts for external agents |
-| `tests/` | Automated pytest coverage for data, analytics, agent, and interface layers |
-| `notebooks/` | Human-guided demos and manual exploration notebooks |
-| `docs/` | Module-level documentation |
+TerraFin is MIT-licensed open-source software, but the MIT license applies to
+the software only. It does not grant rights to upstream market data, filings,
+content, trademarks, or services accessed through this project.
+
+Operator-managed deployments remain responsible for the sources they enable and
+their own compliance/privacy posture. For the full notice, read
+<https://kiungsong.github.io/TerraFin/legal/> and [LICENSE](LICENSE).
