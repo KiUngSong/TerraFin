@@ -105,6 +105,14 @@ interface HostedRunResponse {
   toolResults: HostedToolResult[];
 }
 
+type SendStatusState =
+  | {
+      kind: 'working' | 'error';
+      content: string;
+      createdAt: string;
+    }
+  | null;
+
 interface HostedSessionSummary {
   sessionId: string;
   agentName: string;
@@ -134,6 +142,9 @@ interface HostedTaskListResponse {
 }
 
 const REQUEST_TIMEOUT_MS = 12000;
+const SEND_REQUEST_TIMEOUT_MS = 45000;
+const SEND_RECONCILE_POLL_MS = 1500;
+const SEND_RECONCILE_WINDOW_MS = 8000;
 const TASK_POLL_INTERVAL_MS = 1500;
 const MODEL_REFRESH_INTERVAL_MS = 60000;
 const CATALOG_STALE_MS = 60000;
@@ -230,6 +241,16 @@ const roleLabel = (message: HostedConversationMessage) => {
   return 'System';
 };
 
+const buildEphemeralMessage = (
+  role: HostedConversationMessage['role'],
+  content: string,
+  createdAt: string = new Date().toISOString()
+): HostedConversationMessage => ({
+  role,
+  content,
+  createdAt,
+});
+
 const truncateText = (text: string | null | undefined, limit = 88) => {
   const compact = (text || '').replace(/\s+/g, ' ').trim();
   if (!compact) {
@@ -264,6 +285,30 @@ const formatSessionTimestamp = (value: string | null | undefined) => {
 const runtimeModelRef = (runtimeModel: HostedRuntimeModel | null | undefined) =>
   typeof runtimeModel?.modelRef === 'string' ? runtimeModel.modelRef : '';
 
+const agentFingerprint = (agent: HostedAgentDefinition) =>
+  [
+    agent.name,
+    agent.description,
+    runtimeModelRef(agent.runtimeModel),
+    agent.runtimeConfigured === false ? 'not-configured' : 'configured',
+    agent.runtimeSetupMessage || '',
+    agent.tools
+      .map((tool) => `${tool.name}:${tool.executionMode}:${tool.capabilityName}`)
+      .join('|'),
+  ].join('::');
+
+const sameAgents = (left: HostedAgentDefinition[] = [], right: HostedAgentDefinition[] = []) => {
+  if (left.length !== right.length) {
+    return false;
+  }
+  for (let index = 0; index < left.length; index += 1) {
+    if (agentFingerprint(left[index]) !== agentFingerprint(right[index])) {
+      return false;
+    }
+  }
+  return true;
+};
+
 const readStoredActiveSessionId = () => {
   try {
     return window.localStorage.getItem(ACTIVE_SESSION_STORAGE_KEY);
@@ -287,6 +332,64 @@ const writeStoredActiveSessionId = (sessionId: string | null) => {
 const TERMINAL_TASK_STATUSES = new Set(['completed', 'failed', 'cancelled']);
 
 const isTerminalTaskStatus = (status: string) => TERMINAL_TASK_STATUSES.has(status);
+
+const taskFingerprint = (task: HostedTask) =>
+  [
+    task.taskId,
+    task.status,
+    task.error || '',
+    JSON.stringify(task.progress || {}),
+    JSON.stringify(task.result || {}),
+  ].join('::');
+
+const sameTaskLists = (left: HostedTask[] = [], right: HostedTask[] = []) => {
+  if (left.length !== right.length) {
+    return false;
+  }
+  for (let index = 0; index < left.length; index += 1) {
+    if (taskFingerprint(left[index]) !== taskFingerprint(right[index])) {
+      return false;
+    }
+  }
+  return true;
+};
+
+const syncToolResultsWithTasks = (
+  currentResults: HostedToolResult[],
+  nextTasks: HostedTask[]
+) => {
+  if (currentResults.length === 0) {
+    return currentResults;
+  }
+  const tasksById = new Map(nextTasks.map((task) => [task.taskId, task]));
+  let changed = false;
+  const nextResults = currentResults.map((result) => {
+    const taskId = result.task?.taskId;
+    if (!taskId) {
+      return result;
+    }
+    const updatedTask = tasksById.get(taskId);
+    if (!updatedTask) {
+      return result;
+    }
+    if (
+      result.task?.status === updatedTask.status &&
+      result.task?.description === updatedTask.description
+    ) {
+      return result;
+    }
+    changed = true;
+    return {
+      ...result,
+      task: {
+        taskId: updatedTask.taskId,
+        status: updatedTask.status,
+        description: updatedTask.description,
+      },
+    };
+  });
+  return changed ? nextResults : currentResults;
+};
 
 const formatTaskLabel = (task: HostedTask) => {
   const target = task.result?.ticker || task.inputPayload?.name || task.inputPayload?.ticker;
@@ -344,9 +447,14 @@ const parseRuntimeError = (payload: unknown, fallback: string): string => {
   return fallback;
 };
 
-const fetchRuntimeJson = async <T,>(url: string, options: RequestInit = {}, timeoutLabel: string): Promise<T> => {
+const fetchRuntimeJson = async <T,>(
+  url: string,
+  options: RequestInit = {},
+  timeoutLabel: string,
+  timeoutMs: number = REQUEST_TIMEOUT_MS
+): Promise<T> => {
   const controller = new AbortController();
-  const timeoutId = window.setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  const timeoutId = window.setTimeout(() => controller.abort(), timeoutMs);
   try {
     const response = await fetch(url, {
       ...options,
@@ -375,6 +483,11 @@ const fetchRuntimeJson = async <T,>(url: string, options: RequestInit = {}, time
   }
 };
 
+const delay = (ms: number) =>
+  new Promise<void>((resolve) => {
+    window.setTimeout(resolve, ms);
+  });
+
 const GlobalAgentWidget: React.FC = () => {
   const [isOpen, setIsOpen] = useState(false);
   const [agents, setAgents] = useState<HostedAgentDefinition[]>([]);
@@ -394,6 +507,8 @@ const GlobalAgentWidget: React.FC = () => {
   const [creatingSession, setCreatingSession] = useState(false);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [pendingMessages, setPendingMessages] = useState<HostedConversationMessage[]>([]);
+  const [sendStatus, setSendStatus] = useState<SendStatusState>(null);
   const transcriptRef = useRef<HTMLDivElement | null>(null);
   const promptMenuRef = useRef<HTMLDivElement | null>(null);
   const wasOpenRef = useRef(false);
@@ -422,13 +537,17 @@ const GlobalAgentWidget: React.FC = () => {
     () => (activeSession?.messages || []).filter((message) => message.role !== 'system' && message.role !== 'tool'),
     [activeSession]
   );
+  const displayedMessages = useMemo(
+    () => mergeMessages(visibleMessages, pendingMessages),
+    [pendingMessages, visibleMessages]
+  );
   const visibleMessageEntries = useMemo(
     () =>
-      visibleMessages.map((message, index) => ({
+      displayedMessages.map((message, index) => ({
         key: `${messageFingerprint(message)}::${index}`,
         message,
       })),
-    [visibleMessages]
+    [displayedMessages]
   );
   const orderedTasks = useMemo(() => {
     const tasks = activeSession?.tasks || [];
@@ -499,18 +618,24 @@ const GlobalAgentWidget: React.FC = () => {
     setShowPromptSuggestions(false);
   }, []);
 
+  const fetchSessionPayload = useCallback(async (sessionId: string) => {
+    return fetchRuntimeJson<HostedAgentSession>(
+      `/agent/api/runtime/sessions/${encodeURIComponent(sessionId)}`,
+      {},
+      'Loading saved session'
+    );
+  }, []);
+
   const loadSessionRecord = useCallback(
     async (sessionId: string, options: { pinnedByHistory?: boolean } = {}) => {
       setLoadingSessionId(sessionId);
       try {
-        const payload = await fetchRuntimeJson<HostedAgentSession>(
-          `/agent/api/runtime/sessions/${encodeURIComponent(sessionId)}`,
-          {},
-          'Loading saved session'
-        );
+        const payload = await fetchSessionPayload(sessionId);
         setSession(payload);
         setHistoryPinnedSession(Boolean(options.pinnedByHistory));
         setToolResults([]);
+        setPendingMessages([]);
+        setSendStatus(null);
         setError(null);
         writeStoredActiveSessionId(payload.sessionId);
         return payload;
@@ -525,7 +650,7 @@ const GlobalAgentWidget: React.FC = () => {
         setLoadingSessionId((current) => (current === sessionId ? null : current));
       }
     },
-    []
+    [fetchSessionPayload]
   );
 
   const loadSessionHistory = useCallback(
@@ -620,7 +745,7 @@ const GlobalAgentWidget: React.FC = () => {
         );
         const nextAgents = payload.agents || [];
         lastCatalogLoadedAtRef.current = Date.now();
-        setAgents(nextAgents);
+        setAgents((current) => (sameAgents(current, nextAgents) ? current : nextAgents));
         setError(
           nextAgents.length === 0
             ? LOCAL_SETUP_MESSAGE
@@ -680,6 +805,8 @@ const GlobalAgentWidget: React.FC = () => {
     setSession(null);
     setHistoryPinnedSession(false);
     setToolResults([]);
+    setPendingMessages([]);
+    setSendStatus(null);
     setActiveDrawer(null);
     setShowPromptSuggestions(false);
     writeStoredActiveSessionId(null);
@@ -715,6 +842,8 @@ const GlobalAgentWidget: React.FC = () => {
         setSession(null);
         setHistoryPinnedSession(false);
         setToolResults([]);
+        setPendingMessages([]);
+        setSendStatus(null);
         writeStoredActiveSessionId(null);
       }
     })();
@@ -743,7 +872,7 @@ const GlobalAgentWidget: React.FC = () => {
       return;
     }
     transcriptRef.current.scrollTop = transcriptRef.current.scrollHeight;
-  }, [isOpen, visibleMessages]);
+  }, [isOpen, sendStatus, visibleMessageEntries]);
 
   useEffect(() => {
     if (!showPromptSuggestions) {
@@ -800,8 +929,13 @@ const GlobalAgentWidget: React.FC = () => {
           if (!current || current.sessionId !== activeSessionId) {
             return current;
           }
-          return { ...current, tasks: payload.tasks || [] };
+          const nextTasks = payload.tasks || [];
+          if (sameTaskLists(current.tasks || [], nextTasks)) {
+            return current;
+          }
+          return { ...current, tasks: nextTasks };
         });
+        setToolResults((current) => syncToolResultsWithTasks(current, payload.tasks || []));
       } catch {
         // Keep the current UI state if background polling fails transiently.
       }
@@ -838,13 +972,16 @@ const GlobalAgentWidget: React.FC = () => {
     }
     setSession(null);
     setToolResults([]);
+    setPendingMessages([]);
+    setSendStatus(null);
     setActiveDrawer(null);
     setShowPromptSuggestions(false);
     setHistoryPinnedSession(false);
     writeStoredActiveSessionId(null);
   }, [activeSession, defaultRuntimeModel, historyPinnedSession, isOpen]);
 
-  const ensureSession = async () => {
+  const ensureSession = async (options: { preserveTransientState?: boolean } = {}) => {
+    const { preserveTransientState = false } = options;
     const existing = session;
     if (existing) {
       return existing;
@@ -873,6 +1010,10 @@ const GlobalAgentWidget: React.FC = () => {
       setSession(payload);
       setHistoryPinnedSession(false);
       setToolResults([]);
+      if (!preserveTransientState) {
+        setPendingMessages([]);
+        setSendStatus(null);
+      }
       setError(null);
       writeStoredActiveSessionId(payload.sessionId);
       return payload;
@@ -884,19 +1025,65 @@ const GlobalAgentWidget: React.FC = () => {
     }
   };
 
+  const reconcileTimedOutSend = useCallback(
+    async (sessionId: string, baselineVisibleCount: number) => {
+      const deadline = Date.now() + SEND_RECONCILE_WINDOW_MS;
+      let latestPayload: HostedAgentSession | null = null;
+      while (Date.now() < deadline) {
+        try {
+          const payload = await fetchSessionPayload(sessionId);
+          latestPayload = payload;
+          const nextVisibleMessages = payload.messages.filter(
+            (message) => message.role !== 'system' && message.role !== 'tool'
+          );
+          const newVisibleMessages = nextVisibleMessages.slice(baselineVisibleCount);
+          setSession(payload);
+          writeStoredActiveSessionId(payload.sessionId);
+          setPendingMessages([]);
+          if (newVisibleMessages.some((message) => message.role === 'assistant')) {
+            setSendStatus(null);
+            return true;
+          }
+        } catch {
+          // Best effort reconciliation only.
+        }
+        await delay(SEND_RECONCILE_POLL_MS);
+      }
+      if (latestPayload) {
+        setSession(latestPayload);
+        writeStoredActiveSessionId(latestPayload.sessionId);
+      }
+      setPendingMessages([]);
+      return false;
+    },
+    [fetchSessionPayload]
+  );
+
   const handleSend = async (content: string) => {
-    if (!currentAgent || !content.trim()) {
+    const trimmedContent = content.trim();
+    if (!currentAgent || !trimmedContent) {
       return;
     }
     if (!chatAvailable) {
       setError(runtimeSetupMessage);
       return;
     }
+    const optimisticCreatedAt = new Date().toISOString();
     setSending(true);
     setError(null);
+    setDraft('');
+    setPendingMessages([buildEphemeralMessage('user', trimmedContent, optimisticCreatedAt)]);
+    setSendStatus({
+      kind: 'working',
+      content: 'Thinking…',
+      createdAt: new Date(Date.now() + 1).toISOString(),
+    });
+    const baselineVisibleCount = visibleMessages.length;
     try {
-      const session = activeSession ?? (await ensureSession());
+      const session = activeSession ?? (await ensureSession({ preserveTransientState: true }));
       if (!session) {
+        setPendingMessages([]);
+        setSendStatus(null);
         return;
       }
       const run = (await fetchRuntimeJson<HostedRunResponse>(
@@ -904,9 +1091,10 @@ const GlobalAgentWidget: React.FC = () => {
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ content }),
+          body: JSON.stringify({ content: trimmedContent }),
         },
-        'Running assistant request'
+        'Running assistant request',
+        SEND_REQUEST_TIMEOUT_MS
       )) as HostedRunResponse;
       const nextSession = mergeSessionFromRun(session, run);
       const previousMessageCount = session.messages.length;
@@ -916,7 +1104,8 @@ const GlobalAgentWidget: React.FC = () => {
       setSession(nextSession);
       writeStoredActiveSessionId(nextSession.sessionId);
       setToolResults(run.toolResults || []);
-      setDraft('');
+      setPendingMessages([]);
+      setSendStatus(null);
       setShowPromptSuggestions(false);
       if (
         !run.finalMessage &&
@@ -926,11 +1115,56 @@ const GlobalAgentWidget: React.FC = () => {
         setError(`${AGENT_UI_NAME} did not return a visible reply. Please try again.`);
       }
     } catch (payload) {
-      setError(parseRuntimeError(payload, 'Failed to run the hosted TerraFin agent.'));
+      const parsedMessage = parseRuntimeError(payload, 'Failed to run the hosted TerraFin agent.');
+      const timedOut = /timed out/i.test(parsedMessage);
+      if (timedOut) {
+        const sessionId = activeSession?.sessionId || readStoredActiveSessionId();
+        if (sessionId) {
+          setSendStatus({
+            kind: 'working',
+            content: 'Still waiting for the assistant…',
+            createdAt: new Date(Date.now() + 2).toISOString(),
+          });
+          const reconciled = await reconcileTimedOutSend(sessionId, baselineVisibleCount);
+          if (reconciled) {
+            return;
+          }
+        } else {
+          setPendingMessages([]);
+        }
+      }
+      const displayMessage = timedOut
+        ? 'The assistant is taking longer than expected. Check this chat again in a moment.'
+        : parsedMessage;
+      if (displayMessage === LOCAL_SETUP_MESSAGE || displayMessage === runtimeSetupMessage) {
+        setPendingMessages([]);
+        setSendStatus(null);
+        setError(displayMessage);
+      } else {
+        setSendStatus({
+          kind: 'error',
+          content: displayMessage,
+          createdAt: new Date(Date.now() + 2).toISOString(),
+        });
+      }
     } finally {
       setSending(false);
     }
   };
+
+  const handleComposerKeyDown = useCallback(
+    (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
+      if (event.key !== 'Enter' || event.shiftKey || event.nativeEvent.isComposing) {
+        return;
+      }
+      if (!chatAvailable || sending || creatingSession || loadingCatalog || !draft.trim()) {
+        return;
+      }
+      event.preventDefault();
+      void handleSend(draft);
+    },
+    [chatAvailable, creatingSession, draft, loadingCatalog, sending]
+  );
 
   const handleClear = () => {
     setDraft('');
@@ -938,6 +1172,8 @@ const GlobalAgentWidget: React.FC = () => {
     setSession(null);
     setHistoryPinnedSession(false);
     setToolResults([]);
+    setPendingMessages([]);
+    setSendStatus(null);
     setActiveDrawer(null);
     setShowPromptSuggestions(false);
     writeStoredActiveSessionId(null);
@@ -969,6 +1205,8 @@ const GlobalAgentWidget: React.FC = () => {
           setSession(null);
           setHistoryPinnedSession(false);
           setToolResults([]);
+          setPendingMessages([]);
+          setSendStatus(null);
           setDraft('');
           writeStoredActiveSessionId(null);
         }
@@ -1350,19 +1588,27 @@ const GlobalAgentWidget: React.FC = () => {
             <div
               ref={transcriptRef}
               className={`tf-agent-transcript tf-agent-transcript--widget ${
-                visibleMessages.length > 0 ? 'tf-agent-transcript--live' : 'tf-agent-transcript--idle'
+                visibleMessageEntries.length > 0 || sendStatus
+                  ? 'tf-agent-transcript--live'
+                  : 'tf-agent-transcript--idle'
               }`}
             >
-              {sending ? (
-                <div className="tf-agent-widget__activity">
-                  <div className="tf-agent-widget__activity-spinner" aria-hidden="true" />
-                  <div className="tf-agent-widget__activity-copy">Working on your request...</div>
-                </div>
-              ) : null}
               {visibleMessageEntries.map(({ key, message }) => (
                 <AgentMessageItem key={key} message={message} messageKey={key} />
               ))}
-              {visibleMessages.length === 0 && loadingCatalog ? (
+              {sendStatus ? (
+                <div
+                  className={`tf-agent-message tf-agent-message--assistant tf-agent-message--status tf-agent-message--status-${sendStatus.kind}`}
+                >
+                  <div className="tf-agent-message__status">
+                    {sendStatus.kind === 'working' ? (
+                      <span className="tf-agent-message__status-spinner" aria-hidden="true" />
+                    ) : null}
+                    <span className="tf-agent-message__status-copy">{sendStatus.content}</span>
+                  </div>
+                </div>
+              ) : null}
+              {visibleMessageEntries.length === 0 && !sendStatus && loadingCatalog ? (
                 <div className="tf-agent-widget__placeholder">
                   <div className="tf-agent-widget__placeholder-spinner" aria-hidden="true" />
                   <div className="tf-agent-widget__placeholder-title">Warming up {AGENT_UI_NAME}</div>
@@ -1373,7 +1619,7 @@ const GlobalAgentWidget: React.FC = () => {
                   </div>
                 </div>
               ) : null}
-              {visibleMessages.length === 0 && creatingSession ? (
+              {visibleMessageEntries.length === 0 && !sendStatus && creatingSession ? (
                 <div className="tf-agent-widget__placeholder">
                   <div className="tf-agent-widget__placeholder-spinner" aria-hidden="true" />
                   <div className="tf-agent-widget__placeholder-title">Starting a conversation</div>
@@ -1382,7 +1628,7 @@ const GlobalAgentWidget: React.FC = () => {
                   </div>
                 </div>
               ) : null}
-              {visibleMessages.length === 0 && !loadingCatalog && !creatingSession && !sending ? (
+              {visibleMessageEntries.length === 0 && !sendStatus && !loadingCatalog && !creatingSession && !sending ? (
                 <div className="tf-agent-widget__placeholder">
                   <div className="tf-agent-widget__placeholder-title">
                     {chatAvailable
@@ -1420,6 +1666,7 @@ const GlobalAgentWidget: React.FC = () => {
               <textarea
                 value={draft}
                 onChange={(event) => setDraft(event.target.value)}
+                onKeyDown={handleComposerKeyDown}
                 placeholder={
                   chatAvailable
                     ? 'Ask about a stock, portfolio, DCF, chart, or macro setup.'
