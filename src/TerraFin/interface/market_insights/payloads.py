@@ -21,6 +21,20 @@ _MACRO_NAME_ALIASES = {
     "s&p500": "S&P 500",
     "s&p 500 index": "S&P 500",
     "nikkei": "Nikkei 225",
+    "fed funds rate": "Federal Funds Effective Rate",
+    "federal funds rate": "Federal Funds Effective Rate",
+    "effective fed funds rate": "Federal Funds Effective Rate",
+    "m2 money supply": "M2",
+    "m2 money stock": "M2",
+    "federal reserve balance sheet": "SOMA",
+    "us federal reserve balance sheet": "SOMA",
+    "fed balance sheet": "SOMA",
+    "10 year treasury yield": "Treasury-10Y",
+    "10-year treasury yield": "Treasury-10Y",
+    "10y treasury yield": "Treasury-10Y",
+    "2 year treasury yield": "Treasury-2Y",
+    "2-year treasury yield": "Treasury-2Y",
+    "2y treasury yield": "Treasury-2Y",
 }
 
 

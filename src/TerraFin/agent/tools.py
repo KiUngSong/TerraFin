@@ -97,7 +97,10 @@ class TerraFinHostedToolAdapter:
         tool = self._get_tool_for_session(session_id, tool_name)
         payload: dict[str, Any]
         task: TerraFinTaskRecord | None = None
-        resolved_arguments = dict(arguments or {})
+        resolved_arguments = _normalize_common_alias_arguments(dict(arguments or {}))
+        preflight_result = self._preflight_tool_misuse(tool, session_id, resolved_arguments)
+        if preflight_result is not None:
+            return preflight_result
         try:
             if tool.name == "current_view_context":
                 payload = self.runtime.read_linked_view_context(
@@ -196,6 +199,50 @@ class TerraFinHostedToolAdapter:
         tools.append(self._build_current_view_context_tool())
         return tuple(tools)
 
+    def _preflight_tool_misuse(
+        self,
+        tool: TerraFinToolDefinition,
+        session_id: str,
+        arguments: Mapping[str, Any],
+    ) -> TerraFinToolInvocationResult | None:
+        business_only_tools = {"company_info", "earnings", "financials", "fundamental_screen"}
+        if tool.capability_name not in business_only_tools:
+            return None
+
+        requested_value = _optional_string(arguments.get("ticker")) or _optional_string(arguments.get("name"))
+        if not _looks_like_equity_index_or_etf(requested_value):
+            return None
+
+        message = (
+            "This tool expects an operating-business ticker, not a broad equity benchmark or ETF shell. "
+            "Use market_snapshot, market_data, risk_profile, or valuation for SPY/QQQ/DIA/VT-style market questions."
+        )
+        return TerraFinToolInvocationResult(
+            tool_name=tool.name,
+            capability_name=tool.capability_name,
+            session_id=session_id,
+            execution_mode=tool.execution_mode,
+            payload={
+                "accepted": False,
+                "error": {
+                    "code": "tool_wrong_equity_benchmark_analysis",
+                    "message": message,
+                    "detail": requested_value,
+                    "retryable": True,
+                    "modelHint": (
+                        "Do not use company_info, earnings, financials, or fundamental_screen on SPY, QQQ, DIA, VT, "
+                        "or similar market-benchmark ETFs. Retry with market_snapshot, market_data, risk_profile, "
+                        "or valuation depending on the question."
+                    ),
+                },
+            },
+            task=None,
+            is_error=True,
+            retryable=True,
+            error_code="tool_wrong_equity_benchmark_analysis",
+            error_message=message,
+        )
+
     def _build_tool_definition(
         self,
         capability: TerraFinCapability,
@@ -264,7 +311,10 @@ class TerraFinHostedToolAdapter:
         repaired = dict(arguments)
         if "name" in repaired:
             value = _optional_string(repaired.get("name"))
-            fixed = _repair_symbol_or_name(value, allow_macro=True)
+            if tool.name == "macro_focus":
+                fixed = _repair_macro_focus_name(value)
+            else:
+                fixed = _repair_symbol_or_name(value, allow_macro=True)
             if fixed and fixed != value:
                 repaired["name"] = fixed
                 return repaired
@@ -316,6 +366,23 @@ class TerraFinHostedToolAdapter:
             else "could not be resolved to a valid ticker or supported macro instrument."
         )
 
+        if tool.name == "macro_focus" and _looks_like_equity_index_or_etf(requested_value):
+            return _ToolErrorDisposition(
+                code="tool_wrong_market_tool",
+                message=(
+                    "The requested name looks like an equity index or ETF rather than a macro instrument. "
+                    "Use market_snapshot, market_data, risk_profile, or valuation for SPY/QQQ/DIA/VT-style benchmarks."
+                ),
+                retryable=True,
+                expose_to_user=False,
+                model_hint=(
+                    "Do not call `macro_focus` on SPY, QQQ, DIA, VT, or other equity benchmarks. "
+                    "Use `market_snapshot`, `market_data`, `risk_profile`, or `valuation` for equity-index questions. "
+                    "Reserve `macro_focus` for macro instruments like VIX, DXY, Fear & Greed, Treasury-10Y, "
+                    "Federal Funds Effective Rate, M2, or SOMA."
+                ),
+            )
+
         recoverable_markers = (
             "invalid ticker:",
             "no data found for",
@@ -324,6 +391,18 @@ class TerraFinHostedToolAdapter:
             "not found for ticker",
         )
         if any(marker in lowered for marker in recoverable_markers):
+            if tool.name == "macro_focus":
+                model_hint = (
+                    "Retry `macro_focus` only with a supported macro instrument such as VIX, DXY, Fear & Greed, "
+                    "Treasury-10Y, Federal Funds Effective Rate, M2, or SOMA. For SPY/QQQ/DIA/VT and other equity "
+                    "benchmarks, use `market_snapshot`, `market_data`, or `risk_profile` instead."
+                )
+            else:
+                model_hint = (
+                    "If the user is asking about the page they are currently viewing, call "
+                    "`current_view_context` first. Otherwise retry with a concrete ticker or supported "
+                    "macro instrument instead of a descriptive phrase."
+                )
             return _ToolErrorDisposition(
                 code="tool_input_resolution_error",
                 message=(
@@ -332,11 +411,7 @@ class TerraFinHostedToolAdapter:
                 ),
                 retryable=True,
                 expose_to_user=False,
-                model_hint=(
-                    "If the user is asking about the page they are currently viewing, call "
-                    "`current_view_context` first. Otherwise retry with a concrete ticker or supported "
-                    "macro instrument instead of a descriptive phrase."
-                ),
+                model_hint=model_hint,
             )
 
         validation_markers = (
@@ -363,9 +438,40 @@ def _optional_string(value: Any) -> str | None:
     return text or None
 
 
+_EQUITY_INDEX_ALIASES = {
+    "spx": "SPY",
+    "spx index": "SPY",
+    "sp500": "SPY",
+    "s&p 500": "SPY",
+    "ndx": "QQQ",
+    "ndx index": "QQQ",
+    "nasdaq-100": "QQQ",
+    "nasdaq 100": "QQQ",
+    "djia": "DIA",
+    "dji": "DIA",
+    "dow jones industrial average": "DIA",
+    "rty": "IWM",
+}
+
+
+def _normalize_common_alias_arguments(arguments: dict[str, Any]) -> dict[str, Any]:
+    normalized = dict(arguments)
+    for key in ("name", "ticker"):
+        value = normalized.get(key)
+        if value is None:
+            continue
+        alias = _EQUITY_INDEX_ALIASES.get(str(value).strip().casefold())
+        if alias:
+            normalized[key] = alias
+    return normalized
+
+
 def _repair_symbol_or_name(value: str | None, *, allow_macro: bool) -> str | None:
     if not value:
         return None
+    alias = _EQUITY_INDEX_ALIASES.get(str(value).strip().casefold())
+    if alias:
+        return alias
     canonical = canonical_macro_name(value)
     if allow_macro and resolve_macro_type(canonical) is not None:
         return canonical
@@ -377,6 +483,43 @@ def _repair_symbol_or_name(value: str | None, *, allow_macro: bool) -> str | Non
     if resolved_type == "stock" and resolved_name:
         return resolved_name
     return None
+
+
+def _repair_macro_focus_name(value: str | None) -> str | None:
+    if not value:
+        return None
+    canonical = canonical_macro_name(value)
+    return canonical if resolve_macro_type(canonical) is not None else None
+
+
+def _looks_like_equity_index_or_etf(value: str | None) -> bool:
+    text = (value or "").strip()
+    if not text:
+        return False
+    normalized = text.casefold()
+    if normalized in _EQUITY_INDEX_ALIASES:
+        return True
+    if normalized in {
+        "spy",
+        "qqq",
+        "dia",
+        "vt",
+        "iwm",
+        "s&p 500",
+        "nasdaq",
+        "nasdaq 100",
+        "dow",
+        "dow jones",
+        "dow jones industrial average",
+        "russell 2000",
+    }:
+        return True
+    try:
+        resolved = resolve_ticker_query(text)
+    except Exception:
+        return False
+    resolved_name = _optional_string(resolved.get("name"))
+    return (resolved_name or "").upper() in {"SPY", "QQQ", "DIA", "VT", "IWM"}
 
 
 def _looks_like_descriptive_phrase(value: str) -> bool:

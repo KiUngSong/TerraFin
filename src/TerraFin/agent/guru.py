@@ -15,10 +15,10 @@ from uuid import uuid4
 
 from pydantic import BaseModel, Field, ValidationError, field_validator
 
-from .conversation import TerraFinConversationMessage, make_text_block
+from .conversation import TerraFinConversationMessage, make_text_block, make_tool_result_block
 from .conversation_state import record_tool_call_history
 from .definitions import DEFAULT_HOSTED_AGENT_NAME
-from .personas import PersonaRegistry, build_default_persona_registry
+from .personas import GuruPersona, PersonaRegistry, build_default_persona_registry
 from .recovery import RecoveryTracker
 from .tools import TerraFinToolDefinition
 
@@ -37,7 +37,7 @@ STANLEY_DRUCKENMILLER = "stanley-druckenmiller"
 
 _PERSONA_MENTION_PATTERNS: tuple[tuple[str, str], ...] = (
     (WARREN_BUFFETT, r"\b(buffett|warren buffett|oracle of omaha)\b"),
-    (HOWARD_MARKS, r"\b(howard marks|oaktree)\b"),
+    (HOWARD_MARKS, r"\b(howard marks|marks|oaktree)\b"),
     (STANLEY_DRUCKENMILLER, r"\b(druckenmiller|stanley druckenmiller)\b"),
 )
 
@@ -96,6 +96,16 @@ _ANALYSIS_INTENT_TERMS = (
     "buffett lens",
     "marks lens",
     "druckenmiller lens",
+)
+_COMPARISON_TERMS = (
+    "disagree",
+    "difference",
+    "different",
+    "compare",
+    "comparison",
+    "versus",
+    "vs",
+    "debate",
 )
 
 
@@ -206,7 +216,15 @@ def maybe_run_guru_orchestrator(
             return assistant_message, total_steps, route_log
         return None
 
-    if len(memos) == 1:
+    if _should_direct_render_multi_guru(user_message=user_message, route_plan=route_plan):
+        assistant_message = _render_multi_guru_comparison_reply(
+            memos=memos,
+            route_plan=route_plan,
+            persona_registry=registry,
+            failures=failures,
+        )
+        render_mode = "multi-memo-direct"
+    elif len(memos) == 1:
         assistant_message = _render_single_guru_memo_reply(
             memo=memos[0],
             route_plan=route_plan,
@@ -265,7 +283,7 @@ def build_guru_route_plan(
     if explicit:
         return GuruRoutePlan(
             route_type="explicit",
-            selected_gurus=tuple(explicit[:2]),
+            selected_gurus=tuple(explicit[:3]),
             reason="The user explicitly requested named investor perspectives.",
             matched_terms=tuple(explicit),
             view_context=view_context if view_context.get("available") else None,
@@ -347,6 +365,7 @@ def _run_guru_research_memo(
     )
     persona = persona_registry.get(guru_name)
     request = _build_guru_research_prompt(
+        persona=persona,
         persona_display_name=persona.display_name,
         user_message=user_message,
         route_plan=route_plan,
@@ -355,6 +374,8 @@ def _run_guru_research_memo(
     return _execute_guru_worker(
         loop=loop,
         conversation=conversation,
+        persona=persona,
+        route_plan=route_plan,
         guru_name=guru_name,
         request=request,
     )
@@ -362,6 +383,7 @@ def _run_guru_research_memo(
 
 def _build_guru_research_prompt(
     *,
+    persona: GuruPersona,
     persona_display_name: str,
     user_message: str,
     route_plan: GuruRoutePlan,
@@ -395,14 +417,28 @@ def _build_guru_research_prompt(
         [
             "",
             f"After research is complete, call `{_GURU_MEMO_TOOL_NAME}` exactly once with the final memo payload.",
+            f"`{_GURU_MEMO_TOOL_NAME}` must include: stance, confidence, thesis, key_evidence, risks, open_questions, citations.",
+            (
+                "Memo payload example: "
+                "{\"stance\":\"neutral\",\"confidence\":72,\"thesis\":\"...\","
+                "\"key_evidence\":[\"...\"],\"risks\":[\"...\"],"
+                "\"open_questions\":[\"...\"],\"citations\":[\"...\"]}"
+            ),
             "",
             "Rules:",
             "- Cite concrete numbers when available.",
             "- If you lack enough evidence or the case is outside your style, use `abstain`.",
+            "- If some supporting inputs are missing but you still have enough to frame the lens honestly, submit a lower-confidence partial memo in character instead of a sterile refusal.",
             f"- Do not answer with prose when you are done; finalize with `{_GURU_MEMO_TOOL_NAME}`.",
+            "- Your memo must sound like this investor's actual worldview, not a generic analyst summary with a famous name swapped in.",
+            "- Open the thesis with one unmistakable worldview sentence before you elaborate on supporting evidence.",
+            "- Key evidence and risks should be clean, complete, investor-readable bullets. Prefer two strong bullets to five messy ones.",
+            "- Keep open_questions plain, concrete, and investor-readable. They should read like real follow-up questions, not fragments or word salad.",
+            f"- The final thesis must explicitly reflect native concepts from this investor's worldview, such as: {', '.join(persona.signature_concepts[:4])}.",
         ]
     )
     special_guidance = _special_guru_research_guidance(
+        persona=persona,
         persona_display_name=persona_display_name,
         user_message=user_message,
         route_plan=route_plan,
@@ -442,6 +478,8 @@ def _execute_guru_worker(
     *,
     loop: "TerraFinHostedAgentLoop",
     conversation: "TerraFinHostedConversation",
+    persona: GuruPersona,
+    route_plan: GuruRoutePlan,
     guru_name: str,
     request: str,
 ) -> tuple[GuruResearchMemo | None, int, str | None]:
@@ -454,11 +492,21 @@ def _execute_guru_worker(
     memo_tool = _build_guru_memo_tool()
     total_tool_calls = 0
     recovery_budget = RecoveryTracker(loop.recovery_policy)
+    persona_fit_retry_used = False
+    memo_validation_retry_used = False
+    finalize_reminder_used = False
+    broad_market = _is_broad_market_request(_normalize_text(request), view_context=route_plan.view_context)
 
     for step in range(1, loop.max_steps + 1):
         definition = loop.runtime.get_session_definition(session_id)
         context = loop.runtime.get_session(session_id)
-        tools = tuple(loop.tool_adapter.list_tools_for_session(session_id)) + (memo_tool,)
+        tools = _select_guru_worker_tools(
+            loop=loop,
+            session_id=session_id,
+            persona=persona,
+            broad_market=broad_market,
+            memo_tool=memo_tool,
+        )
         turn = loop.complete_model_turn(
             agent=definition,
             session=context.session,
@@ -491,7 +539,51 @@ def _execute_guru_worker(
                     arguments=memo_calls[0].arguments,
                 )
             except ValidationError as exc:
-                return None, step, f"Guru memo failed validation: {exc}"
+                if memo_validation_retry_used:
+                    return None, step, f"Guru memo failed validation: {exc}"
+                retry_prompt = (
+                    f"Your `{_GURU_MEMO_TOOL_NAME}` call was malformed. "
+                    "Retry it once with all required fields present: stance, confidence, thesis, key_evidence, "
+                    "risks, open_questions, citations. "
+                    f"Validation details: {exc}"
+                )
+                loop._append_conversation_message(
+                    conversation,
+                    TerraFinConversationMessage(
+                        role="user",
+                        content=retry_prompt,
+                        blocks=(make_text_block(retry_prompt),),
+                        metadata={"internalOnly": True, "guruMemoValidationRetry": True},
+                    ),
+                )
+                loop._persist_conversation_runtime_state(session_id, conversation)
+                memo_validation_retry_used = True
+                continue
+            fit_feedback = _persona_fit_feedback(
+                persona=persona,
+                route_plan=route_plan,
+                memo=memo,
+            )
+            if fit_feedback:
+                if persona_fit_retry_used:
+                    return None, step, f"Guru memo still failed persona-fit review: {fit_feedback}"
+                retry_prompt = (
+                    f"Rewrite the memo so it actually sounds like {persona.display_name}. "
+                    f"Current issue: {fit_feedback} "
+                    "Do not switch to generic analyst language. Keep the memo grounded in this investor's worldview and signature concepts."
+                )
+                loop._append_conversation_message(
+                    conversation,
+                    TerraFinConversationMessage(
+                        role="user",
+                        content=retry_prompt,
+                        blocks=(make_text_block(retry_prompt),),
+                        metadata={"internalOnly": True, "guruPersonaFitRetry": True},
+                    ),
+                )
+                loop._persist_conversation_runtime_state(session_id, conversation)
+                persona_fit_retry_used = True
+                continue
             return memo, step, None
 
         for tool_call in non_memo_calls:
@@ -507,12 +599,38 @@ def _execute_guru_worker(
                 return None, step, str(outcome.error or "Guru tool execution failed.")
             assert outcome.message is not None
             assert outcome.invocation is not None
-            loop._append_conversation_message(conversation, outcome.message)
+            loop._append_conversation_message(
+                conversation,
+                _sanitize_guru_tool_message(
+                    persona=persona,
+                    broad_market=broad_market,
+                    tool_call=tool_call,
+                    invocation=outcome.invocation,
+                    message=outcome.message,
+                ),
+            )
             if outcome.kind == "retryable_error":
                 exhausted = recovery_budget.record(outcome.fingerprint)
                 if exhausted:
                     return None, step, "Guru worker exhausted its internal tool-recovery budget."
         loop._persist_conversation_runtime_state(session_id, conversation)
+        if broad_market and total_tool_calls >= 3 and not finalize_reminder_used:
+            finalize_prompt = (
+                "You already have enough evidence for a compact memo in this investor's voice. "
+                f"Do not keep gathering benchmarks unless a single critical gap remains. On the next turn, either call `{_GURU_MEMO_TOOL_NAME}` "
+                "or abstain cleanly."
+            )
+            loop._append_conversation_message(
+                conversation,
+                TerraFinConversationMessage(
+                    role="user",
+                    content=finalize_prompt,
+                    blocks=(make_text_block(finalize_prompt),),
+                    metadata={"internalOnly": True, "guruFinalizeReminder": True},
+                ),
+            )
+            loop._persist_conversation_runtime_state(session_id, conversation)
+            finalize_reminder_used = True
 
     return (
         None,
@@ -597,36 +715,7 @@ def _render_single_guru_memo_reply(
     failures: list[dict[str, str]],
 ) -> TerraFinConversationMessage:
     persona = persona_registry.get(memo.guru)
-    stance_text = {
-        "bullish": "leans constructive",
-        "bearish": "leans cautious",
-        "neutral": "leans cautious neutrality",
-        "abstain": "would avoid forcing a conclusion",
-    }[memo.stance]
-    lines = [
-        f"From a {persona.display_name} lens, the current read {stance_text}.",
-        memo.thesis.strip(),
-    ]
-    if memo.key_evidence:
-        lines.append("")
-        lines.append("What drives that view:")
-        for item in memo.key_evidence[:3]:
-            lines.append(f"- {item}")
-    if memo.risks:
-        lines.append("")
-        lines.append("What would make that lens more careful:")
-        for item in memo.risks[:2]:
-            lines.append(f"- {item}")
-    if memo.open_questions:
-        lines.append("")
-        lines.append("What this lens would want to verify next:")
-        for item in memo.open_questions[:2]:
-            lines.append(f"- {item}")
-    if memo.citations:
-        lines.append("")
-        lines.append("Concrete anchors from the research:")
-        for item in memo.citations[:2]:
-            lines.append(f"- {item}")
+    lines = _persona_render_lines(persona=persona, memo=memo)
     metadata = {
         "guruRouterApplied": True,
         "guruRouteType": route_plan.route_type,
@@ -655,6 +744,29 @@ def _build_explicit_guru_failure_reply(
     failures: list[dict[str, str]],
     persona_registry: PersonaRegistry,
 ) -> TerraFinConversationMessage:
+    if len(route_plan.selected_gurus) == 1:
+        persona = persona_registry.get(route_plan.selected_gurus[0])
+        lines = _persona_partial_failure_lines(persona=persona, route_plan=route_plan)
+        lines.extend(
+            [
+                "",
+                "I could not complete the full persona-specific research path cleanly this turn, so treat this as a low-confidence partial read rather than a finished memo.",
+                "If you retry with a tighter ticker, portfolio, or page-specific context, I can usually produce a much sharper version of this lens.",
+            ]
+        )
+        return TerraFinConversationMessage(
+            role="assistant",
+            content="\n".join(lines),
+            metadata={
+                "guruRouterApplied": True,
+                "guruRouteType": route_plan.route_type,
+                "selectedGurus": list(route_plan.selected_gurus),
+                "guruRouterFailure": True,
+                "guruRouterPartial": True,
+                "failedGurus": list(failures),
+            },
+        )
+
     persona_names = [persona_registry.get(name).display_name for name in route_plan.selected_gurus]
     if len(persona_names) == 1:
         subject = persona_names[0]
@@ -676,6 +788,41 @@ def _build_explicit_guru_failure_reply(
             "failedGurus": list(failures),
         },
     )
+
+
+def _persona_partial_failure_lines(
+    *,
+    persona: GuruPersona,
+    route_plan: GuruRoutePlan,
+) -> list[str]:
+    broad_market = route_plan.route_type in {"explicit", "macro"} and _is_broad_market_request(
+        _normalize_text(" ".join(route_plan.matched_terms) + " " + route_plan.reason),
+        view_context=route_plan.view_context,
+    )
+    if persona.name == WARREN_BUFFETT:
+        lines = [
+            f"From a {persona.display_name} lens, the default instinct is still patience rather than activity.",
+            "If the broad market is not offering a clear margin of safety, cash and optionality matter more than having an opinion every day.",
+        ]
+        if not broad_market:
+            lines[1] = "If the business quality and price discipline cannot both be defended cleanly, the right move is usually to wait rather than stretch."
+        return lines
+    if persona.name == HOWARD_MARKS:
+        return [
+            f"From a {persona.display_name} lens, the first question is still where we are in the cycle and whether investors are being paid enough for the risk they are taking.",
+            "Even without a finished memo, the default read is caution when optimism outruns compensation for risk and psychology gets friendlier than the payoff warrants.",
+        ]
+    if persona.name == STANLEY_DRUCKENMILLER:
+        lines = [
+            f"From a {persona.display_name} lens, the broad-market issue is still the macro tradeoff between liquidity, rates, and what the tape is confirming.",
+            "If that tradeoff is messy rather than one-way, the cleaner edge is often in selective stocks or sectors, not in pretending the index has a perfect setup.",
+        ]
+        if not broad_market:
+            lines[1] = "If the macro tailwind and price confirmation are not lining up cleanly, this is usually a low-edge setup rather than a bet to press."
+        return lines
+    return [
+        f"From a {persona.display_name} lens, the right move is to avoid pretending the evidence is cleaner than it is.",
+    ]
 
 
 def _build_synthesis_prompt(
@@ -736,6 +883,7 @@ def _fallback_synthesis_text(
 
 def _special_guru_research_guidance(
     *,
+    persona: GuruPersona,
     persona_display_name: str,
     user_message: str,
     route_plan: GuruRoutePlan,
@@ -749,23 +897,166 @@ def _special_guru_research_guidance(
         "This is a broad market or index-level question. Broad index ETFs are market containers, not operating businesses.",
         "Do not force company-style moat, owner earnings, or DCF logic onto SPY, QQQ, DIA, VT, or similar broad benchmarks.",
         "Use market-level tools to judge breadth, price behavior, and whether the market appears broadly expensive, fairly priced, euphoric, or fearful.",
+        "For SPY, QQQ, DIA, VT, or other equity benchmarks, use market_snapshot, market_data, risk_profile, valuation, and economic rather than free-form macro_focus guesses.",
+        "Use economic with canonical names such as Federal Funds Effective Rate, Treasury-10Y, M2, or SOMA instead of improvising descriptive macro labels.",
+        "If you need economic series, use canonical names like Federal Funds Effective Rate, Unemployment Rate, M2, or SOMA rather than free-form prose labels.",
+        "Do not call company_info, earnings, financials, or fundamental_screen on SPY, QQQ, DIA, VT, or similar benchmark ETFs.",
+        "You do not need an exhaustive research pass here. Prefer a compact 2-4 tool plan, then finalize the memo instead of collecting every possible datapoint.",
+        "A good broad-market sequence is: one or two market_snapshot or risk_profile checks on the main benchmarks, then at most one or two macro or economic context checks, then finalize.",
+        "Do not use `resolve` for broad-market questions. It is not a web search substitute and usually just burns steps without improving the memo.",
+    )
+    persona_guidance: tuple[str, ...] = tuple(persona.broad_market_playbook)
+    recent_cues: tuple[str, ...] = tuple(
+        f"Recent cue to reflect if relevant: {item}" for item in persona.recent_context_cues[:3]
+    )
+    forbidden: tuple[str, ...] = tuple(
+        f"Avoid making this the backbone of the answer: {item}" for item in persona.forbidden_backbone_evidence
     )
     if persona_display_name == "Warren Buffett":
         return general + (
-            "A Buffett-style answer should emphasize that he does not make precise macro forecasts and does not treat index ETFs like standalone businesses.",
-            "Prefer `market_snapshot` and `market_data` for the broad market. Reserve `valuation`, `fundamental_screen`, and owner-earnings reasoning for actual operating businesses.",
-            "Frame the conclusion around valuation discipline, patience, and whether the broad market appears to offer a margin of safety, not around DCF of the index itself.",
-        )
+            "If you use valuation on a broad market ETF, use it only as a rough temperature check on relative expensiveness; do not make missing DCF or owner-earnings data for the ETF shell the main point.",
+            "For Buffett on the broad market, patience, cash, and the absence of clear margin of safety should dominate the memo more than any indicator reading.",
+        ) + persona_guidance + recent_cues + forbidden
     if persona_display_name == "Howard Marks":
         return general + (
-            "A Howard Marks answer should focus on cycle position, sentiment, risk appetite, and whether investors are being compensated for risk at the market level.",
-            "Use valuation ranges and breadth as cycle clues, not as a substitute for business-level intrinsic value on the index ETF itself.",
-        )
+            "For Howard Marks, you only need enough evidence to judge cycle position, investor psychology, and risk compensation. Do not burn steps trying to build a full macro dashboard.",
+            "If breadth, sentiment, and valuation already point to optimism or compressed risk premium, finalize the memo rather than continuing to hunt for every confirming statistic.",
+            "Your opening sentence should sound like a cycle-and-psychology investor, not a chart technician or economist pretending to be Howard Marks.",
+        ) + persona_guidance + recent_cues + forbidden
     if persona_display_name == "Stanley Druckenmiller":
         return general + (
-            "A Druckenmiller answer should focus on liquidity, regime, momentum, and macro asymmetry rather than business-level DCF logic on the index ETF.",
-        )
-    return general
+            "For Druckenmiller, broad-market questions should usually weigh growth, liquidity, and yields first; technical stretch can support the read, but it should not dominate the opening thesis.",
+            "Your opening sentence should sound like a macro trader weighing rates, liquidity, earnings, and tape confirmation.",
+            "For a U.S. equity-market setup, focus on SPY and QQQ first. Do not fan out into DIA or VT unless they add something essential.",
+            "After roughly three useful tool calls, stop gathering and finalize the memo. This style should act on the tradeoff, not build a giant dashboard.",
+        ) + persona_guidance + recent_cues + forbidden
+    return general + persona_guidance + recent_cues + forbidden
+
+
+def _select_guru_worker_tools(
+    *,
+    loop: "TerraFinHostedAgentLoop",
+    session_id: str,
+    persona: GuruPersona,
+    broad_market: bool,
+    memo_tool: TerraFinToolDefinition,
+) -> tuple[TerraFinToolDefinition, ...]:
+    tools = [
+        tool
+        for tool in loop.tool_adapter.list_tools_for_session(session_id)
+        if tool.execution_mode == "invoke" and not (broad_market and tool.name == "resolve")
+    ]
+    if broad_market:
+        allowed_by_persona: dict[str, set[str]] = {
+            WARREN_BUFFETT: {"market_snapshot", "valuation", "current_view_context"},
+            HOWARD_MARKS: {"market_snapshot", "valuation", "economic", "current_view_context"},
+            STANLEY_DRUCKENMILLER: {
+                "market_snapshot",
+                "economic",
+                "risk_profile",
+                "current_view_context",
+            },
+        }
+        allowed = allowed_by_persona.get(persona.name)
+        if allowed is not None:
+            tools = [tool for tool in tools if tool.capability_name in allowed]
+    return tuple(tools) + (memo_tool,)
+
+
+def _sanitize_guru_tool_message(
+    *,
+    persona: GuruPersona,
+    broad_market: bool,
+    tool_call: Any,
+    invocation: Any,
+    message: TerraFinConversationMessage,
+) -> TerraFinConversationMessage:
+    if invocation.is_error:
+        return message
+
+    payload = dict(invocation.payload or {})
+    ticker = str(payload.get("ticker") or payload.get("name") or "").upper()
+    benchmark_ticker = ticker in {"SPY", "QQQ", "DIA", "VT", "IWM"}
+
+    filtered_payload: dict[str, Any] | None = None
+    if broad_market and benchmark_ticker and persona.name in {WARREN_BUFFETT, HOWARD_MARKS, STANLEY_DRUCKENMILLER} and tool_call.tool_name == "market_snapshot":
+        filtered_payload = {
+            "ticker": payload.get("ticker"),
+            "price_action": payload.get("price_action"),
+            "market_breadth": payload.get("market_breadth"),
+            "processing": payload.get("processing"),
+        }
+    elif persona.name == WARREN_BUFFETT and tool_call.tool_name == "valuation":
+        filtered_payload = {
+            "ticker": payload.get("ticker"),
+            "dcf": payload.get("dcf"),
+            "relative": payload.get("relative"),
+            "current_price": payload.get("current_price"),
+            "margin_of_safety_pct": payload.get("margin_of_safety_pct"),
+            "processing": payload.get("processing"),
+        }
+    elif broad_market and benchmark_ticker and persona.name == HOWARD_MARKS and tool_call.tool_name == "valuation":
+        filtered_payload = {
+            "ticker": payload.get("ticker"),
+            "relative": payload.get("relative"),
+            "current_price": payload.get("current_price"),
+            "margin_of_safety_pct": payload.get("margin_of_safety_pct"),
+            "processing": payload.get("processing"),
+        }
+    elif broad_market and benchmark_ticker and persona.name == STANLEY_DRUCKENMILLER and tool_call.tool_name == "risk_profile":
+        filtered_payload = {
+            "ticker": payload.get("ticker"),
+            "tail_risk": payload.get("tail_risk"),
+            "volatility": payload.get("volatility"),
+            "drawdown": payload.get("drawdown"),
+            "processing": payload.get("processing"),
+        }
+
+    if filtered_payload is None:
+        return message
+
+    content_payload = {
+        "toolName": invocation.tool_name,
+        "capabilityName": invocation.capability_name,
+        "executionMode": invocation.execution_mode,
+        "payload": filtered_payload,
+    }
+    if invocation.task is not None:
+        content_payload["task"] = {
+            "taskId": invocation.task.task_id,
+            "status": invocation.task.status,
+            "description": invocation.task.description,
+        }
+
+    metadata = dict(message.metadata)
+    metadata["guruSanitized"] = True
+    return TerraFinConversationMessage(
+        role="tool",
+        name=tool_call.tool_name,
+        tool_call_id=tool_call.call_id,
+        content=json.dumps(content_payload, ensure_ascii=False, separators=(",", ":")),
+        metadata=metadata,
+        blocks=(
+            make_tool_result_block(
+                call_id=tool_call.call_id,
+                tool_name=tool_call.tool_name,
+                capability_name=invocation.capability_name,
+                execution_mode=invocation.execution_mode,
+                payload=filtered_payload,
+                task=None
+                if invocation.task is None
+                else {
+                    "taskId": invocation.task.task_id,
+                    "status": invocation.task.status,
+                    "description": invocation.task.description,
+                },
+                is_error=invocation.is_error,
+                retryable=invocation.retryable,
+                error_code=invocation.error_code,
+                error_message=invocation.error_message,
+            ),
+        ),
+    )
 
 
 def _normalize_text(value: str) -> str:
@@ -851,11 +1142,16 @@ def _is_broad_market_request(text: str, *, view_context: Mapping[str, Any] | Non
     broad_market_terms = (
         "current market",
         "market status",
+        "market cycle",
         "overall market",
         "broad market",
         "stock market",
         "market environment",
         "market setup",
+        "equity market",
+        "market trade",
+        "where are we in the cycle",
+        "the cycle right now",
         "s&p 500",
         "nasdaq",
         "dow",
@@ -877,10 +1173,381 @@ def _is_broad_market_request(text: str, *, view_context: Mapping[str, Any] | Non
     return False
 
 
+def _persona_fit_feedback(
+    *,
+    persona: GuruPersona,
+    route_plan: GuruRoutePlan,
+    memo: GuruResearchMemo,
+) -> str | None:
+    thesis = _normalize_text(memo.thesis)
+    combined = _normalize_text(
+        " ".join(
+            [
+                memo.thesis,
+                *memo.key_evidence,
+                *memo.risks,
+                *memo.open_questions,
+                *memo.citations,
+            ]
+        )
+    )
+    technical_terms = ("rsi", "bollinger", "macd", "upper band", "overbought")
+    technical_hits = sum(1 for term in technical_terms if term in combined)
+    signature_hits = sum(1 for term in persona.signature_concepts if term.lower() in combined)
+    broad_market = _is_broad_market_request(
+        _normalize_text(" ".join(route_plan.matched_terms) + " " + route_plan.reason),
+        view_context=route_plan.view_context,
+    ) or route_plan.route_type in {"explicit", "macro"}
+
+    if broad_market and technical_hits >= 2 and signature_hits == 0:
+        return (
+            "The memo relies on shared technical-analysis language but does not surface this investor's signature concepts."
+        )
+    narrative_feedback = _narrative_quality_feedback([memo.thesis, *memo.key_evidence, *memo.risks])
+    if narrative_feedback:
+        return narrative_feedback
+    question_feedback = _open_question_quality_feedback(memo.open_questions)
+    if question_feedback:
+        return question_feedback
+    if persona.name == WARREN_BUFFETT:
+        worldview_feedback = _worldview_sentence_feedback(
+            thesis=thesis,
+            combined=combined,
+            primary_terms=("business", "businesses", "owner", "price", "valuation", "wonderful business"),
+            secondary_terms=("margin of safety", "patience", "cash", "optionality"),
+            failure_text="A Buffett memo should open from the perspective of a long-term business owner and price discipline, not just valuation math.",
+        )
+        if worldview_feedback:
+            return worldview_feedback
+        if broad_market and technical_hits >= 1 and technical_hits >= max(signature_hits, 1):
+            return "A Buffett broad-market answer cannot lean on RSI, MACD, or short-term tape language as primary evidence."
+        if broad_market and signature_hits == 0:
+            return "A Buffett broad-market answer should sound patient, valuation-disciplined, and anchored in margin of safety or cash/optionality."
+    if persona.name == HOWARD_MARKS:
+        worldview_feedback = _worldview_sentence_feedback(
+            thesis=thesis,
+            combined=combined,
+            primary_terms=("cycle", "pendulum", "psychology", "optimism", "fear", "euphoria"),
+            secondary_terms=("risk premium", "paid enough for the risk", "second-level", "prepare"),
+            failure_text="A Howard Marks memo should sound like cycle position, psychology, and risk compensation are the center of gravity.",
+        )
+        if worldview_feedback:
+            return worldview_feedback
+        if broad_market and signature_hits == 0:
+            return "A Howard Marks answer should foreground cycle position, psychology, risk premium, or second-level thinking."
+    if persona.name == STANLEY_DRUCKENMILLER:
+        worldview_feedback = _worldview_sentence_feedback(
+            thesis=thesis,
+            combined=combined,
+            primary_terms=("liquidity", "rates", "yield", "bond yields", "macro tradeoff"),
+            secondary_terms=("earnings", "tape", "animal spirits", "individual stock", "edge"),
+            failure_text="A Druckenmiller memo should open with the macro tradeoff between rates/liquidity and what earnings or the tape are saying.",
+        )
+        if worldview_feedback:
+            return worldview_feedback
+        if broad_market and memo.stance == "abstain":
+            return "A Druckenmiller broad-market answer should usually weigh the macro tradeoff explicitly instead of defaulting to abstain."
+        if broad_market and signature_hits == 0:
+            return "A Druckenmiller answer should sound macro-driven, with liquidity, yields, growth, animal spirits, or stock-selection tradeoffs."
+    return None
+
+
+def _worldview_sentence_feedback(
+    *,
+    thesis: str,
+    combined: str,
+    primary_terms: tuple[str, ...],
+    secondary_terms: tuple[str, ...],
+    failure_text: str,
+) -> str | None:
+    if not any(term in thesis for term in primary_terms):
+        return failure_text
+    if not any(term in combined for term in secondary_terms):
+        return failure_text
+    return None
+
+
+def _open_question_quality_feedback(open_questions: list[str]) -> str | None:
+    allowed_starts = {
+        "what",
+        "which",
+        "whether",
+        "how",
+        "why",
+        "will",
+        "would",
+        "could",
+        "can",
+        "is",
+        "are",
+        "should",
+        "do",
+        "does",
+        "to",
+        "where",
+        "when",
+        "if",
+    }
+    for question in open_questions:
+        normalized = _normalize_text(question)
+        if not normalized:
+            continue
+        words = normalized.split()
+        if len(words) > 30:
+            return "The memo's open questions should stay plain and concrete rather than sprawling or fragmentary."
+        if any(marker in question for marker in ("[[", "]]", "{{", "}}", "__", "]]>", "<![", "=>")):
+            return "The memo's open questions should read like real investor follow-up questions, not fragments."
+        if words[0] not in allowed_starts and len(words) <= 4:
+            return "The memo's open questions should read like real investor follow-up questions, not fragments."
+    return None
+
+
+def _narrative_quality_feedback(texts: list[str]) -> str | None:
+    severe_garble = re.compile(r"(\[\[|\]\]|\{\{|\}\}|__|[A-Za-z]+_[A-Za-z]+|[A-Za-z]{4,}\]\)|\)\][A-Za-z]{2,})")
+    for text in texts:
+        stripped = text.strip()
+        if not stripped:
+            continue
+        if '\\"' in stripped or '".' in stripped or '."' in stripped:
+            return "The memo contains garbled quoted fragments rather than clean investor prose."
+        if severe_garble.search(stripped):
+            return "The memo contains garbled fragments rather than clean investor prose."
+        for raw_word in stripped.replace(",", " ").replace(";", " ").split():
+            cleaned = raw_word.strip("?.!()[]{}:;\"'")
+            if raw_word.count("-") >= 2 and len(cleaned) > 18:
+                return "The memo contains garbled compound phrasing rather than clean investor prose."
+    return None
+
+
+def _displayable_open_questions(open_questions: list[str]) -> list[str]:
+    if _open_question_quality_feedback(open_questions):
+        return []
+    allowed_caps = {"SPY", "QQQ", "DIA", "VT", "IWM", "M2", "CPI", "VIX", "DXY", "Fed", "Federal", "Reserve", "Treasury", "Apple", "Buffett", "Marks", "Druckenmiller"}
+    displayable: list[str] = []
+    for question in open_questions:
+        stripped = question.strip()
+        if not stripped.endswith("?"):
+            continue
+        bad_wording = False
+        for raw_word in stripped.replace(",", " ").replace(";", " ").split():
+            if "-" in raw_word and not any(ch.isdigit() for ch in raw_word):
+                bad_wording = True
+                break
+            cleaned = raw_word.strip("?.!()[]{}:;\"'")
+            if cleaned and cleaned[0].isupper() and cleaned not in allowed_caps and raw_word != stripped.split()[0]:
+                bad_wording = True
+                break
+        if not bad_wording:
+            displayable.append(question)
+    return displayable
+
+
+def _displayable_memo_points(
+    *,
+    persona: GuruPersona,
+    items: list[str],
+    point_type: str,
+) -> list[str]:
+    keyword_priority: dict[str, tuple[tuple[str, ...], ...]] = {
+        WARREN_BUFFETT: (
+            ("moat", "pricing power", "brand", "ecosystem", "cash", "owner", "management", "capital allocation"),
+            ("margin of safety", "intrinsic value", "price", "valuation", "discount", "premium", "pe", "multiple"),
+        ),
+        HOWARD_MARKS: (
+            ("cycle", "psychology", "sentiment", "optimism", "euphoria", "fear", "fomo", "pendulum"),
+            ("risk premium", "paid enough for the risk", "valuation", "breadth", "second-level", "downside"),
+        ),
+        STANLEY_DRUCKENMILLER: (
+            ("liquidity", "rates", "yield", "bond", "earnings", "tape", "momentum", "animal spirits"),
+            ("breadth", "volatility", "macro", "risk-reward", "valuation", "tradeoff", "edge"),
+        ),
+    }
+    tiers = keyword_priority.get(persona.name, ((),))
+    scored: list[tuple[int, str]] = []
+    fallback: list[str] = []
+    for item in items:
+        stripped = item.strip()
+        if not stripped:
+            continue
+        if _narrative_quality_feedback([stripped]):
+            continue
+        if any(marker in stripped for marker in ("[[", "]]", "{{", "}}", "__", "....", "=>")):
+            continue
+        normalized = _normalize_text(stripped)
+        words = normalized.split()
+        if len(words) < 4:
+            continue
+        score = 0
+        for index, tier in enumerate(tiers):
+            if any(term in normalized for term in tier):
+                score = max(score, len(tiers) - index)
+        if point_type == "evidence" and score == 0 and persona.name == STANLEY_DRUCKENMILLER:
+            if any(term in normalized for term in ("spy", "qqq", "s&p", "nasdaq")):
+                score = 1
+        if score > 0:
+            scored.append((score, stripped))
+        else:
+            fallback.append(stripped)
+    scored.sort(key=lambda item: (-item[0], items.index(item[1])))
+    selected = [item for _, item in scored[:3]]
+    if not selected:
+        selected = fallback[:3]
+    return selected
+
+
+def _persona_render_lines(*, persona: GuruPersona, memo: GuruResearchMemo) -> list[str]:
+    display_questions = _displayable_open_questions(memo.open_questions)
+    if persona.name == WARREN_BUFFETT:
+        evidence = [
+            item
+            for item in memo.key_evidence
+            if not _contains_any(_normalize_text(item), ("rsi", "macd", "bollinger", "overbought", "upper band"))
+        ]
+        if not evidence:
+            evidence = memo.key_evidence
+        evidence = _displayable_memo_points(persona=persona, items=evidence, point_type="evidence")
+        risks = _displayable_memo_points(persona=persona, items=memo.risks, point_type="risks")
+        lines = [
+            f"From a {persona.display_name} lens, I would not make too much of day-to-day market swings.",
+            "Mr. Market may be cheerful here, but that is not the same as offering a generous price.",
+            memo.thesis.strip(),
+        ]
+        if evidence:
+            lines.append("")
+            lines.append("What would matter in that frame:")
+            for item in evidence[:3]:
+                lines.append(f"- {item}")
+        if risks:
+            lines.append("")
+            lines.append("Why that lens would still stay patient:")
+            for item in risks[:2]:
+                lines.append(f"- {item}")
+        if display_questions:
+            lines.append("")
+            lines.append("What Buffett would want to know before doing more:")
+            for item in display_questions[:2]:
+                lines.append(f"- {item}")
+        return lines
+    if persona.name == HOWARD_MARKS:
+        evidence = _displayable_memo_points(persona=persona, items=memo.key_evidence, point_type="evidence")
+        risks = _displayable_memo_points(persona=persona, items=memo.risks, point_type="risks")
+        lines = [
+            f"From a {persona.display_name} lens, the first question is where we are in the cycle and whether investors are mistaking optimism for safety.",
+            memo.thesis.strip(),
+        ]
+        if evidence:
+            lines.append("")
+            lines.append("What supports that cycle read:")
+            for item in evidence[:3]:
+                lines.append(f"- {item}")
+        if risks:
+            lines.append("")
+            lines.append("What could make that judgment too neat:")
+            for item in risks[:2]:
+                lines.append(f"- {item}")
+        if display_questions:
+            lines.append("")
+            lines.append("What Marks would still want to test:")
+            for item in display_questions[:2]:
+                lines.append(f"- {item}")
+        return lines
+    if persona.name == STANLEY_DRUCKENMILLER:
+        evidence = _displayable_memo_points(persona=persona, items=memo.key_evidence, point_type="evidence")
+        risks = _displayable_memo_points(persona=persona, items=memo.risks, point_type="risks")
+        lines = [
+            f"From a {persona.display_name} lens, the real issue is the macro tradeoff rather than a tidy one-line market call.",
+            "When the tape stays decent but rates and liquidity are still a live constraint, the broad index bet usually gets messier than the headline looks.",
+            memo.thesis.strip(),
+        ]
+        if evidence:
+            lines.append("")
+            lines.append("What is driving that macro read:")
+            for item in evidence[:3]:
+                lines.append(f"- {item}")
+        if risks:
+            lines.append("")
+            lines.append("What could flip the setup:")
+            for item in risks[:2]:
+                lines.append(f"- {item}")
+        if display_questions:
+            lines.append("")
+            lines.append("What Druckenmiller would want to clarify next:")
+            for item in display_questions[:2]:
+                lines.append(f"- {item}")
+        return lines
+
+    stance_text = {
+        "bullish": "leans constructive",
+        "bearish": "leans cautious",
+        "neutral": "leans cautious neutrality",
+        "abstain": "would avoid forcing a conclusion",
+    }[memo.stance]
+    lines = [f"From a {persona.display_name} lens, the current read {stance_text}.", memo.thesis.strip()]
+    if memo.key_evidence:
+        lines.append("")
+        lines.append("What drives that view:")
+        for item in memo.key_evidence[:3]:
+            lines.append(f"- {item}")
+    return lines
+
+
+def _should_direct_render_multi_guru(*, user_message: str, route_plan: GuruRoutePlan) -> bool:
+    normalized_request = _normalize_text(user_message)
+    return route_plan.route_type == "explicit" and len(route_plan.selected_gurus) > 1 and (
+        _contains_any(normalized_request, _COMPARISON_TERMS) or len(route_plan.selected_gurus) >= 3
+    )
+
+
+def _render_multi_guru_comparison_reply(
+    *,
+    memos: list[GuruResearchMemo],
+    route_plan: GuruRoutePlan,
+    persona_registry: PersonaRegistry,
+    failures: list[dict[str, str]],
+) -> TerraFinConversationMessage:
+    memo_by_guru = {memo.guru: memo for memo in memos}
+    ordered = [memo_by_guru[guru] for guru in route_plan.selected_gurus if guru in memo_by_guru]
+    lines = ["Here is how the investor lenses separate on this setup:"]
+    for memo in ordered:
+        persona = persona_registry.get(memo.guru)
+        display_questions = _displayable_open_questions(memo.open_questions)
+        lines.append("")
+        lines.append(f"{persona.display_name}:")
+        lines.append(f"- Core read: {memo.thesis}")
+        if memo.key_evidence:
+            lines.append(f"- What this lens leans on: {memo.key_evidence[0]}")
+        if memo.risks:
+            lines.append(f"- What keeps this lens careful: {memo.risks[0]}")
+        if display_questions:
+            lines.append(f"- What this lens would still test: {display_questions[0]}")
+    if failures:
+        lines.append("")
+        lines.append("Incomplete lenses:")
+        for failure in failures:
+            persona = persona_registry.get(failure["guru"])
+            lines.append(f"- {persona.display_name}: research path did not complete cleanly.")
+    return TerraFinConversationMessage(
+        role="assistant",
+        content="\n".join(lines),
+        metadata={
+            "guruRouterApplied": True,
+            "guruRouteType": route_plan.route_type,
+            "selectedGurus": list(route_plan.selected_gurus),
+            "memoSummary": [
+                {"guru": memo.guru, "stance": memo.stance, "confidence": memo.confidence} for memo in ordered
+            ],
+            "guruDirectRender": True,
+            "guruComparisonRender": True,
+            "failedGurus": list(failures),
+        },
+    )
+
+
 __all__ = [
     "GuruOrchestratedReply",
     "GuruResearchMemo",
     "GuruRoutePlan",
+    "_select_guru_worker_tools",
     "build_guru_route_plan",
     "maybe_run_guru_orchestrator",
 ]

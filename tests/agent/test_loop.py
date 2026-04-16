@@ -7,7 +7,16 @@ from TerraFin.agent.definitions import (
     build_default_agent_definition_registry,
 )
 from TerraFin.agent.conversation import is_internal_only_message
-from TerraFin.agent.guru import GuruRoutePlan, _build_guru_research_prompt, build_guru_route_plan
+from TerraFin.agent.guru import (
+    GuruResearchMemo,
+    GuruRoutePlan,
+    _build_guru_memo_tool,
+    _build_guru_research_prompt,
+    _persona_fit_feedback,
+    _persona_render_lines,
+    _select_guru_worker_tools,
+    build_guru_route_plan,
+)
 from TerraFin.agent.hosted_runtime import TerraFinHostedAgentRuntime
 from TerraFin.agent.loop import (
     TerraFinConversationMessage,
@@ -476,6 +485,53 @@ class _MalformedGuruMemoModel:
         )
 
 
+class _RetryingMalformedGuruMemoModel:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def complete(self, *, agent, messages, tools, **kwargs):
+        _ = kwargs
+        memo_tool_name = next((tool.name for tool in tools if tool.name == "submit_guru_research_memo"), None)
+        if agent.name != "howard-marks":
+            return TerraFinModelTurn(
+                assistant_message=TerraFinConversationMessage(
+                    role="assistant",
+                    content="General answer.",
+                )
+            )
+        last_user = next((message.content for message in reversed(messages) if message.role == "user"), "")
+        if "malformed" in last_user.lower():
+            return TerraFinModelTurn(
+                tool_calls=(
+                    TerraFinToolCall(
+                        call_id="memo-good",
+                        tool_name=memo_tool_name or "submit_guru_research_memo",
+                        arguments={
+                            "stance": "neutral",
+                            "confidence": 74,
+                            "thesis": "The cycle does not justify aggressive optimism because investors are not being paid much for the risk they are taking.",
+                            "key_evidence": ["Investor psychology looks more eager than fearful.", "Risk premiums do not look especially generous."],
+                            "risks": ["Markets can stay richer for longer than caution feels comfortable."],
+                            "open_questions": ["What would cause compensation for risk to widen materially from here?"],
+                            "citations": ["SPY snapshot", "QQQ snapshot"],
+                        },
+                    ),
+                ),
+                stop_reason="tool_calls",
+            )
+        self.calls += 1
+        return TerraFinModelTurn(
+            tool_calls=(
+                TerraFinToolCall(
+                    call_id="memo-bad",
+                    tool_name=memo_tool_name or "submit_guru_research_memo",
+                    arguments={"citations": ["SPY snapshot"]},
+                ),
+            ),
+            stop_reason="tool_calls",
+        )
+
+
 def test_create_session_seeds_system_prompt() -> None:
     loop = _loop(_DirectAnswerModel())
 
@@ -676,6 +732,38 @@ def test_build_guru_route_plan_prefers_marks_for_dcf_review() -> None:
     assert plan.selected_gurus == ("howard-marks",)
 
 
+def test_build_guru_route_plan_keeps_all_explicitly_named_gurus() -> None:
+    loop = _loop_with_gurus(_DirectAnswerModel())
+    conversation = loop.create_session(
+        DEFAULT_HOSTED_AGENT_NAME,
+        session_id="loop:route-explicit-all-gurus",
+    )
+
+    plan = build_guru_route_plan(
+        loop=loop,
+        session_id=conversation.session_id,
+        user_message="How would Buffett, Howard Marks, and Druckenmiller disagree on this setup?",
+    )
+
+    assert plan is not None
+    assert plan.route_type == "explicit"
+    assert plan.selected_gurus == ("warren-buffett", "howard-marks", "stanley-druckenmiller")
+
+
+def test_submit_user_message_treats_cycle_question_as_broad_market_marks_route() -> None:
+    loop = _loop_with_gurus(_RetryingMalformedGuruMemoModel())
+    conversation = loop.create_session(
+        DEFAULT_HOSTED_AGENT_NAME,
+        session_id="loop:marks-cycle-broad-market",
+    )
+
+    result = loop.submit_user_message(conversation.session_id, "From a Howard Marks lens, where are we in the cycle right now?")
+
+    assert result.final_message is not None
+    assert "Howard Marks lens" in result.final_message.content
+    assert result.final_message.metadata["selectedGurus"] == ["howard-marks"]
+
+
 def test_submit_user_message_routes_default_assistant_through_hidden_guru_sessions() -> None:
     loop = _loop_with_gurus(_GuruRouterModel())
     conversation = loop.create_session(
@@ -719,9 +807,10 @@ def test_submit_user_message_falls_back_when_guru_memo_validation_fails() -> Non
 
     assert result.final_message is not None
     assert "Howard Marks lens" in result.final_message.content
-    assert "generic summary" in result.final_message.content
-    assert result.final_message.metadata["guruRouterApplied"] is False
+    assert "low-confidence partial read" in result.final_message.content
+    assert result.final_message.metadata["guruRouterApplied"] is True
     assert result.final_message.metadata["guruRouterFailure"] is True
+    assert result.final_message.metadata["guruRouterPartial"] is True
     assert result.final_message.metadata["selectedGurus"] == ["howard-marks"]
     reloaded = loop.get_conversation(conversation.session_id)
     failures = reloaded.metadata.get("guruRouterFailures", [])
@@ -729,8 +818,28 @@ def test_submit_user_message_falls_back_when_guru_memo_validation_fails() -> Non
     assert failures[-1]["selectedGurus"] == ["howard-marks"]
 
 
+def test_submit_user_message_retries_once_after_guru_memo_validation_error() -> None:
+    model = _RetryingMalformedGuruMemoModel()
+    loop = _loop_with_gurus(model)
+    conversation = loop.create_session(
+        DEFAULT_HOSTED_AGENT_NAME,
+        session_id="loop:explicit-guru-memo-retry",
+    )
+
+    result = loop.submit_user_message(conversation.session_id, "How would Howard Marks assess current market status?")
+
+    assert result.final_message is not None
+    assert "Howard Marks lens" in result.final_message.content
+    assert result.final_message.metadata["guruRouterApplied"] is True
+    assert result.final_message.metadata["selectedGurus"] == ["howard-marks"]
+    assert model.calls == 1
+
+
 def test_buffett_broad_market_prompt_disallows_treating_indices_like_businesses() -> None:
+    registry = build_default_persona_registry()
+    buffett = registry.get("warren-buffett")
     prompt = _build_guru_research_prompt(
+        persona=buffett,
         persona_display_name="Warren Buffett",
         user_message="How would Warren Buffett assess current market status?",
         route_plan=GuruRoutePlan(
@@ -745,7 +854,17 @@ def test_buffett_broad_market_prompt_disallows_treating_indices_like_businesses(
 
     assert "Broad index ETFs are market containers, not operating businesses." in prompt
     assert "Do not force company-style moat, owner earnings, or DCF logic onto SPY, QQQ, DIA, VT" in prompt
-    assert "Reserve `valuation`, `fundamental_screen`, and owner-earnings reasoning for actual operating businesses." in prompt
+    assert "Do not treat SPY, QQQ, DIA, or VT like standalone operating businesses with moats and owner earnings." in prompt
+    assert "use market_snapshot, market_data, risk_profile, valuation, and economic rather than free-form macro_focus guesses." in prompt
+    assert "Use economic with canonical names such as Federal Funds Effective Rate, Treasury-10Y, M2, or SOMA" in prompt
+    assert "Do not call company_info, earnings, financials, or fundamental_screen on SPY, QQQ, DIA, VT, or similar benchmark ETFs." in prompt
+    assert "Prefer a compact 2-4 tool plan" in prompt
+    assert "`submit_guru_research_memo` must include: stance, confidence, thesis, key_evidence, risks, open_questions, citations." in prompt
+    assert "Do not use `resolve` for broad-market questions." in prompt
+    assert "The final thesis must explicitly reflect native concepts from this investor's worldview" in prompt
+    assert "Open the thesis with one unmistakable worldview sentence" in prompt
+    assert "Keep open_questions plain, concrete, and investor-readable" in prompt
+    assert "volatility was 'really nothing'" in prompt
 
 
 def test_buffett_persona_allows_market_snapshot_for_broad_market_checks() -> None:
@@ -753,3 +872,232 @@ def test_buffett_persona_allows_market_snapshot_for_broad_market_checks() -> Non
     buffett = registry.get("warren-buffett")
 
     assert "market_snapshot" in buffett.allowed_capabilities
+
+
+def test_persona_fit_feedback_rejects_generic_buffett_technical_memo() -> None:
+    registry = build_default_persona_registry()
+    buffett = registry.get("warren-buffett")
+
+    feedback = _persona_fit_feedback(
+        persona=buffett,
+        route_plan=GuruRoutePlan(
+            route_type="explicit",
+            selected_gurus=("warren-buffett",),
+            reason="Current market broad index question.",
+            matched_terms=("current market", "spy", "qqq"),
+            view_context=None,
+        ),
+        memo=GuruResearchMemo(
+            guru="warren-buffett",
+            stance="neutral",
+            confidence=65,
+            thesis="The market looks overbought because RSI, MACD, and Bollinger Bands are stretched.",
+            key_evidence=["SPY RSI is high", "QQQ is near the upper Bollinger Band"],
+            risks=[],
+            open_questions=[],
+            citations=[],
+        ),
+    )
+
+    assert feedback is not None
+    assert "signature concepts" in feedback or "Buffett broad-market answer" in feedback
+
+
+def test_persona_fit_feedback_rejects_buffett_memo_when_technicals_dominate() -> None:
+    registry = build_default_persona_registry()
+    buffett = registry.get("warren-buffett")
+
+    feedback = _persona_fit_feedback(
+        persona=buffett,
+        route_plan=GuruRoutePlan(
+            route_type="explicit",
+            selected_gurus=("warren-buffett",),
+            reason="Current market broad index question.",
+            matched_terms=("current market", "spy", "qqq"),
+            view_context=None,
+        ),
+        memo=GuruResearchMemo(
+            guru="warren-buffett",
+            stance="neutral",
+            confidence=65,
+            thesis="The market looks neutral because RSI is elevated and MACD is still constructive.",
+            key_evidence=["SPY RSI is high", "QQQ MACD remains positive."],
+            risks=[],
+            open_questions=[],
+            citations=[],
+        ),
+    )
+
+    assert feedback is not None
+    assert "technical-analysis language" in feedback or "cannot lean on RSI" in feedback
+
+
+def test_persona_fit_feedback_accepts_marks_cycle_psychology_memo() -> None:
+    registry = build_default_persona_registry()
+    marks = registry.get("howard-marks")
+
+    feedback = _persona_fit_feedback(
+        persona=marks,
+        route_plan=GuruRoutePlan(
+            route_type="explicit",
+            selected_gurus=("howard-marks",),
+            reason="Current market broad index question.",
+            matched_terms=("current market", "spy", "qqq"),
+            view_context=None,
+        ),
+        memo=GuruResearchMemo(
+            guru="howard-marks",
+            stance="bearish",
+            confidence=72,
+            thesis="The pendulum looks closer to optimism than fear, and the real issue is whether investors are being paid enough for the risk they are taking.",
+            key_evidence=["Psychology looks more eager than fearful.", "Risk premiums do not look generous.", "This feels closer to second-level caution than a precise forecast."],
+            risks=[],
+            open_questions=[],
+            citations=[],
+        ),
+    )
+
+    assert feedback is None
+
+
+def test_persona_fit_feedback_accepts_clean_buffett_business_memo() -> None:
+    registry = build_default_persona_registry()
+    buffett = registry.get("warren-buffett")
+
+    feedback = _persona_fit_feedback(
+        persona=buffett,
+        route_plan=GuruRoutePlan(
+            route_type="explicit",
+            selected_gurus=("warren-buffett",),
+            reason="User explicitly asked for Buffett on AAPL valuation.",
+            matched_terms=("warren-buffett", "aapl"),
+            view_context=None,
+        ),
+        memo=GuruResearchMemo(
+            guru="warren-buffett",
+            stance="neutral",
+            confidence=76,
+            thesis="Apple is a wonderful business, but the current price leaves no margin of safety for a patient owner.",
+            key_evidence=[
+                "The business still produces strong cash generation and durable pricing power.",
+                "At roughly $266 versus an intrinsic value estimate closer to $167, the price asks me to pay up for a business I already admire.",
+                "Operating margins remain strong, but the valuation gives me little room for error if growth cools.",
+            ],
+            risks=[
+                "A rich valuation can turn a fine business into a mediocre investment result.",
+                "If pricing power softens, today's price would look even less forgiving.",
+            ],
+            open_questions=[
+                "What would have to happen to justify paying today's price without a margin of safety?",
+                "How durable is Apple's pricing power if gross margins keep drifting lower?",
+            ],
+            citations=["functions.company_info", "functions.valuation", "functions.fundamental_screen"],
+        ),
+    )
+
+    assert feedback is None
+
+
+def test_persona_fit_feedback_rejects_marks_fragment_open_questions() -> None:
+    registry = build_default_persona_registry()
+    marks = registry.get("howard-marks")
+
+    feedback = _persona_fit_feedback(
+        persona=marks,
+        route_plan=GuruRoutePlan(
+            route_type="explicit",
+            selected_gurus=("howard-marks",),
+            reason="Current market broad index question.",
+            matched_terms=("current market", "spy", "qqq"),
+            view_context=None,
+        ),
+        memo=GuruResearchMemo(
+            guru="howard-marks",
+            stance="neutral",
+            confidence=68,
+            thesis="The pendulum looks closer to optimism than fear, and the key question is whether investors are being paid enough for the risk they are taking.",
+            key_evidence=["Cycle position looks late enough that psychology matters more than a neat forecast."],
+            risks=[],
+            open_questions=["How does ]] current-cycle skew work now?"],
+            citations=[],
+        ),
+    )
+
+    assert feedback is not None
+    assert "open questions" in feedback.lower()
+
+
+def test_select_guru_worker_tools_uses_distinct_broad_market_allowlists() -> None:
+    registry = build_default_persona_registry()
+    loop = _loop_with_gurus(_DirectAnswerModel())
+    buffett_session = loop.create_session("warren-buffett", session_id="loop:buffett-tools", allow_internal=True)
+    marks_session = loop.create_session("howard-marks", session_id="loop:marks-tools", allow_internal=True)
+    druck_session = loop.create_session("stanley-druckenmiller", session_id="loop:druck-tools", allow_internal=True)
+    memo_tool = _build_guru_memo_tool()
+
+    buffett_tools = _select_guru_worker_tools(
+        loop=loop,
+        session_id=buffett_session.session_id,
+        persona=registry.get("warren-buffett"),
+        broad_market=True,
+        memo_tool=memo_tool,
+    )
+    marks_tools = _select_guru_worker_tools(
+        loop=loop,
+        session_id=marks_session.session_id,
+        persona=registry.get("howard-marks"),
+        broad_market=True,
+        memo_tool=memo_tool,
+    )
+    druck_tools = _select_guru_worker_tools(
+        loop=loop,
+        session_id=druck_session.session_id,
+        persona=registry.get("stanley-druckenmiller"),
+        broad_market=True,
+        memo_tool=memo_tool,
+    )
+
+    buffett_names = {tool.capability_name for tool in buffett_tools}
+    marks_names = {tool.capability_name for tool in marks_tools}
+    druck_names = {tool.capability_name for tool in druck_tools}
+
+    assert "risk_profile" not in buffett_names
+    assert "economic" not in buffett_names
+    assert "risk_profile" not in marks_names
+    assert "economic" in marks_names
+    assert "macro_focus" not in marks_names
+    assert "risk_profile" in druck_names
+    assert "market_data" not in druck_names
+    assert "valuation" not in druck_names
+    assert "macro_focus" not in druck_names
+
+
+def test_persona_render_lines_filters_garbled_druckenmiller_points() -> None:
+    registry = build_default_persona_registry()
+    druck = registry.get("stanley-druckenmiller")
+
+    lines = _persona_render_lines(
+        persona=druck,
+        memo=GuruResearchMemo(
+            guru="stanley-druckenmiller",
+            stance="neutral",
+            confidence=65,
+            thesis="The macro tradeoff is that animal spirits are back, but higher yields can still lean on multiples if earnings do not outrun them.",
+            key_evidence=[
+                "SPY up 3.54% and QQQ up 5.17% over the past week, which tells me the tape still has momentum.",
+                "Decliner trend often characterized (broad sensitivity) hypo-wide",
+                "Treasury yields can still compress equity multiples if liquidity does not improve.",
+            ],
+            risks=[
+                "rates .... adjusted format",
+                "If yields keep rising while breadth stays narrow, the index-level edge fades fast.",
+            ],
+            open_questions=["How will Treasury yield trends affect equity multiples if growth stabilizes?"],
+            citations=[],
+        ),
+    )
+
+    rendered = "\n".join(lines)
+    assert "hypo-wide" not in rendered
+    assert "rates .... adjusted format" not in rendered
+    assert "Treasury yields can still compress equity multiples" in rendered

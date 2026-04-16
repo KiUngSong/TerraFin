@@ -535,22 +535,33 @@ class TerraFinAgentService:
         )
         results: dict[str, dict[str, Any]] = {}
         for name in requested:
+            display_name = canonical_macro_name(name)
             try:
-                data = self._data_factory.get_fred_data(name)
+                if display_name in indicator_registry._indicators:
+                    data = self._data_factory.get_economic_data(display_name)
+                else:
+                    raw_name = name.strip()
+                    data = self._data_factory.get_fred_data(raw_name)
+                    display_name = raw_name
             except Exception:
                 data = TimeSeriesDataFrame.make_empty()
             if data is not None and not data.empty:
                 series = [
                     {"time": str(row.get("time", "")), "value": float(row["close"])} for _, row in data.iterrows()
                 ]
-                results[name] = {
-                    "name": name,
+                results[display_name] = {
+                    "name": display_name,
                     "latest_value": round(float(data["close"].iloc[-1]), 4),
                     "latest_time": str(data["time"].iloc[-1]),
                     "series": series,
                 }
             else:
-                results[name] = {"name": name, "latest_value": None, "latest_time": None, "series": []}
+                results[display_name] = {
+                    "name": display_name,
+                    "latest_value": None,
+                    "latest_time": None,
+                    "series": [],
+                }
         return {
             "indicators": results,
             "processing": _full_processing(

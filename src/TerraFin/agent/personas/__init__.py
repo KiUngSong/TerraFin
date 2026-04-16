@@ -47,6 +47,10 @@ class GuruPersona:
     sell_discipline: tuple[str, ...] = ()
     disagreement_policy: str = ""
     style_exemplars: tuple[str, ...] = ()
+    recent_context_cues: tuple[str, ...] = ()
+    broad_market_playbook: tuple[str, ...] = ()
+    forbidden_backbone_evidence: tuple[str, ...] = ()
+    signature_concepts: tuple[str, ...] = ()
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
@@ -79,6 +83,10 @@ def _parse_persona(raw: dict[str, Any]) -> GuruPersona:
         sell_discipline=tuple(raw.get("sell_discipline", ())),
         disagreement_policy=raw.get("disagreement_policy", ""),
         style_exemplars=tuple(raw.get("style_exemplars", ())),
+        recent_context_cues=tuple(raw.get("recent_context_cues", ())),
+        broad_market_playbook=tuple(raw.get("broad_market_playbook", ())),
+        forbidden_backbone_evidence=tuple(raw.get("forbidden_backbone_evidence", ())),
+        signature_concepts=tuple(raw.get("signature_concepts", ())),
         metadata=dict(raw.get("metadata", {})),
     )
 
@@ -209,6 +217,30 @@ def build_guru_system_prompt(persona: GuruPersona) -> str:
     if persona.style_exemplars:
         lines.append("## Style Exemplars")
         for item in persona.style_exemplars:
+            lines.append(f"- {item}")
+        lines.append("")
+
+    if persona.recent_context_cues:
+        lines.append("## Recent Context Cues")
+        for item in persona.recent_context_cues:
+            lines.append(f"- {item}")
+        lines.append("")
+
+    if persona.broad_market_playbook:
+        lines.append("## Broad Market Playbook")
+        for item in persona.broad_market_playbook:
+            lines.append(f"- {item}")
+        lines.append("")
+
+    if persona.signature_concepts:
+        lines.append("## Signature Concepts")
+        for item in persona.signature_concepts:
+            lines.append(f"- {item}")
+        lines.append("")
+
+    if persona.forbidden_backbone_evidence:
+        lines.append("## Evidence To Avoid As The Main Backbone")
+        for item in persona.forbidden_backbone_evidence:
             lines.append(f"- {item}")
         lines.append("")
 

@@ -62,6 +62,12 @@ class _FakeDataFactory:
         frame.name = name
         return frame
 
+    def get_economic_data(self, name: str):
+        frame = _make_frame(name, periods=12)[["time", "close"]]
+        frame = TimeSeriesDataFrame(frame)
+        frame.name = name
+        return frame
+
 
 class _FakePrivateDataService:
     def get_market_breadth(self):
@@ -160,3 +166,13 @@ def test_macro_focus_uses_shared_market_pipeline(monkeypatch) -> None:
     assert payload["info"]["type"] == "index"
     assert payload["processing"]["resolvedDepth"] == "recent"
     assert payload["processing"]["view"] == "weekly"
+
+
+def test_economic_normalizes_human_friendly_indicator_aliases(monkeypatch) -> None:
+    monkeypatch.setattr(agent_service, "DataFactory", _FakeDataFactory)
+    service = agent_service.TerraFinAgentService()
+
+    payload = service.economic(["Fed Funds Rate", "US Federal Reserve Balance Sheet"])
+
+    assert "Federal Funds Effective Rate" in payload["indicators"]
+    assert "SOMA" in payload["indicators"]

@@ -150,6 +150,11 @@ class _QuotaFailureService(_FakeService):
         raise RuntimeError("429 rate limit exceeded for upstream API key")
 
 
+class _MacroFocusEquityMisuseService(_FakeService):
+    def macro_focus(self, name: str, *, depth: str = "auto", view: str = "daily") -> dict[str, object]:
+        raise LookupError(f"Unknown macro instrument: '{name}'")
+
+
 def _fake_chart_opener(
     data_or_names,
     *,
@@ -291,6 +296,41 @@ def test_run_tool_returns_internal_retryable_error_result_for_symbol_resolution_
     assert result.payload["error"]["retryable"] is True
     assert "descriptive phrase" in result.payload["error"]["message"]
     assert "current_view_context" in result.payload["error"]["modelHint"]
+
+
+def test_run_tool_guides_macro_focus_away_from_equity_index_etfs() -> None:
+    adapter = _adapter(service=_MacroFocusEquityMisuseService())
+    session = adapter.runtime.create_session(DEFAULT_HOSTED_AGENT_NAME, session_id="tool:macro-misuse")
+
+    result = adapter.run_tool(session.session.session_id, "macro_focus", {"name": "SPY"})
+
+    assert result.is_error is True
+    assert result.retryable is True
+    assert result.error_code == "tool_wrong_market_tool"
+    assert "equity index or ETF" in result.payload["error"]["message"]
+    assert "market_snapshot" in result.payload["error"]["modelHint"]
+
+
+def test_run_tool_repairs_common_index_aliases_to_supported_etfs() -> None:
+    adapter = _adapter()
+    session = adapter.runtime.create_session(DEFAULT_HOSTED_AGENT_NAME, session_id="tool:index-alias")
+
+    result = adapter.run_tool(session.session.session_id, "market_snapshot", {"name": "SPX"})
+
+    assert result.payload["ticker"] == "SPY"
+
+
+def test_run_tool_blocks_operating_business_tools_for_benchmark_etfs() -> None:
+    adapter = _adapter()
+    session = adapter.runtime.create_session(DEFAULT_HOSTED_AGENT_NAME, session_id="tool:benchmark-business-misuse")
+
+    result = adapter.run_tool(session.session.session_id, "fundamental_screen", {"ticker": "SPY"})
+
+    assert result.is_error is True
+    assert result.retryable is True
+    assert result.error_code == "tool_wrong_equity_benchmark_analysis"
+    assert "operating-business ticker" in result.payload["error"]["message"]
+    assert "fundamental_screen" in result.payload["error"]["modelHint"]
 
 
 def test_run_tool_still_raises_for_upstream_auth_or_quota_failures() -> None:
