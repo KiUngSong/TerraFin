@@ -12,16 +12,23 @@ import requests
 
 from TerraFin.env import ensure_runtime_env_loaded
 
-from ..conversation_state import get_tool_call_record
-from ..definitions import TerraFinAgentDefinition
-from ..loop import (
+from ..conversation import (
     TerraFinConversationMessage,
     TerraFinHostedConversation,
     TerraFinModelTurn,
     TerraFinToolCall,
+    iter_tool_result_blocks,
+    iter_tool_use_blocks,
 )
+from ..conversation_state import get_tool_call_record
+from ..definitions import TerraFinAgentDefinition
 from ..model_management import resolve_provider_secret
-from ..model_runtime import TerraFinModelConfigError, TerraFinModelProvider, TerraFinModelResponseError, TerraFinRuntimeModel
+from ..model_runtime import (
+    TerraFinModelConfigError,
+    TerraFinModelProvider,
+    TerraFinModelResponseError,
+    TerraFinRuntimeModel,
+)
 from ..runtime import TerraFinAgentSession
 from ..tools import TerraFinToolDefinition
 
@@ -184,33 +191,48 @@ class TerraFinGoogleResponsesProvider(TerraFinModelProvider):
                 contents.append({"role": "user", "parts": [{"text": message.content}]})
                 continue
             if message.role == "assistant":
+                tool_use_blocks = iter_tool_use_blocks(message)
+                if tool_use_blocks:
+                    for block in tool_use_blocks:
+                        contents.append(
+                            {
+                                "role": "model",
+                                "parts": [
+                                    {
+                                        "functionCall": {
+                                            "name": str(block.payload.get("toolName") or ""),
+                                            "args": dict(block.payload.get("arguments", {})),
+                                        }
+                                    }
+                                ],
+                            }
+                        )
                 if message.content.strip():
                     contents.append({"role": "model", "parts": [{"text": message.content}]})
                 continue
             if message.role == "tool":
+                tool_result_blocks = iter_tool_result_blocks(message)
+                tool_result_block = tool_result_blocks[0] if tool_result_blocks else None
                 call_record = get_tool_call_record(conversation, message.tool_call_id or "")
-                if call_record is not None:
-                    contents.append(
-                        {
-                            "role": "model",
-                            "parts": [
-                                {
-                                    "functionCall": {
-                                        "name": str(call_record.get("toolName") or message.name or ""),
-                                        "args": dict(call_record.get("arguments", {})),
-                                    }
-                                }
-                            ],
-                        }
+                if tool_result_block is not None:
+                    tool_name = str(
+                        tool_result_block.payload.get("toolName")
+                        or message.name
+                        or (call_record or {}).get("toolName")
+                        or ""
                     )
+                    response_payload = dict(tool_result_block.payload.get("payload", {}))
+                else:
+                    tool_name = message.name or str((call_record or {}).get("toolName") or "")
+                    response_payload = self._parse_tool_output(message.content)
                 contents.append(
                     {
                         "role": "user",
                         "parts": [
                             {
                                 "functionResponse": {
-                                    "name": message.name or str(call_record.get("toolName") if call_record else ""),
-                                    "response": self._parse_tool_output(message.content),
+                                    "name": tool_name,
+                                    "response": response_payload,
                                 }
                             }
                         ],

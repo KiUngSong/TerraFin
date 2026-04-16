@@ -4,6 +4,9 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
+from TerraFin.interface.market_insights.payloads import canonical_macro_name, resolve_macro_type
+from TerraFin.interface.stock.payloads import resolve_ticker_query
+
 from .definitions import TerraFinAgentDefinition
 from .hosted_runtime import (
     TerraFinAgentApprovalRequiredError,
@@ -45,6 +48,19 @@ class TerraFinToolInvocationResult:
     execution_mode: ToolExecutionMode
     payload: dict[str, Any]
     task: TerraFinTaskRecord | None = None
+    is_error: bool = False
+    retryable: bool = False
+    error_code: str | None = None
+    error_message: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class _ToolErrorDisposition:
+    code: str
+    message: str
+    retryable: bool
+    expose_to_user: bool
+    model_hint: str | None = None
 
 
 class TerraFinHostedToolAdapter:
@@ -110,6 +126,47 @@ class TerraFinHostedToolAdapter:
                     "reason": exc.approval.reason,
                 },
             }
+        except Exception as exc:
+            retried_arguments = self._repair_retryable_arguments(tool, resolved_arguments, exc)
+            if retried_arguments is None:
+                disposition = self._classify_tool_error(tool, resolved_arguments, exc)
+                if disposition is None or disposition.expose_to_user:
+                    raise
+                return TerraFinToolInvocationResult(
+                    tool_name=tool.name,
+                    capability_name=tool.capability_name,
+                    session_id=session_id,
+                    execution_mode=tool.execution_mode,
+                    payload={
+                        "accepted": False,
+                        "error": {
+                            "code": disposition.code,
+                            "message": disposition.message,
+                            "detail": str(exc),
+                            "retryable": disposition.retryable,
+                            "modelHint": disposition.model_hint,
+                        },
+                    },
+                    task=None,
+                    is_error=True,
+                    retryable=disposition.retryable,
+                    error_code=disposition.code,
+                    error_message=disposition.message,
+                )
+            if tool.name == "current_view_context":
+                payload = self.runtime.read_linked_view_context(
+                    session_id,
+                    view_context_id=_optional_string(retried_arguments.get("viewContextId")),
+                )
+            elif tool.execution_mode == "task":
+                task = self.runtime.start_task(session_id, tool.capability_name, **retried_arguments)
+                payload = {
+                    "accepted": True,
+                    "taskId": task.task_id,
+                    "status": task.status,
+                }
+            else:
+                payload = self.runtime.invoke(session_id, tool.capability_name, **retried_arguments)
         return TerraFinToolInvocationResult(
             tool_name=tool.name,
             capability_name=tool.capability_name,
@@ -187,9 +244,143 @@ class TerraFinHostedToolAdapter:
             },
         )
 
+    def _repair_retryable_arguments(
+        self,
+        tool: TerraFinToolDefinition,
+        arguments: Mapping[str, Any],
+        error: Exception,
+    ) -> dict[str, Any] | None:
+        message = str(error or "")
+        if not any(
+            marker in message
+            for marker in (
+                "Invalid ticker:",
+                "No data found for",
+                "Unknown macro instrument:",
+            )
+        ):
+            return None
+
+        repaired = dict(arguments)
+        if "name" in repaired:
+            value = _optional_string(repaired.get("name"))
+            fixed = _repair_symbol_or_name(value, allow_macro=True)
+            if fixed and fixed != value:
+                repaired["name"] = fixed
+                return repaired
+        if "ticker" in repaired:
+            value = _optional_string(repaired.get("ticker"))
+            fixed = _repair_symbol_or_name(value, allow_macro=False)
+            if fixed and fixed != value:
+                repaired["ticker"] = fixed
+                return repaired
+        return None
+
+    def _classify_tool_error(
+        self,
+        tool: TerraFinToolDefinition,
+        arguments: Mapping[str, Any],
+        error: Exception,
+    ) -> _ToolErrorDisposition | None:
+        message = str(error or "").strip()
+        lowered = message.lower()
+
+        fatal_markers = (
+            "rate limit",
+            "quota",
+            "too many requests",
+            "api key",
+            "invalid api key",
+            "authentication",
+            "unauthorized",
+            "forbidden",
+            "credential",
+            "401",
+            "403",
+            "429",
+        )
+        if any(marker in lowered for marker in fatal_markers):
+            return _ToolErrorDisposition(
+                code="upstream_auth_or_quota_error",
+                message=message or "The upstream API rejected the request.",
+                retryable=False,
+                expose_to_user=True,
+            )
+
+        name_value = _optional_string(arguments.get("name"))
+        ticker_value = _optional_string(arguments.get("ticker"))
+        requested_value = name_value or ticker_value or ""
+        generic_phrase = (
+            "looks like a descriptive phrase rather than a ticker or supported macro instrument."
+            if _looks_like_descriptive_phrase(requested_value)
+            else "could not be resolved to a valid ticker or supported macro instrument."
+        )
+
+        recoverable_markers = (
+            "invalid ticker:",
+            "no data found for",
+            "unknown macro instrument:",
+            "unknown instrument:",
+            "not found for ticker",
+        )
+        if any(marker in lowered for marker in recoverable_markers):
+            return _ToolErrorDisposition(
+                code="tool_input_resolution_error",
+                message=(
+                    f"The requested symbol or market name {generic_phrase} "
+                    "Retry with a concrete ticker or macro instrument, or inspect the current view first."
+                ),
+                retryable=True,
+                expose_to_user=False,
+                model_hint=(
+                    "If the user is asking about the page they are currently viewing, call "
+                    "`current_view_context` first. Otherwise retry with a concrete ticker or supported "
+                    "macro instrument instead of a descriptive phrase."
+                ),
+            )
+
+        validation_markers = (
+            "missing required",
+            "validation",
+            "must be one of",
+            "expected ",
+        )
+        if any(marker in lowered for marker in validation_markers):
+            return _ToolErrorDisposition(
+                code="tool_input_validation_error",
+                message="The tool input was malformed. Retry with corrected arguments.",
+                retryable=True,
+                expose_to_user=False,
+                model_hint="Correct the tool arguments and retry.",
+            )
+        return None
+
 
 def _optional_string(value: Any) -> str | None:
     if value is None:
         return None
     text = str(value).strip()
     return text or None
+
+
+def _repair_symbol_or_name(value: str | None, *, allow_macro: bool) -> str | None:
+    if not value:
+        return None
+    canonical = canonical_macro_name(value)
+    if allow_macro and resolve_macro_type(canonical) is not None:
+        return canonical
+    resolved = resolve_ticker_query(value)
+    resolved_type = str(resolved.get("type") or "").strip().lower()
+    resolved_name = _optional_string(resolved.get("name"))
+    if allow_macro and resolved_type == "macro" and resolved_name:
+        return resolved_name
+    if resolved_type == "stock" and resolved_name:
+        return resolved_name
+    return None
+
+
+def _looks_like_descriptive_phrase(value: str) -> bool:
+    text = (value or "").strip()
+    if not text:
+        return False
+    return " " in text

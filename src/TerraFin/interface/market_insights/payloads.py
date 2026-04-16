@@ -12,6 +12,18 @@ from TerraFin.data.providers.market import INDEX_DESCRIPTIONS, INDEX_MAP, MARKET
 from TerraFin.interface.chart.state import get_named_series
 
 
+_MACRO_NAME_ALIASES = {
+    "nasdaq composite": "Nasdaq",
+    "nasdaq composite index": "Nasdaq",
+    "nasdaq comp": "Nasdaq",
+    "dow jones": "Dow",
+    "dow jones industrial average": "Dow",
+    "s&p500": "S&P 500",
+    "s&p 500 index": "S&P 500",
+    "nikkei": "Nikkei 225",
+}
+
+
 def _display_name(name: str) -> str:
     return name.upper() if name == name.lower() else name
 
@@ -30,6 +42,9 @@ def canonical_macro_name(name: str) -> str:
     stripped = name.strip()
     if not stripped:
         return stripped
+    alias = _MACRO_NAME_ALIASES.get(stripped.casefold())
+    if alias:
+        return alias
     match = _case_insensitive_match(stripped, INDEX_MAP.keys())
     if match:
         return match

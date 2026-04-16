@@ -55,8 +55,43 @@ class TerraFinAgentDefinitionRegistry:
         return tuple(self._definitions)
 
 
-def build_default_agent_definition_registry() -> TerraFinAgentDefinitionRegistry:
-    return TerraFinAgentDefinitionRegistry(
+def build_guru_agent_definitions(
+    registry: "PersonaRegistry | None" = None,
+) -> list[TerraFinAgentDefinition]:
+    """Build TerraFinAgentDefinitions for all loaded guru personas."""
+    if registry is None:
+        from .personas import build_default_persona_registry
+
+        registry = build_default_persona_registry()
+
+    definitions: list[TerraFinAgentDefinition] = []
+    for persona in registry.list():
+        definitions.append(
+            TerraFinAgentDefinition(
+                name=persona.name,
+                description=persona.description,
+                allowed_capabilities=tuple(persona.allowed_capabilities),
+                default_depth="auto",
+                default_view="daily",
+                chart_access=False,
+                allow_background_tasks=True,
+                metadata={
+                    "role": "guru",
+                    "visibility": "internal",
+                    "investing_style": persona.investing_style,
+                    "display_name": persona.display_name,
+                    "title": persona.title,
+                },
+            )
+        )
+    return definitions
+
+
+def build_default_agent_definition_registry(
+    *,
+    include_gurus: bool = False,
+) -> TerraFinAgentDefinitionRegistry:
+    registry = TerraFinAgentDefinitionRegistry(
         [
             TerraFinAgentDefinition(
                 name=DEFAULT_HOSTED_AGENT_NAME,
@@ -66,7 +101,15 @@ def build_default_agent_definition_registry() -> TerraFinAgentDefinitionRegistry
                 default_view="daily",
                 chart_access=True,
                 allow_background_tasks=True,
-                metadata={"role": "default"},
+                metadata={"role": "default", "visibility": "public"},
             ),
         ]
     )
+    if include_gurus:
+        for definition in build_guru_agent_definitions():
+            registry.register(definition)
+    return registry
+
+
+def is_internal_agent_definition(definition: TerraFinAgentDefinition) -> bool:
+    return str(definition.metadata.get("visibility", "public")).strip().lower() == "internal"

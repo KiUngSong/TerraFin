@@ -7,6 +7,13 @@ from .definitions import (
     TerraFinAgentDefinition,
     TerraFinAgentDefinitionRegistry,
     build_default_agent_definition_registry,
+    build_guru_agent_definitions,
+)
+from .guru import (
+    GuruResearchMemo,
+    GuruRoutePlan,
+    build_guru_route_plan,
+    maybe_run_guru_orchestrator,
 )
 from .hosted_runtime import (
     TerraFinAgentApprovalRequiredError,
@@ -140,6 +147,7 @@ __all__ = [
     "TerraFinHostedPermissionEvent",
     "TerraFinHostedSessionRecord",
     "build_default_agent_definition_registry",
+    "build_guru_agent_definitions",
     "build_default_capability_registry",
     "create_agent_context",
     "TerraFinRuntimeSessionClient",
@@ -153,4 +161,8 @@ __all__ = [
     "stock_fundamentals",
     "calendar_scan",
     "open_chart",
+    "GuruResearchMemo",
+    "GuruRoutePlan",
+    "build_guru_route_plan",
+    "maybe_run_guru_orchestrator",
 ]

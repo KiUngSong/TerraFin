@@ -1,23 +1,34 @@
 from fastapi import APIRouter, HTTPException, Query
 
+from TerraFin.agent.conversation import is_internal_only_message
+from TerraFin.agent.conversation_state import RUNTIME_MODEL_METADATA_KEY
+from TerraFin.agent.definitions import is_internal_agent_definition
+from TerraFin.agent.hosted_runtime import (
+    TerraFinAgentApprovalRequiredError,
+    TerraFinAgentPolicyError,
+    TerraFinAgentSessionConflictError,
+)
+from TerraFin.agent.hosted_service import get_hosted_agent_loop
+from TerraFin.agent.loop import TerraFinConversationMessage, TerraFinHostedRunResult
+from TerraFin.agent.model_runtime import TerraFinModelConfigError, TerraFinModelResponseError
 from TerraFin.agent.models import (
     CalendarResponse,
     CompanyInfoResponse,
     EarningsResponse,
     EconomicResponse,
-    HostedApprovalDecisionRequest,
-    HostedApprovalListResponse,
-    HostedApprovalResponse,
     FinancialStatementResponse,
     HostedAgentCatalogResponse,
     HostedAgentDefinitionResponse,
     HostedAgentMessageRequest,
     HostedAgentRunResponse,
-    HostedAgentSessionDeleteResponse,
     HostedAgentSessionCreateRequest,
+    HostedAgentSessionDeleteResponse,
     HostedAgentSessionListResponse,
     HostedAgentSessionResponse,
     HostedAgentSessionSummaryResponse,
+    HostedApprovalDecisionRequest,
+    HostedApprovalListResponse,
+    HostedApprovalResponse,
     HostedArtifactResponse,
     HostedCapabilityCallResponse,
     HostedConversationMessageResponse,
@@ -39,15 +50,9 @@ from TerraFin.agent.models import (
     PortfolioResponse,
     ResolveResponse,
 )
-from TerraFin.agent.hosted_runtime import (
-    TerraFinAgentApprovalRequiredError,
-    TerraFinAgentPolicyError,
-    TerraFinAgentSessionConflictError,
-)
-from TerraFin.agent.hosted_service import get_hosted_agent_loop
-from TerraFin.agent.loop import TerraFinConversationMessage, TerraFinHostedRunResult
-from TerraFin.agent.model_runtime import TerraFinModelConfigError, TerraFinModelResponseError
 from TerraFin.agent.openai_model import TerraFinOpenAIConfigError, TerraFinOpenAIResponseError
+from TerraFin.agent.runtime import TerraFinArtifact, TerraFinCapabilityCall, TerraFinTaskRecord
+from TerraFin.agent.service import TerraFinAgentService
 from TerraFin.agent.session_store import (
     TerraFinHostedApprovalRequest,
     TerraFinHostedPermissionEvent,
@@ -55,9 +60,6 @@ from TerraFin.agent.session_store import (
     TerraFinHostedViewContextRecord,
 )
 from TerraFin.agent.tools import TerraFinToolDefinition, TerraFinToolInvocationResult
-from TerraFin.agent.runtime import TerraFinArtifact, TerraFinCapabilityCall, TerraFinTaskRecord
-from TerraFin.agent.service import TerraFinAgentService
-from TerraFin.agent.conversation_state import RUNTIME_MODEL_METADATA_KEY
 from TerraFin.data.providers.corporate.filings.sec_edgar.filing import (
     SecEdgarConfigurationError,
     SecEdgarUnavailableError,
@@ -66,6 +68,27 @@ from TerraFin.interface.errors import AppRuntimeError
 
 
 AGENT_API_PREFIX = "/agent/api"
+
+
+def _raise_if_internal_agent_name(loop, agent_name: str) -> None:
+    definition = loop.runtime.get_agent_definition(agent_name)
+    if is_internal_agent_definition(definition):
+        raise AppRuntimeError(
+            "The requested hosted agent is internal-only.",
+            code="hosted_agent_not_found",
+            status_code=404,
+        )
+
+
+def _get_public_session_record(loop, session_id: str) -> TerraFinHostedSessionRecord:
+    try:
+        return loop.runtime.get_public_session_record(session_id)
+    except KeyError as exc:
+        raise AppRuntimeError(
+            "The requested hosted session was not found.",
+            code="hosted_session_not_found",
+            status_code=404,
+        ) from exc
 
 
 def _message_response(message: TerraFinConversationMessage) -> HostedConversationMessageResponse:
@@ -222,9 +245,15 @@ def _session_summary_response(
             conversation = loop.get_conversation(record.session_id)
         except Exception:
             conversation = None
-    visible_messages = [] if conversation is None else [
-        message for message in conversation.snapshot() if message.role not in {"system", "tool"}
-    ]
+    visible_messages = (
+        []
+        if conversation is None
+        else [
+            message
+            for message in conversation.snapshot()
+            if message.role not in {"system", "tool"} and not is_internal_only_message(message)
+        ]
+    )
     last_message = visible_messages[-1] if visible_messages else None
     first_user_message = next((message for message in visible_messages if message.role == "user"), None)
     runtime_model = _runtime_model_response(record.context.session.metadata.get(RUNTIME_MODEL_METADATA_KEY))
@@ -247,26 +276,34 @@ def _session_summary_response(
         title=(
             transcript_summary.title
             if transcript_summary is not None
-            else None if first_user_message is None else _message_preview(first_user_message.content, limit=72)
+            else None
+            if first_user_message is None
+            else _message_preview(first_user_message.content, limit=72)
         ),
         lastMessagePreview=(
             transcript_summary.last_message_preview
             if transcript_summary is not None
-            else None if last_message is None else _message_preview(last_message.content)
+            else None
+            if last_message is None
+            else _message_preview(last_message.content)
         ),
         lastMessageAt=(
             None
             if (transcript_summary is not None and transcript_summary.last_message_at is None)
             else transcript_summary.last_message_at.isoformat()
             if transcript_summary is not None
-            else None if last_message is None else last_message.created_at.isoformat()
+            else None
+            if last_message is None
+            else last_message.created_at.isoformat()
         ),
         messageCount=transcript_summary.message_count if transcript_summary is not None else len(visible_messages),
         pendingTaskCount=pending_task_count,
     )
 
 
-def _resolve_model_client_runtime_model(loop: object, *, session: object | None = None) -> HostedRuntimeModelResponse | None:
+def _resolve_model_client_runtime_model(
+    loop: object, *, session: object | None = None
+) -> HostedRuntimeModelResponse | None:
     describe = getattr(getattr(loop, "model_client", None), "describe_runtime_model", None)
     if not callable(describe):
         return None
@@ -335,14 +372,15 @@ def _session_response(
         focusItems=list(record.context.session.snapshot().focus_items),
         artifacts=[_artifact_response(artifact) for artifact in record.context.session.snapshot().artifacts],
         capabilityCalls=[
-            _capability_call_response(call)
-            for call in record.context.session.snapshot().capability_calls
+            _capability_call_response(call) for call in record.context.session.snapshot().capability_calls
         ],
         tasks=[_task_response(task) for task in record.context.task_registry.list_for_session(record.session_id)],
         approvals=[_approval_response(approval) for approval in record.approval_requests],
         auditTrail=[_audit_response(event) for event in record.audit_log],
         tools=[_tool_response(tool) for tool in tools],
-        messages=[] if conversation is None else [_message_response(message) for message in conversation.snapshot()],
+        messages=[]
+        if conversation is None
+        else [_message_response(message) for message in conversation.snapshot() if not is_internal_only_message(message)],
     )
 
 
@@ -375,7 +413,7 @@ def _run_response(
         agentName=run_result.agent_name,
         steps=run_result.steps,
         finalMessage=None if run_result.final_message is None else _message_response(run_result.final_message),
-        messagesAdded=[_message_response(message) for message in run_result.messages_added],
+        messagesAdded=[_message_response(message) for message in run_result.messages_added if not is_internal_only_message(message)],
         toolResults=[_tool_invocation_response(result) for result in run_result.tool_results],
         session=_session_response(record, loop=loop, tools=tools),
     )
@@ -458,9 +496,13 @@ def create_agent_data_router() -> APIRouter:
     def api_hosted_agent_catalog():
         try:
             loop = get_hosted_agent_loop()
-            default_runtime_model, runtime_configured, runtime_setup_message = _resolve_model_client_runtime_status(loop)
+            default_runtime_model, runtime_configured, runtime_setup_message = _resolve_model_client_runtime_status(
+                loop
+            )
             agents = []
             for definition in loop.runtime.list_agents():
+                if is_internal_agent_definition(definition):
+                    continue
                 agents.append(
                     HostedAgentDefinitionResponse(
                         name=definition.name,
@@ -474,7 +516,9 @@ def create_agent_data_router() -> APIRouter:
                         runtimeConfigured=runtime_configured,
                         runtimeSetupMessage=runtime_setup_message,
                         metadata=dict(definition.metadata),
-                        tools=[_tool_response(tool) for tool in loop.tool_adapter.list_tools_for_agent(definition.name)],
+                        tools=[
+                            _tool_response(tool) for tool in loop.tool_adapter.list_tools_for_agent(definition.name)
+                        ],
                     )
                 )
             return HostedAgentCatalogResponse(agents=agents)
@@ -486,6 +530,7 @@ def create_agent_data_router() -> APIRouter:
         try:
             loop = get_hosted_agent_loop()
             _raise_if_hosted_runtime_unavailable(loop)
+            _raise_if_internal_agent_name(loop, request.agentName)
             conversation = loop.create_session(
                 request.agentName,
                 session_id=request.sessionId,
@@ -516,7 +561,7 @@ def create_agent_data_router() -> APIRouter:
     def api_hosted_agent_get_session(session_id: str):
         try:
             loop = get_hosted_agent_loop()
-            record = loop.runtime.get_session_record(session_id)
+            record = _get_public_session_record(loop, session_id)
             return _session_response(
                 record,
                 loop=loop,
@@ -532,6 +577,7 @@ def create_agent_data_router() -> APIRouter:
     def api_hosted_agent_delete_session(session_id: str):
         try:
             loop = get_hosted_agent_loop()
+            _get_public_session_record(loop, session_id)
             removed = loop.runtime.delete_session(session_id)
             forget_conversation = getattr(loop, "forget_conversation", None)
             if callable(forget_conversation):
@@ -585,10 +631,10 @@ def create_agent_data_router() -> APIRouter:
     def api_hosted_agent_submit_message(session_id: str, request: HostedAgentMessageRequest):
         try:
             loop = get_hosted_agent_loop()
-            record = loop.runtime.get_session_record(session_id)
+            record = _get_public_session_record(loop, session_id)
             _raise_if_hosted_runtime_unavailable(loop, session=record.context.session)
             run_result = loop.submit_user_message(session_id, request.content)
-            record = loop.runtime.get_session_record(session_id)
+            record = _get_public_session_record(loop, session_id)
             return _run_response(
                 run_result,
                 record=record,
@@ -605,7 +651,7 @@ def create_agent_data_router() -> APIRouter:
     def api_hosted_agent_list_tasks(session_id: str):
         try:
             loop = get_hosted_agent_loop()
-            tasks = loop.runtime.list_session_tasks(session_id)
+            tasks = loop.runtime.list_public_session_tasks(session_id)
             return HostedTaskListResponse(
                 sessionId=session_id,
                 tasks=[_task_response(task) for task in tasks],
@@ -620,7 +666,7 @@ def create_agent_data_router() -> APIRouter:
     def api_hosted_agent_list_approvals(session_id: str):
         try:
             loop = get_hosted_agent_loop()
-            approvals = loop.runtime.list_session_approvals(session_id)
+            approvals = loop.runtime.list_public_session_approvals(session_id)
             return HostedApprovalListResponse(
                 sessionId=session_id,
                 approvals=[_approval_response(approval) for approval in approvals],
@@ -632,7 +678,7 @@ def create_agent_data_router() -> APIRouter:
     def api_hosted_agent_get_task(task_id: str):
         try:
             loop = get_hosted_agent_loop()
-            return _task_response(loop.runtime.get_task(task_id))
+            return _task_response(loop.runtime.get_public_task(task_id))
         except Exception as exc:
             _raise_http_error(exc)
 
@@ -640,7 +686,7 @@ def create_agent_data_router() -> APIRouter:
     def api_hosted_agent_get_approval(approval_id: str):
         try:
             loop = get_hosted_agent_loop()
-            return _approval_response(loop.runtime.get_approval(approval_id))
+            return _approval_response(loop.runtime.get_public_approval(approval_id))
         except Exception as exc:
             _raise_http_error(exc)
 
@@ -648,7 +694,7 @@ def create_agent_data_router() -> APIRouter:
     def api_hosted_agent_cancel_task(task_id: str):
         try:
             loop = get_hosted_agent_loop()
-            return _task_response(loop.runtime.cancel_task(task_id))
+            return _task_response(loop.runtime.cancel_public_task(task_id))
         except Exception as exc:
             _raise_http_error(exc)
 
@@ -662,7 +708,7 @@ def create_agent_data_router() -> APIRouter:
     ):
         try:
             loop = get_hosted_agent_loop()
-            return _approval_response(loop.runtime.approve_approval(approval_id, note=request.note))
+            return _approval_response(loop.runtime.approve_public_approval(approval_id, note=request.note))
         except Exception as exc:
             _raise_http_error(exc)
 
@@ -676,7 +722,7 @@ def create_agent_data_router() -> APIRouter:
     ):
         try:
             loop = get_hosted_agent_loop()
-            return _approval_response(loop.runtime.deny_approval(approval_id, note=request.note))
+            return _approval_response(loop.runtime.deny_public_approval(approval_id, note=request.note))
         except Exception as exc:
             _raise_http_error(exc)
 

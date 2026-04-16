@@ -104,6 +104,54 @@ def resolve_model_state_path(env: Mapping[str, str] | None = None) -> Path:
     return resolve_state_dir(env) / DEFAULT_MODEL_STATE_FILENAME
 
 
+def _legacy_model_state_paths(env: Mapping[str, str] | None = None) -> tuple[Path, ...]:
+    source = env if env is not None else os.environ
+    if str(source.get(MODEL_STATE_PATH_ENV, "") or "").strip():
+        return ()
+    if str(source.get("TERRAFIN_STATE_DIR", "") or "").strip():
+        return ()
+
+    current = resolve_model_state_path(env)
+    candidates: list[Path] = []
+    repo_root = current.parent.parent if current.name == DEFAULT_MODEL_STATE_FILENAME else None
+    if repo_root is not None:
+        legacy = repo_root.parent / ".terrafin" / DEFAULT_MODEL_STATE_FILENAME
+        if legacy != current:
+            candidates.append(legacy)
+    return tuple(candidates)
+
+
+def _load_model_state_from_path(path: Path) -> dict[str, Any]:
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        raise ValueError(f"TerraFin model state at '{path}' must be a JSON object.")
+    state = _empty_model_state()
+    state["version"] = int(payload.get("version", 1) or 1)
+    default_model_ref = payload.get("defaultModelRef")
+    state["defaultModelRef"] = str(default_model_ref).strip() if isinstance(default_model_ref, str) else None
+    auth = payload.get("auth", {})
+    if isinstance(auth, Mapping):
+        state["auth"] = {
+            str(provider_id).strip().lower(): dict(provider_payload)
+            for provider_id, provider_payload in auth.items()
+            if isinstance(provider_payload, Mapping)
+        }
+    return state
+
+
+def _migrate_legacy_model_state_if_needed(env: Mapping[str, str] | None = None) -> Path | None:
+    target = resolve_model_state_path(env)
+    if target.is_file():
+        return target
+    for legacy_path in _legacy_model_state_paths(env):
+        if not legacy_path.is_file():
+            continue
+        state = _load_model_state_from_path(legacy_path)
+        save_model_state(state, env)
+        return target
+    return None
+
+
 def _empty_model_state() -> dict[str, Any]:
     return {
         "version": 1,
@@ -119,27 +167,14 @@ def _allow_saved_state(env: Mapping[str, str] | None) -> bool:
 def load_model_state(env: Mapping[str, str] | None = None) -> dict[str, Any]:
     if not _allow_saved_state(env):
         return _empty_model_state()
+    _migrate_legacy_model_state_if_needed(env)
     path = resolve_model_state_path(env)
     if not path.is_file():
         return _empty_model_state()
     try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
+        return _load_model_state_from_path(path)
     except Exception as exc:
         raise ValueError(f"Failed to read TerraFin model state from '{path}'.") from exc
-    if not isinstance(payload, dict):
-        raise ValueError(f"TerraFin model state at '{path}' must be a JSON object.")
-    state = _empty_model_state()
-    state["version"] = int(payload.get("version", 1) or 1)
-    default_model_ref = payload.get("defaultModelRef")
-    state["defaultModelRef"] = str(default_model_ref).strip() if isinstance(default_model_ref, str) else None
-    auth = payload.get("auth", {})
-    if isinstance(auth, Mapping):
-        state["auth"] = {
-            str(provider_id).strip().lower(): dict(provider_payload)
-            for provider_id, provider_payload in auth.items()
-            if isinstance(provider_payload, Mapping)
-        }
-    return state
 
 
 def save_model_state(state: Mapping[str, Any], env: Mapping[str, str] | None = None) -> Path:

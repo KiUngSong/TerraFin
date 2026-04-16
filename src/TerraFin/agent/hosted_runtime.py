@@ -10,11 +10,14 @@ from threading import Event, RLock, Thread
 from typing import Any, Mapping
 from uuid import uuid4
 
+from .conversation_state import RUNTIME_MODEL_METADATA_KEY
 from .definitions import (
     TerraFinAgentDefinition,
     TerraFinAgentDefinitionRegistry,
     build_default_agent_definition_registry,
+    is_internal_agent_definition,
 )
+from .model_runtime import TerraFinRuntimeModel
 from .runtime import (
     TerraFinAgentContext,
     TerraFinAgentSession,
@@ -33,8 +36,6 @@ from .session_store import (
     TerraFinHostedViewContextRecord,
 )
 from .transcript_store import HostedTranscriptStore
-from .model_runtime import TerraFinRuntimeModel
-from .conversation_state import RUNTIME_MODEL_METADATA_KEY
 
 
 class TerraFinAgentPolicyError(RuntimeError):
@@ -94,12 +95,8 @@ class TerraFinHostedAgentRuntime:
         self.transcript_store = transcript_store
         self.session_ttl_seconds = session_ttl_seconds
         self.task_retention_seconds = task_retention_seconds
-        self.default_require_human_approval_for_side_effects = (
-            default_require_human_approval_for_side_effects
-        )
-        self.default_require_human_approval_for_background_tasks = (
-            default_require_human_approval_for_background_tasks
-        )
+        self.default_require_human_approval_for_side_effects = default_require_human_approval_for_side_effects
+        self.default_require_human_approval_for_background_tasks = default_require_human_approval_for_background_tasks
         self.default_runtime_model = default_runtime_model
         self.task_dispatch_poll_seconds = max(task_dispatch_poll_seconds, 0.05)
         self.task_lease_seconds = max(task_lease_seconds, 1)
@@ -133,7 +130,9 @@ class TerraFinHostedAgentRuntime:
     def list_sessions(self) -> tuple[TerraFinHostedSessionRecord, ...]:
         self._cleanup_expired_state()
         if self.transcript_store is None:
-            return self.session_store.list()
+            return tuple(
+                record for record in self.session_store.list() if not self._is_hidden_internal_session(record)
+            )
         records: list[TerraFinHostedSessionRecord] = []
         for entry in self.transcript_store.list_sessions():
             try:
@@ -144,6 +143,8 @@ class TerraFinHostedAgentRuntime:
             self._sync_transcript_runtime_model(record)
             self._reconcile_orphaned_tasks(record)
             self._prune_terminal_tasks(record)
+            if self._is_hidden_internal_session(record):
+                continue
             records.append(record)
         return tuple(records)
 
@@ -156,9 +157,14 @@ class TerraFinHostedAgentRuntime:
         *,
         session_id: str | None = None,
         metadata: Mapping[str, Any] | None = None,
+        allow_internal: bool = False,
     ) -> TerraFinAgentContext:
         self._cleanup_expired_state()
         definition = self.get_agent_definition(agent_name)
+        if is_internal_agent_definition(definition) and not allow_internal:
+            raise TerraFinAgentPolicyError(
+                f"Agent definition '{agent_name}' is internal-only and cannot be created through the public runtime surface."
+            )
         requested_metadata = dict(metadata or {})
         require_human_approval_for_side_effects = bool(
             requested_metadata.pop(
@@ -214,6 +220,21 @@ class TerraFinHostedAgentRuntime:
             )
         return context
 
+    def create_internal_session(
+        self,
+        agent_name: str,
+        *,
+        session_id: str | None = None,
+        metadata: Mapping[str, Any] | None = None,
+    ) -> TerraFinAgentContext:
+        resolved_metadata = {"hiddenInternal": True, **dict(metadata or {})}
+        return self.create_session(
+            agent_name,
+            session_id=session_id,
+            metadata=resolved_metadata,
+            allow_internal=True,
+        )
+
     def attach_conversation(self, session_id: str, conversation: Any) -> TerraFinHostedSessionRecord:
         return self.session_store.attach_conversation(session_id, conversation)
 
@@ -235,12 +256,20 @@ class TerraFinHostedAgentRuntime:
     def get_session(self, session_id: str) -> TerraFinAgentContext:
         return self.get_session_record(session_id).context
 
+    def get_public_session_record(self, session_id: str) -> TerraFinHostedSessionRecord:
+        record = self.get_session_record(session_id)
+        if self._is_hidden_internal_session(record):
+            raise KeyError(session_id)
+        return record
+
     def get_session_definition(self, session_id: str) -> TerraFinAgentDefinition:
         record = self.get_session_record(session_id)
         return self.agent_registry.get(record.agent_name)
 
     def delete_session(self, session_id: str) -> TerraFinHostedSessionRecord:
         record = self.get_session_record(session_id)
+        deleted_at = _utc_now()
+        self._delete_hidden_child_sessions(parent_session_id=session_id, deleted_at=deleted_at)
         active_tasks = [
             task
             for task in record.context.task_registry.list_for_session(session_id)
@@ -251,13 +280,87 @@ class TerraFinHostedAgentRuntime:
                 f"Session '{session_id}' still has active background tasks. Cancel them before deleting the session."
             )
         self._drop_task_handles_for_session(session_id)
-        deleted_at = _utc_now()
         if self.transcript_store is not None and self.transcript_store.session_exists(session_id):
             self.transcript_store.archive_session(session_id, deleted_at=deleted_at)
         removed = self.session_store.delete(session_id)
         removed.updated_at = deleted_at
         removed.last_accessed_at = deleted_at
         return removed
+
+    def list_public_session_tasks(self, session_id: str) -> tuple[TerraFinTaskRecord, ...]:
+        self.get_public_session_record(session_id)
+        return self.list_session_tasks(session_id)
+
+    def get_public_task(self, task_id: str) -> TerraFinTaskRecord:
+        task = self.get_task(task_id)
+        session_id = str(task.session_id or "").strip()
+        if not session_id:
+            raise KeyError(task_id)
+        self.get_public_session_record(session_id)
+        return task
+
+    def cancel_public_task(self, task_id: str) -> TerraFinTaskRecord:
+        task = self.get_public_task(task_id)
+        return self.cancel_task(task.task_id)
+
+    def list_public_session_approvals(self, session_id: str) -> tuple[TerraFinHostedApprovalRequest, ...]:
+        self.get_public_session_record(session_id)
+        return self.list_session_approvals(session_id)
+
+    def get_public_approval(self, approval_id: str) -> TerraFinHostedApprovalRequest:
+        approval = self.get_approval(approval_id)
+        self.get_public_session_record(approval.session_id)
+        return approval
+
+    def approve_public_approval(
+        self,
+        approval_id: str,
+        *,
+        note: str | None = None,
+    ) -> TerraFinHostedApprovalRequest:
+        approval = self.get_public_approval(approval_id)
+        return self.approve_approval(approval.approval_id, note=note)
+
+    def deny_public_approval(
+        self,
+        approval_id: str,
+        *,
+        note: str | None = None,
+    ) -> TerraFinHostedApprovalRequest:
+        approval = self.get_public_approval(approval_id)
+        return self.deny_approval(approval.approval_id, note=note)
+
+    def _is_hidden_internal_session(self, record: TerraFinHostedSessionRecord) -> bool:
+        return bool(record.context.session.metadata.get("hiddenInternal") or record.metadata.get("hiddenInternal"))
+
+    def _delete_hidden_child_sessions(
+        self,
+        *,
+        parent_session_id: str,
+        deleted_at: datetime,
+    ) -> None:
+        child_session_ids = [
+            record.session_id
+            for record in self.session_store.list()
+            if str(record.metadata.get("parentSessionId") or "").strip() == parent_session_id
+        ]
+        for child_session_id in child_session_ids:
+            child_record = self.get_session_record(child_session_id)
+            active_tasks = [
+                task
+                for task in child_record.context.task_registry.list_for_session(child_session_id)
+                if task.status not in {"completed", "failed", "cancelled"}
+            ]
+            if active_tasks:
+                raise TerraFinAgentSessionConflictError(
+                    f"Hidden child session '{child_session_id}' still has active background tasks."
+                )
+            self._drop_task_handles_for_session(child_session_id)
+            if self.transcript_store is not None and self.transcript_store.session_exists(child_session_id):
+                self.transcript_store.archive_session(child_session_id, deleted_at=deleted_at)
+            removed = self.session_store.delete(child_session_id)
+            removed.updated_at = deleted_at
+            removed.last_accessed_at = deleted_at
 
     def _ensure_runtime_model_bound(self, record: TerraFinHostedSessionRecord) -> None:
         if self.default_runtime_model is None:
@@ -273,7 +376,10 @@ class TerraFinHostedAgentRuntime:
             record.metadata[RUNTIME_MODEL_METADATA_KEY] = dict(runtime_model_payload)
             changed = True
 
-        if record.conversation is not None and record.conversation.metadata.get(RUNTIME_MODEL_METADATA_KEY) != runtime_model_payload:
+        if (
+            record.conversation is not None
+            and record.conversation.metadata.get(RUNTIME_MODEL_METADATA_KEY) != runtime_model_payload
+        ):
             record.conversation.metadata[RUNTIME_MODEL_METADATA_KEY] = dict(runtime_model_payload)
             changed = True
 
@@ -860,9 +966,7 @@ class TerraFinHostedAgentRuntime:
     def _drop_task_handles_for_session(self, session_id: str) -> None:
         with self._task_lock:
             task_ids = [
-                task_id
-                for task_id, indexed_session_id in self._task_index.items()
-                if indexed_session_id == session_id
+                task_id for task_id, indexed_session_id in self._task_index.items() if indexed_session_id == session_id
             ]
             for task_id in task_ids:
                 self._task_handles.pop(task_id, None)
@@ -870,7 +974,9 @@ class TerraFinHostedAgentRuntime:
 
     def _active_task_count(self) -> int:
         with self._task_lock:
-            return sum(1 for handle in self._task_handles.values() if handle.future is not None and not handle.future.done())
+            return sum(
+                1 for handle in self._task_handles.values() if handle.future is not None and not handle.future.done()
+            )
 
     def _launch_claimed_task(self, session_id: str, task: TerraFinTaskRecord) -> None:
         handle = _AsyncTaskHandle(session_id=session_id, task_id=task.task_id)

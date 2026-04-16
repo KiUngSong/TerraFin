@@ -609,6 +609,27 @@ def build_default_capability_registry(
                 artifact_builder=_chart_artifact,
                 side_effecting=True,
             ),
+            TerraFinCapability(
+                name="fundamental_screen",
+                description="Run fundamental quality and moat screening for a ticker (ROE, margins, earnings quality, balance sheet, pricing power).",
+                handler=resolved_service.fundamental_screen,
+                focus_extractor=_focus_from_input_keys("ticker"),
+                backgroundable=True,
+            ),
+            TerraFinCapability(
+                name="risk_profile",
+                description="Compute statistical risk profile for an asset (tail risk, convexity, volatility regime, drawdown).",
+                handler=resolved_service.risk_profile,
+                focus_extractor=_focus_from_input_keys("name"),
+                backgroundable=True,
+            ),
+            TerraFinCapability(
+                name="valuation",
+                description="Run DCF, reverse DCF, relative valuation, and Graham Number for a ticker.",
+                handler=resolved_service.valuation,
+                focus_extractor=_focus_from_input_keys("ticker"),
+                backgroundable=True,
+            ),
         ]
     )
     return registry

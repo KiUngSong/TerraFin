@@ -9,21 +9,21 @@ from openai import OpenAI
 
 from TerraFin.env import ensure_runtime_env_loaded
 
-from ..conversation_state import get_provider_state
-from ..definitions import TerraFinAgentDefinition
-from ..loop import (
+from ..conversation import (
     TerraFinConversationMessage,
     TerraFinHostedConversation,
-    TerraFinHostedModelClient,
     TerraFinModelTurn,
 )
+from ..conversation_state import get_provider_state
+from ..definitions import TerraFinAgentDefinition
+from ..loop import TerraFinHostedModelClient
+from ..model_management import resolve_provider_secret
 from ..model_runtime import (
     TerraFinModelConfigError,
     TerraFinModelProvider,
     TerraFinModelResponseError,
     TerraFinRuntimeModel,
 )
-from ..model_management import resolve_provider_secret
 from ..runtime import TerraFinAgentSession
 from ..tools import TerraFinToolDefinition
 from .openai_compatible import OpenAICompatibleResponsesRunner

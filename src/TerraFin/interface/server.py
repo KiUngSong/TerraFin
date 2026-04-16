@@ -6,6 +6,7 @@ import socket
 import subprocess
 import sys
 import time
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
@@ -95,18 +96,19 @@ def create_app(initial_data: TimeSeriesDataFrame | None = None, base_path: str =
             details={"buildDir": str(BUILD_DIR), "reason": str(exc)},
         ) from exc
 
-    app = FastAPI()
-    _ = get_private_data_service()
-    _ = get_watchlist_service()
-    cache_manager = get_cache_manager()
-
-    @app.on_event("startup")
-    def _startup_cache_manager() -> None:
+    @asynccontextmanager
+    async def _lifespan(app: FastAPI):
+        _ = app
+        _ = get_private_data_service()
+        _ = get_watchlist_service()
+        cache_manager = get_cache_manager()
         cache_manager.start()
+        try:
+            yield
+        finally:
+            cache_manager.stop()
 
-    @app.on_event("shutdown")
-    def _shutdown_cache_manager() -> None:
-        cache_manager.stop()
+    app = FastAPI(lifespan=_lifespan)
 
     @app.exception_handler(RequestValidationError)
     async def _handle_validation_error(request: Request, exc: RequestValidationError):
@@ -349,8 +351,7 @@ def start_server() -> int:
     existing_pid = _resolve_server_pid(runtime_config)
     if existing_pid is not None:
         raise RuntimeError(
-            f"Cannot start server: {runtime_config.host}:{runtime_config.port} is already in use"
-            f" (PID={existing_pid})."
+            f"Cannot start server: {runtime_config.host}:{runtime_config.port} is already in use (PID={existing_pid})."
         )
     if _port_has_listener(runtime_config.host, runtime_config.port):
         raise RuntimeError(f"Cannot start server: {runtime_config.host}:{runtime_config.port} is already in use.")

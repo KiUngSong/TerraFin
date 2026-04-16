@@ -6,14 +6,14 @@ from typing import Any
 
 from openai import APIError
 
-from ..conversation_state import get_provider_state, set_provider_state
-from ..definitions import TerraFinAgentDefinition
-from ..loop import (
+from ..conversation import (
     TerraFinConversationMessage,
     TerraFinHostedConversation,
     TerraFinModelTurn,
     TerraFinToolCall,
 )
+from ..conversation_state import get_provider_state, set_provider_state
+from ..definitions import TerraFinAgentDefinition
 from ..runtime import TerraFinAgentSession
 from ..tools import TerraFinToolDefinition
 

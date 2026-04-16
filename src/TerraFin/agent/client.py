@@ -7,6 +7,8 @@ from TerraFin.data.contracts import TimeSeriesDataFrame
 from TerraFin.interface.chart import client as chart_client
 from TerraFin.interface.chart.formatters import build_multi_payload
 
+from .conversation import is_internal_only_message
+from .definitions import is_internal_agent_definition
 from .models import ChartOpenResponse
 from .service import TerraFinAgentService
 
@@ -196,7 +198,9 @@ class TerraFinAgentClient:
             except Exception:
                 conversation = getattr(record, "conversation", None)
         visible_messages = [] if conversation is None else [
-            message for message in conversation.snapshot() if message.role not in {"system", "tool"}
+            message
+            for message in conversation.snapshot()
+            if message.role not in {"system", "tool"} and not is_internal_only_message(message)
         ]
         first_user_message = next((message for message in visible_messages if message.role == "user"), None)
         last_message = visible_messages[-1] if visible_messages else None
@@ -266,7 +270,11 @@ class TerraFinAgentClient:
                 ],
                 "messages": []
                 if active_conversation is None
-                else [self._serialize_runtime_message(message) for message in active_conversation.snapshot()],
+                else [
+                    self._serialize_runtime_message(message)
+                    for message in active_conversation.snapshot()
+                    if not is_internal_only_message(message)
+                ],
             }
 
         resolved_conversation = conversation or loop.get_conversation(session_id)
@@ -283,6 +291,7 @@ class TerraFinAgentClient:
             "messages": [
                 self._serialize_runtime_message(message)
                 for message in resolved_conversation.snapshot()
+                if not is_internal_only_message(message)
             ],
         }
 
@@ -382,6 +391,8 @@ class TerraFinAgentClient:
         loop = self._runtime_loop()
         agents = []
         for definition in loop.runtime.list_agents():
+            if is_internal_agent_definition(definition):
+                continue
             agents.append(
                 {
                     "name": definition.name,
@@ -442,6 +453,7 @@ class TerraFinAgentClient:
         if self._resolved_transport() == "http":
             return self._http_get(f"/agent/api/runtime/sessions/{session_id}")
         loop = self._runtime_loop()
+        loop.runtime.get_public_session_record(session_id)
         conversation = loop.get_conversation(session_id)
         return self._serialize_runtime_session(loop=loop, session_id=session_id, conversation=conversation)
 
@@ -449,6 +461,7 @@ class TerraFinAgentClient:
         if self._resolved_transport() == "http":
             return self._http_delete(f"/agent/api/runtime/sessions/{session_id}")
         loop = self._runtime_loop()
+        loop.runtime.get_public_session_record(session_id)
         removed = loop.runtime.delete_session(session_id)
         forget_conversation = getattr(loop, "forget_conversation", None)
         if callable(forget_conversation):
@@ -465,6 +478,7 @@ class TerraFinAgentClient:
                 json={"content": content},
             )
         loop = self._runtime_loop()
+        loop.runtime.get_public_session_record(session_id)
         run_result = loop.submit_user_message(session_id, content)
         conversation = loop.get_conversation(session_id)
         return {
@@ -477,6 +491,7 @@ class TerraFinAgentClient:
             "messagesAdded": [
                 self._serialize_runtime_message(message)
                 for message in run_result.messages_added
+                if not is_internal_only_message(message)
             ],
             "toolResults": [
                 self._serialize_runtime_tool_result(result)
@@ -489,7 +504,7 @@ class TerraFinAgentClient:
         if self._resolved_transport() == "http":
             return self._http_get(f"/agent/api/runtime/sessions/{session_id}/tasks")
         loop = self._runtime_loop()
-        tasks = loop.runtime.list_session_tasks(session_id)
+        tasks = loop.runtime.list_public_session_tasks(session_id)
         return {
             "sessionId": session_id,
             "tasks": [self._serialize_runtime_task(task) for task in tasks],
@@ -499,7 +514,7 @@ class TerraFinAgentClient:
         if self._resolved_transport() == "http":
             return self._http_get(f"/agent/api/runtime/sessions/{session_id}/approvals")
         loop = self._runtime_loop()
-        approvals = loop.runtime.list_session_approvals(session_id)
+        approvals = loop.runtime.list_public_session_approvals(session_id)
         return {
             "sessionId": session_id,
             "approvals": [self._serialize_runtime_approval(approval) for approval in approvals],
@@ -509,31 +524,31 @@ class TerraFinAgentClient:
         if self._resolved_transport() == "http":
             return self._http_get(f"/agent/api/runtime/tasks/{task_id}")
         loop = self._runtime_loop()
-        return self._serialize_runtime_task(loop.runtime.get_task(task_id))
+        return self._serialize_runtime_task(loop.runtime.get_public_task(task_id))
 
     def runtime_approval(self, approval_id: str) -> dict[str, Any]:
         if self._resolved_transport() == "http":
             return self._http_get(f"/agent/api/runtime/approvals/{approval_id}")
         loop = self._runtime_loop()
-        return self._serialize_runtime_approval(loop.runtime.get_approval(approval_id))
+        return self._serialize_runtime_approval(loop.runtime.get_public_approval(approval_id))
 
     def runtime_cancel_task(self, task_id: str) -> dict[str, Any]:
         if self._resolved_transport() == "http":
             return self._http_post(f"/agent/api/runtime/tasks/{task_id}/cancel", json={})
         loop = self._runtime_loop()
-        return self._serialize_runtime_task(loop.runtime.cancel_task(task_id))
+        return self._serialize_runtime_task(loop.runtime.cancel_public_task(task_id))
 
     def runtime_approve_approval(self, approval_id: str, *, note: str | None = None) -> dict[str, Any]:
         if self._resolved_transport() == "http":
             return self._http_post(f"/agent/api/runtime/approvals/{approval_id}/approve", json={"note": note})
         loop = self._runtime_loop()
-        return self._serialize_runtime_approval(loop.runtime.approve_approval(approval_id, note=note))
+        return self._serialize_runtime_approval(loop.runtime.approve_public_approval(approval_id, note=note))
 
     def runtime_deny_approval(self, approval_id: str, *, note: str | None = None) -> dict[str, Any]:
         if self._resolved_transport() == "http":
             return self._http_post(f"/agent/api/runtime/approvals/{approval_id}/deny", json={"note": note})
         loop = self._runtime_loop()
-        return self._serialize_runtime_approval(loop.runtime.deny_approval(approval_id, note=note))
+        return self._serialize_runtime_approval(loop.runtime.deny_public_approval(approval_id, note=note))
 
     def open_chart(
         self,

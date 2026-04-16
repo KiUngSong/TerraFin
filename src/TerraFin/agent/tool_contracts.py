@@ -191,6 +191,30 @@ HOSTED_TOOL_CONTRACTS: dict[str, dict[str, Any]] = {
         ),
         "response_model": "HostedViewContextResponse",
     },
+    "fundamental_screen": {
+        "input_schema": _object_schema(
+            properties={"ticker": {"type": "string", "minLength": 1}},
+            required=["ticker"],
+        ),
+        "response_model": "FundamentalScreenResponse",
+    },
+    "risk_profile": {
+        "input_schema": _object_schema(
+            properties={
+                "name": {"type": "string", "minLength": 1},
+                "depth": {"type": "string", "enum": ["auto", "recent", "full"], "default": "auto"},
+            },
+            required=["name"],
+        ),
+        "response_model": "RiskProfileResponse",
+    },
+    "valuation": {
+        "input_schema": _object_schema(
+            properties={"ticker": {"type": "string", "minLength": 1}},
+            required=["ticker"],
+        ),
+        "response_model": "ValuationResponse",
+    },
 }
 
 

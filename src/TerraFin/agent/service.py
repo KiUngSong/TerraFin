@@ -1,7 +1,15 @@
+import math
 from typing import Any, Iterable
 
 import pandas as pd
 
+from TerraFin.analytics.analysis.fundamental.dcf import (
+    build_stock_dcf_payload,
+    build_stock_reverse_dcf_payload,
+)
+from TerraFin.analytics.analysis.fundamental.screen import run_fundamental_screen
+from TerraFin.analytics.analysis.risk.profile import run_risk_profile
+from TerraFin.analytics.analysis.risk.returns import extract_close_series
 from TerraFin.analytics.analysis.technical import DEFAULT_MFD_WINDOWS
 from TerraFin.data import DataFactory
 from TerraFin.data.contracts import TimeSeriesDataFrame
@@ -347,6 +355,9 @@ class TerraFinAgentService:
         display_name = name.strip()
         if not display_name:
             raise ValueError("Name is required")
+        canonical_name = canonical_macro_name(display_name)
+        if resolve_macro_type(canonical_name) is not None:
+            display_name = canonical_name
 
         if requested_depth == "full":
             frame = self._data_factory.get(display_name)
@@ -598,4 +609,125 @@ class TerraFinAgentService:
             "month": month,
             "year": year,
             "processing": _calendar_processing(),
+        }
+
+    def fundamental_screen(self, ticker: str) -> dict[str, Any]:
+        normalized = ticker.upper()
+        income = self._data_factory.get_corporate_data(normalized, "income", period="annual")
+        balance = self._data_factory.get_corporate_data(normalized, "balance", period="annual")
+        cashflow = self._data_factory.get_corporate_data(normalized, "cashflow", period="annual")
+
+        result = run_fundamental_screen(
+            normalized,
+            income=income,
+            balance=balance,
+            cashflow=cashflow,
+        )
+        return {
+            "ticker": result.ticker,
+            "moat": result.moat,
+            "earnings_quality": result.earnings_quality,
+            "balance_sheet": result.balance_sheet,
+            "capital_allocation": result.capital_allocation,
+            "pricing_power": result.pricing_power,
+            "warnings": result.warnings,
+            "processing": _full_processing(
+                requested_depth="full",
+                source_version="fundamental-screen",
+                view=None,
+                frame=None,
+            ),
+        }
+
+    def risk_profile(self, name: str, *, depth: str = "auto") -> dict[str, Any]:
+        payload = self._market_series(name, depth=depth, view="daily")
+        frame = payload["frame"]
+        prices = extract_close_series(frame)
+
+        benchmark_frame = self._data_factory.get_market_data("SPY")
+        benchmark_prices = extract_close_series(benchmark_frame) if benchmark_frame is not None else None
+
+        result = run_risk_profile(payload["name"], prices, benchmark_prices=benchmark_prices)
+        return {
+            "ticker": result.ticker,
+            "tail_risk": result.tail_risk,
+            "convexity": result.convexity,
+            "volatility": result.volatility,
+            "drawdown": result.drawdown,
+            "warnings": result.warnings,
+            "processing": payload["processing"],
+        }
+
+    def valuation(self, ticker: str) -> dict[str, Any]:
+        normalized = ticker.upper()
+        dcf = build_stock_dcf_payload(normalized)
+        reverse_dcf = build_stock_reverse_dcf_payload(normalized)
+
+        info = build_company_info_payload(normalized)
+        trailing_pe = info.get("trailingPE")
+        forward_pe = info.get("forwardPE")
+        trailing_eps = info.get("trailingEps")
+        current_price = info.get("currentPrice")
+
+        balance = self._data_factory.get_corporate_data(normalized, "balance", period="annual")
+        bvps = None
+        graham_number = None
+        if balance is not None and not balance.empty:
+            equity_col = None
+            shares_col = None
+            for col in balance.columns:
+                cl = str(col).lower().replace(" ", "")
+                if cl in ("totalstockholdersequity", "stockholdersequity", "totalequity"):
+                    equity_col = col
+                if cl in ("ordinarysharesoutstanding", "sharesoutstanding", "commonstock"):
+                    shares_col = col
+            if equity_col is not None and shares_col is not None:
+                try:
+                    eq = float(balance[equity_col].iloc[-1])
+                    sh = float(balance[shares_col].iloc[-1])
+                    if sh > 0:
+                        bvps = round(eq / sh, 2)
+                except (TypeError, ValueError, IndexError):
+                    pass
+
+        if trailing_eps and bvps and trailing_eps > 0 and bvps > 0:
+            graham_number = round(math.sqrt(22.5 * trailing_eps * bvps), 2)
+
+        margin_of_safety = None
+        intrinsic_value = dcf.get("currentIntrinsicValue") if dcf.get("status") == "ready" else None
+        if intrinsic_value and current_price and current_price > 0:
+            margin_of_safety = round((intrinsic_value - current_price) / current_price * 100, 2)
+
+        return {
+            "ticker": normalized,
+            "dcf": {
+                "status": dcf.get("status"),
+                "intrinsic_value": dcf.get("currentIntrinsicValue"),
+                "upside_pct": dcf.get("upsidePct"),
+                "assumptions": dcf.get("assumptions"),
+                "warnings": dcf.get("warnings", []),
+            },
+            "reverse_dcf": {
+                "status": reverse_dcf.get("status"),
+                "implied_growth_pct": reverse_dcf.get("impliedGrowthPct"),
+                "model_price": reverse_dcf.get("modelPrice"),
+                "warnings": reverse_dcf.get("warnings", []),
+            },
+            "relative": {
+                "trailing_pe": trailing_pe,
+                "forward_pe": forward_pe,
+                "price_to_book": (
+                    round(current_price / bvps, 2)
+                    if current_price and bvps and bvps > 0 else None
+                ),
+            },
+            "graham_number": graham_number,
+            "margin_of_safety_pct": margin_of_safety,
+            "current_price": current_price,
+            "processing": _full_processing(
+                requested_depth="full",
+                source_version="valuation",
+                view=None,
+                frame=None,
+            ),
         }

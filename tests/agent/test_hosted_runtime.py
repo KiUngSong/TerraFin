@@ -7,6 +7,7 @@ from TerraFin.agent.definitions import (
     DEFAULT_HOSTED_AGENT_NAME,
     TerraFinAgentDefinition,
     TerraFinAgentDefinitionRegistry,
+    build_default_agent_definition_registry,
 )
 from TerraFin.agent.hosted_runtime import (
     TerraFinAgentApprovalRequiredError,
@@ -103,6 +104,41 @@ class _FakeService:
     ) -> dict[str, object]:
         return {"events": [], "count": 0, "month": month, "year": year, "categories": categories, "limit": limit, "processing": _processing()}
 
+    def fundamental_screen(self, ticker: str) -> dict[str, object]:
+        return {
+            "ticker": ticker,
+            "moat": {"score": "wide"},
+            "earnings_quality": {},
+            "balance_sheet": {},
+            "capital_allocation": {},
+            "pricing_power": {},
+            "warnings": [],
+            "processing": _processing(),
+        }
+
+    def risk_profile(self, name: str, *, depth: str = "auto") -> dict[str, object]:
+        return {
+            "ticker": name,
+            "tail_risk": {},
+            "convexity": {},
+            "volatility": {"requestedDepth": depth},
+            "drawdown": {},
+            "warnings": [],
+            "processing": _processing(),
+        }
+
+    def valuation(self, ticker: str) -> dict[str, object]:
+        return {
+            "ticker": ticker,
+            "dcf": {"status": "ready", "intrinsic_value": 120.0},
+            "reverse_dcf": {"status": "ready", "implied_growth_pct": 8.0},
+            "relative": {"trailing_pe": 22.0},
+            "graham_number": 100.0,
+            "margin_of_safety_pct": 12.0,
+            "current_price": 107.0,
+            "processing": _processing(),
+        }
+
 
 def _fake_chart_opener(
     data_or_names,
@@ -152,6 +188,32 @@ def test_create_session_records_agent_metadata(tmp_path) -> None:
     assert context.metadata["agentPolicy"]["chartAccess"] is True
 
 
+def test_create_session_rejects_internal_agent_definitions_by_default(tmp_path) -> None:
+    runtime = _runtime(
+        agent_registry=build_default_agent_definition_registry(include_gurus=True),
+        transcript_root=tmp_path / "transcripts",
+    )
+
+    with pytest.raises(TerraFinAgentPolicyError, match="internal-only"):
+        runtime.create_session("warren-buffett", session_id="hosted:hidden")
+
+
+def test_create_internal_session_allows_hidden_guru_definitions(tmp_path) -> None:
+    runtime = _runtime(
+        agent_registry=build_default_agent_definition_registry(include_gurus=True),
+        transcript_root=tmp_path / "transcripts",
+    )
+
+    context = runtime.create_internal_session(
+        "warren-buffett",
+        session_id="hosted:hidden",
+        metadata={"hiddenInternal": True},
+    )
+
+    assert context.session.session_id == "hosted:hidden"
+    assert context.session.metadata["agentDefinition"] == "warren-buffett"
+
+
 def test_existing_session_runtime_model_tracks_current_default_model(tmp_path) -> None:
     runtime = _runtime(transcript_root=tmp_path / "transcripts")
     runtime.default_runtime_model = TerraFinRuntimeModel(
@@ -175,6 +237,30 @@ def test_existing_session_runtime_model_tracks_current_default_model(tmp_path) -
     updated = runtime.get_session_record(context.session.session_id)
     assert updated.context.session.metadata["runtimeModel"]["modelRef"] == "github-copilot/gpt-4o"
     assert updated.metadata["runtimeModel"]["providerId"] == "github-copilot"
+
+
+def test_delete_session_cascades_hidden_child_sessions(tmp_path) -> None:
+    runtime = _runtime(
+        agent_registry=build_default_agent_definition_registry(include_gurus=True),
+        transcript_root=tmp_path / "transcripts",
+    )
+    parent = runtime.create_session(DEFAULT_HOSTED_AGENT_NAME, session_id="hosted:parent")
+    child = runtime.create_internal_session(
+        "warren-buffett",
+        session_id="hosted:child",
+        metadata={
+            "hiddenInternal": True,
+            "parentSessionId": parent.session.session_id,
+        },
+    )
+
+    runtime.delete_session(parent.session.session_id)
+
+    assert runtime.transcript_store is not None
+    assert runtime.transcript_store.session_exists(parent.session.session_id) is False
+    assert runtime.transcript_store.session_exists(child.session.session_id) is False
+    with pytest.raises(KeyError):
+        runtime.get_session_record(child.session.session_id)
 
 
 def test_invoke_applies_agent_default_depth_and_view() -> None:

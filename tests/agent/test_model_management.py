@@ -44,6 +44,38 @@ def test_resolve_current_model_preference_uses_saved_default_when_env_missing(tm
     assert current == {"modelRef": "google/gemini-3.1-pro-preview", "source": "saved"}
 
 
+def test_resolve_current_model_preference_migrates_legacy_repo_parent_state(tmp_path, monkeypatch) -> None:
+    repo_root = tmp_path / "TerraFin"
+    repo_root.mkdir(parents=True)
+    legacy_state_dir = tmp_path / ".terrafin"
+    legacy_state_dir.mkdir(parents=True)
+    legacy_state_path = legacy_state_dir / "agent-models.json"
+    legacy_state_path.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "defaultModelRef": "github-copilot/gpt-4o",
+                "auth": {},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr("TerraFin.env._source_repo_root", lambda: repo_root)
+    monkeypatch.delenv("TERRAFIN_AGENT_MODELS_PATH", raising=False)
+    monkeypatch.delenv("TERRAFIN_STATE_DIR", raising=False)
+    monkeypatch.delenv("TERRAFIN_AGENT_MODEL_REF", raising=False)
+    monkeypatch.delenv("TERRAFIN_OPENAI_MODEL", raising=False)
+
+    current = resolve_current_model_preference()
+
+    assert current == {"modelRef": "github-copilot/gpt-4o", "source": "saved"}
+    migrated_path = repo_root / ".terrafin" / "agent-models.json"
+    assert migrated_path.is_file()
+    migrated = json.loads(migrated_path.read_text(encoding="utf-8"))
+    assert migrated["defaultModelRef"] == "github-copilot/gpt-4o"
+
+
 def test_provider_secret_prefers_env_over_saved_state(tmp_path) -> None:
     env = {
         "TERRAFIN_AGENT_MODELS_PATH": str(tmp_path / "agent-models.json"),

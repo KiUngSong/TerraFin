@@ -6,17 +6,21 @@ from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from threading import Lock, RLock
-from typing import TYPE_CHECKING, Any, Iterator, Literal, Mapping
+from typing import Any, Iterator, Literal, Mapping
 from uuid import uuid4
 
+from .conversation import (
+    TerraFinConversationMessage,
+    TerraFinHostedConversation,
+    deserialize_message_blocks,
+    ensure_message_blocks,
+    is_internal_only_message,
+    serialize_message_blocks,
+)
 from .conversation_state import RUNTIME_MODEL_METADATA_KEY
 
 
-if TYPE_CHECKING:
-    from .loop import TerraFinConversationMessage, TerraFinHostedConversation
-
-
-TRANSCRIPT_STORE_VERSION = 2
+TRANSCRIPT_STORE_VERSION = 3
 TranscriptEventType = Literal[
     "session_header",
     "message",
@@ -117,9 +121,7 @@ class HostedTranscriptReader:
         session_id: str,
         *,
         metadata: Mapping[str, Any] | None = None,
-    ) -> "TerraFinHostedConversation":
-        from .loop import TerraFinConversationMessage, TerraFinHostedConversation
-
+    ) -> TerraFinHostedConversation:
         entry = self.store.get_session_index(session_id)
         events = self.store.load_events(session_id)
         created_at = entry.created_at
@@ -139,13 +141,16 @@ class HostedTranscriptReader:
             if event.event_type != "message":
                 continue
             conversation.messages.append(
-                TerraFinConversationMessage(
-                    role=str(event.payload.get("role")),
-                    content=str(event.payload.get("content") or ""),
-                    created_at=event.created_at,
-                    name=event.payload.get("name"),
-                    tool_call_id=event.payload.get("toolCallId"),
-                    metadata=dict(event.payload.get("metadata", {})),
+                ensure_message_blocks(
+                    TerraFinConversationMessage(
+                        role=str(event.payload.get("role")),
+                        content=str(event.payload.get("content") or ""),
+                        created_at=event.created_at,
+                        name=event.payload.get("name"),
+                        tool_call_id=event.payload.get("toolCallId"),
+                        metadata=dict(event.payload.get("metadata", {})),
+                        blocks=deserialize_message_blocks(event.payload.get("blocks")),
+                    )
                 )
             )
         return conversation
@@ -221,9 +226,7 @@ class HostedTranscriptStore:
                 title=raw.get("title"),
                 last_message_preview=raw.get("lastMessagePreview"),
                 message_count=int(raw.get("messageCount", 0)),
-                runtime_model=None
-                if raw.get("runtimeModel") is None
-                else dict(raw.get("runtimeModel", {})),
+                runtime_model=None if raw.get("runtimeModel") is None else dict(raw.get("runtimeModel", {})),
                 deleted_at=_parse_datetime(raw.get("deletedAt")),
             )
         return entries
@@ -311,7 +314,7 @@ class HostedTranscriptStore:
         agent_name: str,
         created_at: datetime,
         runtime_model: dict[str, Any] | None = None,
-        system_message: "TerraFinConversationMessage | None" = None,
+        system_message: TerraFinConversationMessage | None = None,
     ) -> HostedSessionIndexEntry:
         with self.lock.session(session_id):
             with self.lock.index():
@@ -350,6 +353,7 @@ class HostedTranscriptStore:
                                 "name": system_message.name,
                                 "toolCallId": system_message.tool_call_id,
                                 "metadata": dict(system_message.metadata),
+                                "blocks": serialize_message_blocks(system_message.blocks),
                             },
                         )
                     )
@@ -372,8 +376,9 @@ class HostedTranscriptStore:
     def append_message(
         self,
         session_id: str,
-        message: "TerraFinConversationMessage",
+        message: TerraFinConversationMessage,
     ) -> HostedTranscriptEvent:
+        message = ensure_message_blocks(message)
         with self.lock.session(session_id):
             event = HostedTranscriptEvent(
                 event_id=f"event:{uuid4().hex}",
@@ -386,6 +391,7 @@ class HostedTranscriptStore:
                     "name": message.name,
                     "toolCallId": message.tool_call_id,
                     "metadata": dict(message.metadata),
+                    "blocks": serialize_message_blocks(message.blocks),
                 },
             )
             self._append_event_unlocked(session_id, event)
@@ -396,7 +402,7 @@ class HostedTranscriptStore:
                     entry,
                     updated_at=message.created_at,
                 )
-                if message.role in {"user", "assistant"}:
+                if message.role in {"user", "assistant"} and not is_internal_only_message(message):
                     updated = replace(
                         updated,
                         last_message_at=message.created_at,
@@ -480,11 +486,7 @@ class HostedTranscriptStore:
     def list_sessions(self, *, include_deleted: bool = False) -> tuple[HostedSessionIndexEntry, ...]:
         with self.lock.index():
             index = self._load_index_unlocked()
-            items = [
-                entry
-                for entry in index.values()
-                if include_deleted or entry.deleted_at is None
-            ]
+            items = [entry for entry in index.values() if include_deleted or entry.deleted_at is None]
             items.sort(key=lambda item: item.updated_at, reverse=True)
             return tuple(items)
 
@@ -493,7 +495,7 @@ class HostedTranscriptStore:
         session_id: str,
         *,
         metadata: Mapping[str, Any] | None = None,
-    ) -> "TerraFinHostedConversation":
+    ) -> TerraFinHostedConversation:
         return self.reader.load_conversation(session_id, metadata=metadata)
 
     def build_summary(self, session_id: str) -> HostedTranscriptSummary:

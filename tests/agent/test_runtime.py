@@ -86,6 +86,41 @@ class _FakeService:
     ) -> dict[str, object]:
         return {"events": [], "count": 0, "month": month, "year": year, "categories": categories, "limit": limit, "processing": _processing()}
 
+    def fundamental_screen(self, ticker: str) -> dict[str, object]:
+        return {
+            "ticker": ticker,
+            "moat": {"score": "wide"},
+            "earnings_quality": {},
+            "balance_sheet": {},
+            "capital_allocation": {},
+            "pricing_power": {},
+            "warnings": [],
+            "processing": _processing(),
+        }
+
+    def risk_profile(self, name: str, *, depth: str = "auto") -> dict[str, object]:
+        return {
+            "ticker": name,
+            "tail_risk": {},
+            "convexity": {},
+            "volatility": {"requestedDepth": depth},
+            "drawdown": {},
+            "warnings": [],
+            "processing": _processing(),
+        }
+
+    def valuation(self, ticker: str) -> dict[str, object]:
+        return {
+            "ticker": ticker,
+            "dcf": {"status": "ready", "intrinsic_value": 120.0},
+            "reverse_dcf": {"status": "ready", "implied_growth_pct": 8.0},
+            "relative": {"trailing_pe": 22.0},
+            "graham_number": 100.0,
+            "margin_of_safety_pct": 12.0,
+            "current_price": 107.0,
+            "processing": _processing(),
+        }
+
 
 class _ExplodingService(_FakeService):
     def market_snapshot(self, name: str, *, depth: str = "auto", view: str = "daily") -> dict[str, object]:
@@ -126,6 +161,9 @@ def test_default_capability_registry_contains_kernel_capabilities() -> None:
         "macro_focus",
         "calendar_events",
         "open_chart",
+        "fundamental_screen",
+        "risk_profile",
+        "valuation",
     )
 
 

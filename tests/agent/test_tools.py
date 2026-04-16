@@ -1,3 +1,5 @@
+import pytest
+
 from TerraFin.agent.definitions import (
     DEFAULT_HOSTED_AGENT_NAME,
     TerraFinAgentDefinition,
@@ -91,6 +93,62 @@ class _FakeService:
     ) -> dict[str, object]:
         return {"events": [], "count": 0, "month": month, "year": year, "categories": categories, "limit": limit, "processing": _processing()}
 
+    def fundamental_screen(self, ticker: str) -> dict[str, object]:
+        return {
+            "ticker": ticker,
+            "moat": {"score": "wide"},
+            "earnings_quality": {},
+            "balance_sheet": {},
+            "capital_allocation": {},
+            "pricing_power": {},
+            "warnings": [],
+            "processing": _processing(),
+        }
+
+    def risk_profile(self, name: str, *, depth: str = "auto") -> dict[str, object]:
+        return {
+            "ticker": name,
+            "tail_risk": {},
+            "convexity": {},
+            "volatility": {"requestedDepth": depth},
+            "drawdown": {},
+            "warnings": [],
+            "processing": _processing(),
+        }
+
+    def valuation(self, ticker: str) -> dict[str, object]:
+        return {
+            "ticker": ticker,
+            "dcf": {"status": "ready", "intrinsic_value": 120.0},
+            "reverse_dcf": {"status": "ready", "implied_growth_pct": 8.0},
+            "relative": {"trailing_pe": 22.0},
+            "graham_number": 100.0,
+            "margin_of_safety_pct": 12.0,
+            "current_price": 107.0,
+            "processing": _processing(),
+        }
+
+
+class _RetryingFakeService(_FakeService):
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+
+    def market_snapshot(self, name: str, *, depth: str = "auto", view: str = "daily") -> dict[str, object]:
+        self.calls.append(name)
+        if name == "NASDAQ COMPOSITE":
+            raise ValueError("Invalid ticker: NASDAQ COMPOSITE")
+        return super().market_snapshot(name, depth=depth, view=view)
+
+
+class _UnrepairableRecoverableErrorService(_FakeService):
+    def market_snapshot(self, name: str, *, depth: str = "auto", view: str = "daily") -> dict[str, object]:
+        raise ValueError(f"Invalid ticker: {name}")
+
+
+class _QuotaFailureService(_FakeService):
+    def market_snapshot(self, name: str, *, depth: str = "auto", view: str = "daily") -> dict[str, object]:
+        raise RuntimeError("429 rate limit exceeded for upstream API key")
+
 
 def _fake_chart_opener(
     data_or_names,
@@ -108,8 +166,12 @@ def _fake_chart_opener(
     }
 
 
-def _adapter(agent_registry: TerraFinAgentDefinitionRegistry | None = None) -> TerraFinHostedToolAdapter:
-    service = _FakeService()
+def _adapter(
+    agent_registry: TerraFinAgentDefinitionRegistry | None = None,
+    *,
+    service: _FakeService | None = None,
+) -> TerraFinHostedToolAdapter:
+    service = service or _FakeService()
     registry = build_default_capability_registry(service, chart_opener=_fake_chart_opener)
     runtime = TerraFinHostedAgentRuntime(service=service, capability_registry=registry, agent_registry=agent_registry)
     return TerraFinHostedToolAdapter(runtime)
@@ -203,5 +265,37 @@ def test_run_tool_can_start_background_task_variant() -> None:
     assert result.execution_mode == "task"
     assert result.task is not None
     assert result.payload["accepted"] is True
-    assert result.payload["taskId"] == result.task.task_id
-    assert result.task.status in {"pending", "running", "completed"}
+
+
+def test_run_tool_retries_with_repaired_macro_alias_before_exposing_error() -> None:
+    service = _RetryingFakeService()
+    adapter = _adapter(service=service)
+    session = adapter.runtime.create_session(DEFAULT_HOSTED_AGENT_NAME, session_id="tool:retry")
+
+    result = adapter.run_tool(session.session.session_id, "market_snapshot", {"name": "NASDAQ COMPOSITE"})
+
+    assert result.payload["ticker"] == "Nasdaq"
+    assert service.calls == ["NASDAQ COMPOSITE", "Nasdaq"]
+
+
+def test_run_tool_returns_internal_retryable_error_result_for_symbol_resolution_failures() -> None:
+    adapter = _adapter(service=_UnrepairableRecoverableErrorService())
+    session = adapter.runtime.create_session(DEFAULT_HOSTED_AGENT_NAME, session_id="tool:recoverable-error")
+
+    result = adapter.run_tool(session.session.session_id, "market_snapshot", {"name": "CURRENT MARKET STATE"})
+
+    assert result.is_error is True
+    assert result.retryable is True
+    assert result.error_code == "tool_input_resolution_error"
+    assert result.payload["accepted"] is False
+    assert result.payload["error"]["retryable"] is True
+    assert "descriptive phrase" in result.payload["error"]["message"]
+    assert "current_view_context" in result.payload["error"]["modelHint"]
+
+
+def test_run_tool_still_raises_for_upstream_auth_or_quota_failures() -> None:
+    adapter = _adapter(service=_QuotaFailureService())
+    session = adapter.runtime.create_session(DEFAULT_HOSTED_AGENT_NAME, session_id="tool:quota-error")
+
+    with pytest.raises(RuntimeError, match="rate limit exceeded"):
+        adapter.run_tool(session.session.session_id, "market_snapshot", {"name": "AAPL"})

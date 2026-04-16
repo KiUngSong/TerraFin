@@ -44,6 +44,34 @@ class _FakeHostedRuntime:
     def delete_session(self, session_id: str):
         return self._records.pop(session_id)
 
+    def get_public_session_record(self, session_id: str):
+        return self._records[session_id]
+
+    def list_public_session_tasks(self, session_id: str):
+        _ = session_id
+        return ()
+
+    def list_public_session_approvals(self, session_id: str):
+        _ = session_id
+        return ()
+
+    def get_public_task(self, task_id: str):
+        raise KeyError(task_id)
+
+    def get_public_approval(self, approval_id: str):
+        raise KeyError(approval_id)
+
+    def cancel_public_task(self, task_id: str):
+        raise KeyError(task_id)
+
+    def approve_public_approval(self, approval_id: str, *, note: str | None = None):
+        _ = note
+        raise KeyError(approval_id)
+
+    def deny_public_approval(self, approval_id: str, *, note: str | None = None):
+        _ = note
+        raise KeyError(approval_id)
+
 
 class _FakeHostedToolAdapter:
     def __init__(self) -> None:
@@ -86,7 +114,9 @@ class _FakeHostedLoop:
         session_id: str | None = None,
         metadata: dict | None = None,
         system_prompt: str | None = None,
+        allow_internal: bool = False,
     ) -> TerraFinHostedConversation:
+        _ = allow_internal
         conversation = TerraFinHostedConversation(
             session_id=session_id or "runtime:test",
             agent_name=agent_name,

@@ -6,6 +6,7 @@ from threading import Lock
 
 from TerraFin.env import resolve_state_dir
 
+from .definitions import build_default_agent_definition_registry
 from .hosted_runtime import TerraFinHostedAgentRuntime
 from .loop import TerraFinHostedAgentLoop
 from .model_runtime import TerraFinModelProviderRegistry, TerraFinProviderRoutedModelClient
@@ -50,6 +51,7 @@ def build_hosted_agent_loop() -> TerraFinHostedAgentLoop:
     runtime = TerraFinHostedAgentRuntime(
         service=service,
         capability_registry=capability_registry,
+        agent_registry=build_default_agent_definition_registry(include_gurus=True),
         session_store=SQLiteHostedSessionStore(
             db_path=session_db_path,
             service=service,

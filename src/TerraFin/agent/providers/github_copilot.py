@@ -14,23 +14,26 @@ from openai import OpenAI
 
 from TerraFin.env import ensure_runtime_env_loaded, resolve_state_dir
 
-from ..conversation_state import get_tool_call_record
-from ..definitions import TerraFinAgentDefinition
-from ..loop import (
+from ..conversation import (
     TerraFinConversationMessage,
     TerraFinHostedConversation,
-    TerraFinToolCall,
     TerraFinModelTurn,
+    TerraFinToolCall,
+    iter_tool_result_blocks,
+    iter_tool_use_blocks,
 )
+from ..definitions import TerraFinAgentDefinition
+from ..model_management import resolve_provider_secret
 from ..model_runtime import (
     TerraFinModelConfigError,
     TerraFinModelProvider,
     TerraFinModelResponseError,
     TerraFinRuntimeModel,
 )
-from ..model_management import resolve_provider_secret
 from ..runtime import TerraFinAgentSession
 from ..tools import TerraFinToolDefinition
+
+
 DEFAULT_COPILOT_MODEL = "gpt-4o"
 DEFAULT_COPILOT_TIMEOUT_SECONDS = 60.0
 DEFAULT_COPILOT_MAX_RETRIES = 2
@@ -334,9 +337,7 @@ class TerraFinGithubCopilotResponsesProvider(TerraFinModelProvider):
             timeout=self.config.timeout_seconds,
         )
         if response.status_code >= 400:
-            raise TerraFinGithubCopilotResponseError(
-                f"Copilot token exchange failed: HTTP {response.status_code}"
-            )
+            raise TerraFinGithubCopilotResponseError(f"Copilot token exchange failed: HTTP {response.status_code}")
         try:
             payload = response.json()
         except ValueError as exc:
@@ -379,52 +380,51 @@ class TerraFinGithubCopilotResponsesProvider(TerraFinModelProvider):
         conversation: TerraFinHostedConversation,
     ) -> list[dict[str, Any]]:
         chat_messages: list[dict[str, Any]] = []
-        pending_tool_messages: list[TerraFinConversationMessage] = []
+        pending_tool_calls: list[dict[str, Any]] = []
 
-        def flush_pending_tools() -> None:
-            nonlocal pending_tool_messages
-            if not pending_tool_messages:
+        def flush_pending_tool_calls() -> None:
+            nonlocal pending_tool_calls
+            if not pending_tool_calls:
                 return
-            tool_calls_payload: list[dict[str, Any]] = []
-            for tool_message in pending_tool_messages:
-                record = get_tool_call_record(conversation, tool_message.tool_call_id or "")
-                if record is None:
+            chat_messages.append({"role": "assistant", "content": "", "tool_calls": pending_tool_calls})
+            pending_tool_calls = []
+
+        for message in messages:
+            tool_use_blocks = iter_tool_use_blocks(message)
+            if tool_use_blocks:
+                for block in tool_use_blocks:
+                    pending_tool_calls.append(
+                        {
+                            "id": str(block.payload.get("callId") or "").strip(),
+                            "type": "function",
+                            "function": {
+                                "name": str(block.payload.get("toolName") or "").strip(),
+                                "arguments": json.dumps(block.payload.get("arguments", {}), ensure_ascii=True),
+                            },
+                        }
+                    )
+                if not message.content.strip():
                     continue
-                tool_calls_payload.append(
-                    {
-                        "id": str(record.get("callId") or tool_message.tool_call_id or "").strip(),
-                        "type": "function",
-                        "function": {
-                            "name": str(record.get("toolName") or tool_message.name or "").strip(),
-                            "arguments": json.dumps(record.get("arguments", {}), ensure_ascii=True),
-                        },
-                    }
-                )
-            if tool_calls_payload:
-                chat_messages.append(
-                    {
-                        "role": "assistant",
-                        "content": "",
-                        "tool_calls": tool_calls_payload,
-                    }
-                )
-            for tool_message in pending_tool_messages:
-                if not tool_message.tool_call_id:
+            if message.role == "tool":
+                flush_pending_tool_calls()
+                tool_result_blocks = iter_tool_result_blocks(message)
+                tool_result_block = tool_result_blocks[0] if tool_result_blocks else None
+                if not message.tool_call_id:
                     continue
+                content = (
+                    json.dumps(tool_result_block.payload.get("payload", {}), ensure_ascii=False)
+                    if tool_result_block is not None
+                    else message.content
+                )
                 chat_messages.append(
                     {
                         "role": "tool",
-                        "tool_call_id": tool_message.tool_call_id,
-                        "content": tool_message.content,
+                        "tool_call_id": message.tool_call_id,
+                        "content": content,
                     }
                 )
-            pending_tool_messages = []
-
-        for message in messages:
-            if message.role == "tool":
-                pending_tool_messages.append(message)
                 continue
-            flush_pending_tools()
+            flush_pending_tool_calls()
             if message.role not in {"system", "user", "assistant"}:
                 continue
             chat_messages.append(
@@ -434,7 +434,7 @@ class TerraFinGithubCopilotResponsesProvider(TerraFinModelProvider):
                 }
             )
 
-        flush_pending_tools()
+        flush_pending_tool_calls()
         return chat_messages
 
     def _completion_to_turn(self, response: Any) -> TerraFinModelTurn:
@@ -453,9 +453,7 @@ class TerraFinGithubCopilotResponsesProvider(TerraFinModelProvider):
 
         assistant_text = str(message.get("content") or "").strip()
         assistant_message = (
-            TerraFinConversationMessage(role="assistant", content=assistant_text)
-            if assistant_text
-            else None
+            TerraFinConversationMessage(role="assistant", content=assistant_text) if assistant_text else None
         )
 
         tool_calls: list[TerraFinToolCall] = []
@@ -523,9 +521,7 @@ class TerraFinGithubCopilotResponsesProvider(TerraFinModelProvider):
             try:
                 expires_at = int(expires_at_raw.strip())
             except ValueError as exc:
-                raise TerraFinGithubCopilotResponseError(
-                    "Copilot token response has invalid expires_at."
-                ) from exc
+                raise TerraFinGithubCopilotResponseError("Copilot token response has invalid expires_at.") from exc
         else:
             raise TerraFinGithubCopilotResponseError("Copilot token response missing expires_at.")
         if expires_at < 100_000_000_000:
@@ -537,7 +533,9 @@ class TerraFinGithubCopilotResponsesProvider(TerraFinModelProvider):
         proxy_endpoint = match.group(1).strip() if match else ""
         if not proxy_endpoint:
             return None
-        url_text = proxy_endpoint if proxy_endpoint.startswith(("http://", "https://")) else f"https://{proxy_endpoint}"
+        url_text = (
+            proxy_endpoint if proxy_endpoint.startswith(("http://", "https://")) else f"https://{proxy_endpoint}"
+        )
         try:
             parsed = requests.utils.urlparse(url_text)
         except Exception:

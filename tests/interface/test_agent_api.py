@@ -5,11 +5,15 @@ from types import SimpleNamespace
 import pandas as pd
 from fastapi.testclient import TestClient
 
-import TerraFin.interface.agent.data_routes as agent_routes
 import TerraFin.agent.service as agent_service
+import TerraFin.interface.agent.data_routes as agent_routes
 import TerraFin.interface.stock.data_routes as stock_routes
 import TerraFin.interface.stock.payloads as stock_payloads
-from TerraFin.agent.definitions import DEFAULT_HOSTED_AGENT_NAME, TerraFinAgentDefinition
+from TerraFin.agent.definitions import (
+    DEFAULT_HOSTED_AGENT_NAME,
+    TerraFinAgentDefinition,
+    is_internal_agent_definition,
+)
 from TerraFin.agent.loop import TerraFinConversationMessage, TerraFinHostedConversation, TerraFinHostedRunResult
 from TerraFin.agent.runtime import TerraFinAgentSession, TerraFinTaskRegistry
 from TerraFin.agent.session_store import (
@@ -128,31 +132,51 @@ class _FakePortfolioOutput:
 
 
 class _FakeHostedRuntime:
-    def __init__(self, definition: TerraFinAgentDefinition) -> None:
+    def __init__(
+        self, definition: TerraFinAgentDefinition, internal_definition: TerraFinAgentDefinition | None = None
+    ) -> None:
         self._definition = definition
+        self._internal_definition = internal_definition
         self._records: dict[str, TerraFinHostedSessionRecord] = {}
         self._task_index: dict[str, str] = {}
         self._view_contexts: dict[str, TerraFinHostedViewContextRecord] = {}
 
     def list_agents(self):
-        return (self._definition,)
+        definitions = [self._definition]
+        if self._internal_definition is not None:
+            definitions.append(self._internal_definition)
+        return tuple(definitions)
 
-    def create_record(self, session_id: str, *, metadata: dict | None = None) -> TerraFinHostedSessionRecord:
+    def get_agent_definition(self, agent_name: str) -> TerraFinAgentDefinition:
+        if agent_name == self._definition.name:
+            return self._definition
+        if self._internal_definition is not None and agent_name == self._internal_definition.name:
+            return self._internal_definition
+        raise KeyError(agent_name)
+
+    def create_record(
+        self,
+        session_id: str,
+        *,
+        metadata: dict | None = None,
+        agent_name: str | None = None,
+    ) -> TerraFinHostedSessionRecord:
+        definition = self.get_agent_definition(agent_name or self._definition.name)
         session_metadata = {
             **dict(metadata or {}),
-            "agentDefinition": self._definition.name,
+            "agentDefinition": definition.name,
             "agentPolicy": {
-                "defaultDepth": self._definition.default_depth,
-                "defaultView": self._definition.default_view,
-                "chartAccess": self._definition.chart_access,
-                "allowBackgroundTasks": self._definition.allow_background_tasks,
+                "defaultDepth": definition.default_depth,
+                "defaultView": definition.default_view,
+                "chartAccess": definition.chart_access,
+                "allowBackgroundTasks": definition.allow_background_tasks,
             },
         }
         session = TerraFinAgentSession(session_id=session_id, metadata=session_metadata)
         context = SimpleNamespace(session=session, task_registry=TerraFinTaskRegistry())
         record = TerraFinHostedSessionRecord(
             session_id=session_id,
-            agent_name=self._definition.name,
+            agent_name=definition.name,
             context=context,
             metadata=dict(session_metadata),
         )
@@ -161,6 +185,13 @@ class _FakeHostedRuntime:
 
     def get_session_record(self, session_id: str) -> TerraFinHostedSessionRecord:
         return self._records[session_id]
+
+    def get_public_session_record(self, session_id: str) -> TerraFinHostedSessionRecord:
+        record = self.get_session_record(session_id)
+        definition = self.get_agent_definition(record.agent_name)
+        if is_internal_agent_definition(definition) or record.metadata.get("hiddenInternal"):
+            raise KeyError(session_id)
+        return record
 
     def list_sessions(self):
         return tuple(
@@ -188,16 +219,33 @@ class _FakeHostedRuntime:
     def list_session_tasks(self, session_id: str):
         return self._records[session_id].context.task_registry.list_for_session(session_id)
 
+    def list_public_session_tasks(self, session_id: str):
+        self.get_public_session_record(session_id)
+        return self.list_session_tasks(session_id)
+
     def get_task(self, task_id: str):
         session_id = self._task_index[task_id]
         return self._records[session_id].context.task_registry.get(task_id)
+
+    def get_public_task(self, task_id: str):
+        task = self.get_task(task_id)
+        self.get_public_session_record(task.session_id)
+        return task
 
     def cancel_task(self, task_id: str):
         session_id = self._task_index[task_id]
         return self._records[session_id].context.task_registry.cancel(task_id, reason="Cancelled by test")
 
+    def cancel_public_task(self, task_id: str):
+        task = self.get_public_task(task_id)
+        return self.cancel_task(task.task_id)
+
     def list_session_approvals(self, session_id: str):
         return tuple(self._records[session_id].approval_requests)
+
+    def list_public_session_approvals(self, session_id: str):
+        self.get_public_session_record(session_id)
+        return self.list_session_approvals(session_id)
 
     def get_approval(self, approval_id: str):
         for record in self._records.values():
@@ -205,6 +253,11 @@ class _FakeHostedRuntime:
                 if approval.approval_id == approval_id:
                     return approval
         raise KeyError(approval_id)
+
+    def get_public_approval(self, approval_id: str):
+        approval = self.get_approval(approval_id)
+        self.get_public_session_record(approval.session_id)
+        return approval
 
     def upsert_view_context(
         self,
@@ -254,6 +307,10 @@ class _FakeHostedRuntime:
                 return updated
         raise KeyError(approval_id)
 
+    def approve_public_approval(self, approval_id: str, *, note: str | None = None):
+        approval = self.get_public_approval(approval_id)
+        return self.approve_approval(approval.approval_id, note=note)
+
     def deny_approval(self, approval_id: str, *, note: str | None = None):
         for record in self._records.values():
             for idx, approval in enumerate(record.approval_requests):
@@ -269,6 +326,10 @@ class _FakeHostedRuntime:
                 record.approval_requests[idx] = updated
                 return updated
         raise KeyError(approval_id)
+
+    def deny_public_approval(self, approval_id: str, *, note: str | None = None):
+        approval = self.get_public_approval(approval_id)
+        return self.deny_approval(approval.approval_id, note=note)
 
     def seed_task(
         self,
@@ -346,6 +407,14 @@ class _FakeHostedLoop:
             chart_access=True,
             allow_background_tasks=True,
         )
+        self.internal_definition = TerraFinAgentDefinition(
+            name="warren-buffett",
+            description="Internal guru role.",
+            allowed_capabilities=("market_snapshot",),
+            chart_access=False,
+            allow_background_tasks=False,
+            metadata={"visibility": "internal", "role": "guru"},
+        )
         self.tools = (
             TerraFinToolDefinition(
                 name="market_snapshot",
@@ -361,7 +430,7 @@ class _FakeHostedLoop:
                 side_effecting=False,
             ),
         )
-        self.runtime = _FakeHostedRuntime(self.definition)
+        self.runtime = _FakeHostedRuntime(self.definition, self.internal_definition)
         self.tool_adapter = _FakeHostedToolAdapter(self.tools)
         self._conversations: dict[str, TerraFinHostedConversation] = {}
         runtime_model = {
@@ -387,9 +456,15 @@ class _FakeHostedLoop:
         session_id: str | None = None,
         metadata: dict | None = None,
         system_prompt: str | None = None,
+        allow_internal: bool = False,
     ) -> TerraFinHostedConversation:
-        assert agent_name == self.definition.name
-        record = self.runtime.create_record(session_id or "hosted:test-session", metadata=metadata)
+        if agent_name == self.internal_definition.name and not allow_internal:
+            raise agent_routes.TerraFinAgentPolicyError("Internal-only agent.")
+        record = self.runtime.create_record(
+            session_id or "hosted:test-session",
+            metadata=metadata,
+            agent_name=agent_name,
+        )
         conversation = TerraFinHostedConversation(
             session_id=record.session_id,
             agent_name=agent_name,
@@ -725,7 +800,9 @@ def test_hosted_agent_runtime_routes(monkeypatch) -> None:
 
     completed_task = loop.runtime.seed_task("hosted:http-test", status="completed")
     assert completed_task.status == "completed"
-    for task_record in loop.runtime.get_session_record("hosted:http-test").context.task_registry.list_for_session("hosted:http-test"):
+    for task_record in loop.runtime.get_session_record("hosted:http-test").context.task_registry.list_for_session(
+        "hosted:http-test"
+    ):
         if task_record.status not in {"completed", "failed", "cancelled"}:
             loop.runtime.get_session_record("hosted:http-test").context.task_registry.cancel(
                 task_record.task_id,
@@ -738,6 +815,47 @@ def test_hosted_agent_runtime_routes(monkeypatch) -> None:
 
     deleted_session_resp = client.get("/agent/api/runtime/sessions/hosted:http-test")
     assert deleted_session_resp.status_code == 404
+
+
+def test_hosted_agent_runtime_rejects_internal_agent_creation(monkeypatch) -> None:
+    loop = _FakeHostedLoop()
+    client = _client(monkeypatch, hosted_loop=loop)
+
+    create_resp = client.post(
+        "/agent/api/runtime/sessions",
+        json={
+            "agentName": "warren-buffett",
+            "sessionId": "hosted:hidden-guru",
+        },
+    )
+
+    assert create_resp.status_code == 404
+    assert create_resp.json()["error"]["code"] == "hosted_agent_not_found"
+
+
+def test_hosted_agent_runtime_hides_internal_sessions_from_direct_routes(monkeypatch) -> None:
+    loop = _FakeHostedLoop()
+    hidden = loop.create_session(
+        "warren-buffett",
+        session_id="hosted:hidden-guru",
+        metadata={"hiddenInternal": True},
+        allow_internal=True,
+    )
+    hidden_task = loop.runtime.seed_task(hidden.session_id)
+    hidden_approval = loop.runtime.seed_approval(hidden.session_id)
+    client = _client(monkeypatch, hosted_loop=loop)
+
+    session_resp = client.get(f"/agent/api/runtime/sessions/{hidden.session_id}")
+    task_list_resp = client.get(f"/agent/api/runtime/sessions/{hidden.session_id}/tasks")
+    approval_list_resp = client.get(f"/agent/api/runtime/sessions/{hidden.session_id}/approvals")
+    task_resp = client.get(f"/agent/api/runtime/tasks/{hidden_task.task_id}")
+    approval_resp = client.get(f"/agent/api/runtime/approvals/{hidden_approval.approval_id}")
+
+    assert session_resp.status_code == 404
+    assert task_list_resp.status_code == 404
+    assert approval_list_resp.status_code == 404
+    assert task_resp.status_code == 404
+    assert approval_resp.status_code == 404
 
 
 def test_hosted_agent_runtime_routes_report_unconfigured_runtime(monkeypatch) -> None:
