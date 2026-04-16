@@ -22,7 +22,10 @@ It answers a narrower question:
     used by OpenClaw and Claude Code: append-only per-session transcripts with a
     separate session index and explicit rewrite paths. TerraFin's runtime
     controller, financial capability kernel, task/approval flow, widget, and API
-    integration remain TerraFin-specific.
+    integration remain TerraFin-specific. The hidden guru-router pattern also
+    takes inspiration from the role-separation style in `ai-hedge-fund`, but
+    TerraFin keeps shared capabilities and prompt-level persona policy instead
+    of hardcoded per-guru analysis modules.
 
 ## Current runtime shape
 
@@ -36,6 +39,10 @@ Today the hosted runtime has:
 - a provider registry with OpenAI, Gemini, and GitHub Copilot adapters
 - Python, CLI, HTTP, notebook, and browser widget adapters
 - transcript-first local session history
+- a main-orchestrator router for hidden guru research roles
+- a structured internal tool-result/error protocol
+- transcript normalization and repair before model calls
+- a proactive context-budget manager with reactive fallback retries
 
 ## Transcript-first persistence
 
@@ -61,6 +68,17 @@ Transcript events are append-only and currently include:
 - `custom_title`
 - `compact_boundary`
 
+`message` events now carry structured internal content blocks as well as the
+public `role/content` shape. In practice that means TerraFin can persist:
+
+- assistant text
+- hidden internal tool-use turns
+- tool results
+- retryable tool-error results
+
+without exposing the hidden internal turns in the browser widget or public
+session APIs.
+
 Important consequences:
 
 - session list/history is transcript-derived
@@ -68,6 +86,11 @@ Important consequences:
 - deleting a session archives the transcript file with a `.deleted.<timestamp>`
   suffix and removes it from active history
 - legacy embedded conversation blobs are ignored and not migrated
+- hidden internal guru sessions can still be recorded for runtime/debug purposes,
+  but they are filtered out of normal public session history
+- hidden guru sessions are also blocked from normal public read/delete/task/approval
+  routes even when a caller knows a session id
+- deleting a public parent session cascades hidden guru child cleanup
 
 Tasks, approvals, audit, and published view context still live in the hosted
 runtime/session store. Only conversation history moved to transcript files.
@@ -80,6 +103,12 @@ runtime/session store. Only conversation history moved to transcript files.
 | `src/TerraFin/agent/definitions.py` | hosted agent definitions and allowlists |
 | `src/TerraFin/agent/hosted_runtime.py` | session lifecycle, policy enforcement, task dispatch, transcript-aware session access |
 | `src/TerraFin/agent/loop.py` | hosted loop, immediate message append flow, provider state persistence |
+| `src/TerraFin/agent/conversation.py` | internal message/block protocol and conversation dataclasses |
+| `src/TerraFin/agent/guru.py` | route planning, hidden guru execution, and structured memo synthesis |
+| `src/TerraFin/agent/tool_execution.py` | structured tool execution outcomes and tool-result message creation |
+| `src/TerraFin/agent/transcript_normalizer.py` | transcript repair, tool-use/tool-result pairing, internal/public view split |
+| `src/TerraFin/agent/context_budget.py` | proactive prompt-budget estimation and compaction levels |
+| `src/TerraFin/agent/recovery.py` | per-turn recovery budget / repeated-error policy |
 | `src/TerraFin/agent/transcript_store.py` | append-only transcript store, `sessions.json` index, transcript readers, archive/rewrite helpers |
 | `src/TerraFin/agent/session_store.py` | non-transcript hosted state: tasks, approvals, audit, view context, transient conversation attachment |
 | `src/TerraFin/agent/model_runtime.py` | provider registry, runtime-model binding, canonical `provider/model` refs |
@@ -108,12 +137,28 @@ Current routes:
 - `POST /agent/api/runtime/tasks/{task_id}/cancel`
 - `GET /agent/api/runtime/approvals/{approval_id}`
 - `POST /agent/api/runtime/approvals/{approval_id}/approve`
+
+## Recovery architecture
+
+The hosted loop now follows a stricter internal recovery path inspired by the
+kind of guardrails Claude Code uses internally, while keeping TerraFin's own
+surface and naming:
+
+- retryable tool/input failures stay inside the loop as structured tool-error results
+- fatal upstream auth/quota/provider failures are the main class still surfaced to users
+- transcripts are normalized before provider calls so orphaned tool results do not leak into the next turn
+- context is proactively compacted before provider calls, with reactive retry levels still kept as a last resort
 - `POST /agent/api/runtime/approvals/{approval_id}/deny`
 - `PUT /agent/api/runtime/view-contexts/{context_id}`
 - `GET /agent/api/runtime/view-contexts/{context_id}`
 
 The browser widget, notebook helpers, CLI runtime commands, and Python client
 all sit on top of this same contract.
+
+The runtime catalog intentionally exposes only public agents in the normal
+adapter surfaces. Hidden guru roles are internal runtime definitions, not
+default user-facing choices, and the public session-create route rejects them
+directly.
 
 ## Browser behavior
 
@@ -139,6 +184,9 @@ What is already there:
 - provider-backed model loop
 - transcript-first local session history
 - archived session delete behavior
+- policy-first hidden guru routing from the main assistant
+- structured internal guru memos for orchestrator synthesis through an internal
+  memo tool-call contract, not JSON scraped from prose
 - notebook helper surface
 - browser widget over the runtime endpoints
 

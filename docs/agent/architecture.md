@@ -15,7 +15,11 @@ This document is for maintainers.
     TerraFin's provider/model registry and model-management CLI were inspired by
     OpenClaw's model-provider UX. TerraFin's transcript-first session history
     now also follows the same broad reference shape used by OpenClaw and Claude
-    Code: append-only per-session transcripts plus a separate session index.
+    Code: append-only per-session transcripts plus a separate session index. The
+    hidden guru-role split described below also borrows the high-level idea of
+    explicit analyst role separation from `ai-hedge-fund`, while deliberately
+    keeping TerraFin's shared capability kernel instead of per-guru Python
+    analysis modules.
     The shared financial capability kernel, hosted-runtime policy layer,
     permission flow, widget integration, and view-context design described here
     are TerraFin-specific architecture.
@@ -125,9 +129,18 @@ Current default product path:
 
 - `terrafin-assistant`
 
-The registry still exists so TerraFin can define narrower hosted agents for
-tests, future deployments, or specialized operator workflows without changing
-the runtime architecture.
+The registry also contains **internal guru definitions** such as Buffett,
+Marks, and Druckenmiller. These are hidden research roles, not public product
+surfaces.
+
+Current product rule:
+
+- users talk to `terrafin-assistant`
+- `terrafin-assistant` may route to hidden guru roles when policy says the
+  request benefits from those lenses
+- guru roles are not shown in the default catalog or session history
+- guru roles are not creatable through the public runtime session API
+- hidden guru session ids are not valid public session/task/approval handles
 
 ### Hosted loop layer
 
@@ -137,10 +150,40 @@ Its job is to:
 
 - run the model loop
 - expose capabilities as tools
-- append messages and tool results to the session
+- append transcript-first messages and structured tool results to the session
 - decide when to invoke a capability directly versus launch a task
+- normalize transcript state before the next provider call
+- compact context proactively before the provider rejects the prompt
 
 External agents do not need TerraFin to own this layer.
+
+### Main-orchestrator router layer
+
+The main hosted assistant now owns a **policy-first router** for investor
+personas.
+
+Rules:
+
+- inspect the user request
+- inspect current TerraFin view context
+- decide whether to stay in general TerraFin mode or invoke hidden guru roles
+- synthesize the resulting research back into one user-facing answer
+- require each hidden guru role to finish via a structured memo handoff, not
+  free-form prose parsing
+
+This is intentionally not an LLM-first “let the model decide everything”
+approach. Routing is deterministic and cost-bounded.
+
+Current default role mapping:
+
+- portfolio / holdings / business-quality interpretation -> Buffett first,
+  optionally Marks
+- macro / regime / liquidity / top-down setup -> Druckenmiller first,
+  optionally Marks
+- valuation / downside / DCF review / cycle framing -> Marks first,
+  optionally Buffett
+
+The user still sees one assistant.
 
 ### Transport adapters
 
@@ -196,6 +239,7 @@ Shape:
 | `src/TerraFin/agent/runtime.py` | shared kernel primitives |
 | `src/TerraFin/agent/service.py` | capability implementation layer |
 | `src/TerraFin/agent/definitions.py` | hosted agent definition registry |
+| `src/TerraFin/agent/guru.py` | policy-first guru router, structured research memos, and hidden-role synthesis |
 | `src/TerraFin/agent/hosted_runtime.py` | hosted runtime controller and policy layer |
 | `src/TerraFin/agent/transcript_store.py` | append-only transcript store and session index |
 | `src/TerraFin/agent/session_store.py` | non-transcript hosted state, approvals, tasks, audit, and view context |
@@ -215,6 +259,10 @@ Shape:
 - Do not let HTTP, CLI, and Python semantics drift away from the same kernel.
 - Do not treat chart-opening as a toy path if agents can create chart artifacts.
 - Do not overbuild remote or multi-agent orchestration before local kernel semantics are solid.
+- Do not expose hidden guru roles as a product picker unless the product
+  direction explicitly changes.
+- Do not let internal guru orchestration depend on regex recovery from prose;
+  the internal handoff must stay structured.
 
 ## Read next
 

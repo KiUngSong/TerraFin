@@ -16,7 +16,10 @@ TerraFin's agent surface has three separate jobs:
     OpenClaw, especially canonical `provider/model` refs, the `models ...`
     command family, and the GitHub Copilot login flow. TerraFin's hosted
     runtime, financial capability kernel, session/task model, widget, and API
-    wiring are TerraFin-specific unless a page says otherwise.
+    wiring are TerraFin-specific unless a page says otherwise. The hosted
+    runtime's hidden guru-router architecture also borrows the high-level idea
+    of explicit analyst-role separation from `ai-hedge-fund`, while keeping
+    TerraFin's shared capability kernel instead of per-guru Python modules.
 
 ## Start Here
 
@@ -42,6 +45,14 @@ Hosted runtime history is now local and transcript-first:
 - append-only JSONL transcript per session
 - separate `sessions.json` index for history lookup
 - delete archives old sessions instead of rewriting them in place
+- hidden internal tool-use turns stay out of the public chat surface
+- retryable tool/input failures are handled inside the loop instead of dumped straight to the user
+
+Hosted runtime also keeps one public assistant surface:
+
+- `TerraFin Agent` is the only default user-facing chat surface
+- hidden guru roles may run behind the scenes for research requests
+- guru routing is policy-first and research-only in v1
 
 ## Related Docs
 

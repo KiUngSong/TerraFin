@@ -34,6 +34,9 @@ There are two agent-facing HTTP families:
 In the browser, the hosted runtime is exposed through the floating **TerraFin Agent**
 widget available on main interface pages such as `/dashboard`, `/chart`, and `/stock/<ticker>`.
 
+That panel is always the public surface. There is no guru picker in the default
+product flow.
+
 If the deployment does not have a usable hosted model configured, the widget
 stays in an info-only state:
 
@@ -47,6 +50,20 @@ Hosted runtime chat history is local transcript history:
 - history list and previews are derived from the transcript index
 - deleting a session archives the transcript and removes it from active history
 - raw tool JSON stays in the transcript for replay, but is hidden from user-facing previews
+
+TerraFin Agent may also route some research questions through hidden investor
+roles before replying. Today those roles include Warren Buffett, Howard Marks,
+and Stanley Druckenmiller.
+
+Important product rules:
+
+- users still talk only to `TerraFin Agent`
+- hidden guru routing is policy-first and view-context-aware
+- the hidden guru path is research-only in v1
+- hidden guru sessions are not shown in normal session history
+- hidden guru roles cannot be created through the normal public runtime API
+- hidden guru session ids are not valid public session/task/approval resources
+- internal guru handoff uses a structured memo contract before the main assistant synthesizes a reply
 
 ## Choose a transport
 

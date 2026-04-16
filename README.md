@@ -109,6 +109,14 @@ terrafin-agent models auth login-github-copilot --set-default
 The browser UI is exposed through the floating **TerraFin Agent** panel on the
 main interface pages.
 
+That panel is the only default chat surface. TerraFin does not expose a guru
+picker in the main product flow.
+
+For some research questions, the main TerraFin orchestrator may route the
+request through hidden investor-role research passes such as Buffett, Marks, or
+Druckenmiller, then synthesize the result back into one answer. This stays
+research-only in v1.
+
 If the deployment does not have a valid hosted model configured, the widget
 stays in warning/info mode:
 
@@ -124,7 +132,9 @@ The CLI model-management UX was inspired by OpenClaw. TerraFin's runtime
 binding, saved-state format, hosted session model, and widget integration are
 TerraFin-specific. See
 <https://kiungsong.github.io/TerraFin/agent/models/> for the explicit
-attribution boundary.
+attribution boundary. The hidden guru-router pattern also takes high-level role
+separation inspiration from `ai-hedge-fund`, while keeping TerraFin's shared
+capability kernel instead of hardcoded per-guru Python analysis modules.
 
 ## Development
 
