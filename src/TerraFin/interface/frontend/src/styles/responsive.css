@@ -819,7 +819,9 @@
 .tf-agent-widget__runtime-chip {
   display: inline-flex;
   align-items: center;
-  padding: 4px 9px;
+  justify-content: center;
+  min-height: 28px;
+  padding: 6px 10px;
   border-radius: 999px;
   border: 1px solid rgba(148, 163, 184, 0.22);
   background: rgba(248, 250, 252, 0.92);
@@ -916,14 +918,9 @@
 }
 
 .tf-agent-widget__close {
-  border: 1px solid rgba(148, 163, 184, 0.28);
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.88);
   color: #334155;
-  font-size: 12px;
-  font-weight: 700;
-  padding: 7px 11px;
-  font-family: inherit;
+  background: rgba(255, 255, 255, 0.88);
+  border-color: rgba(148, 163, 184, 0.28);
 }
 
 .tf-agent-widget__description {

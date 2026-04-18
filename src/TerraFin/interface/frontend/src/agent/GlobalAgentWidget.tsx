@@ -1386,7 +1386,7 @@ const GlobalAgentWidget: React.FC = () => {
             </button>
             <button
               type="button"
-              className="tf-agent-widget__close"
+              className="tf-agent-widget__header-button tf-agent-widget__close"
               onClick={() => setIsOpen(false)}
               aria-label={`Close ${AGENT_UI_NAME}`}
             >
