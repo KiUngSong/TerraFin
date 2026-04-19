@@ -601,6 +601,89 @@ def build_default_capability_registry(
                 handler=resolved_service.calendar_events,
                 backgroundable=True,
             ),
+            # ----- Dashboard widget-parity capabilities -----
+            # Each of these mirrors a standalone widget the user sees on the
+            # dashboard / market-insights / stock-analysis pages. Without them
+            # the user would be surprised the agent can't comment on something
+            # they're staring at. Payloads pass through verbatim from the
+            # `build_*_payload` / `get_*` route helpers so the two views never
+            # diverge (DA audit: High-3/4/5, Med-6).
+            TerraFinCapability(
+                name="fear_greed",
+                description=(
+                    "Fetch the CNN Fear & Greed index — same data as the "
+                    "`/dashboard/api/fear-greed` widget. Returns score, rating, "
+                    "previous close, and 1W/1M history."
+                ),
+                handler=resolved_service.fear_greed,
+            ),
+            TerraFinCapability(
+                name="sp500_dcf",
+                description=(
+                    "Fetch the full S&P 500 DCF valuation — same shape as "
+                    "`/market-insights/api/dcf/sp500`. Includes scenarios, "
+                    "sensitivity matrix, methods, rateCurve, dataQuality."
+                ),
+                handler=resolved_service.sp500_dcf,
+                backgroundable=True,
+            ),
+            TerraFinCapability(
+                name="beta_estimate",
+                description=(
+                    "Fetch a 5-year monthly beta estimate with adjusted beta, "
+                    "R², and benchmark — same shape as `/stock/api/beta-estimate`. "
+                    "Use this when you need the statistical quality of the beta; "
+                    "`company_info` only surfaces a bare beta string."
+                ),
+                handler=resolved_service.beta_estimate,
+                focus_extractor=_focus_from_input_keys("ticker"),
+                backgroundable=True,
+            ),
+            TerraFinCapability(
+                name="top_companies",
+                description=(
+                    "Fetch the market-insights top-companies list — same data as "
+                    "`/market-insights/api/top-companies`."
+                ),
+                handler=resolved_service.top_companies,
+            ),
+            TerraFinCapability(
+                name="market_regime",
+                description=(
+                    "Fetch the market regime summary — same data as "
+                    "`/market-insights/api/regime`. Returns a short summary, "
+                    "confidence, and bulleted signals."
+                ),
+                handler=resolved_service.market_regime,
+            ),
+            TerraFinCapability(
+                name="trailing_forward_pe",
+                description=(
+                    "Fetch the trailing vs. forward P/E spread — same data as "
+                    "`/dashboard/api/trailing-forward-pe-spread`."
+                ),
+                handler=resolved_service.trailing_forward_pe,
+                backgroundable=True,
+            ),
+            TerraFinCapability(
+                name="market_breadth",
+                description=(
+                    "Fetch standalone market-breadth metrics — same data as the "
+                    "MarketBreadthCard widget. Was previously bundled inside "
+                    "`market_snapshot`; use this capability when the question is "
+                    "about whole-market state rather than a single ticker."
+                ),
+                handler=resolved_service.market_breadth,
+            ),
+            TerraFinCapability(
+                name="watchlist",
+                description=(
+                    "Fetch the user's current watchlist — same data as the "
+                    "WatchlistSection widget. Standalone now; was previously "
+                    "bundled inside `market_snapshot`."
+                ),
+                handler=resolved_service.watchlist,
+            ),
             TerraFinCapability(
                 name="open_chart",
                 description="Create or update a TerraFin chart session and return a chart artifact.",
@@ -627,6 +710,116 @@ def build_default_capability_registry(
                 name="valuation",
                 description="Run DCF, reverse DCF, relative valuation, and Graham Number for a ticker.",
                 handler=resolved_service.valuation,
+                focus_extractor=_focus_from_input_keys("ticker"),
+                backgroundable=True,
+            ),
+            TerraFinCapability(
+                name="sec_filings",
+                description=(
+                    "List recent 10-K / 10-Q / 8-K filings for a ticker with SEC EDGAR links. "
+                    "Call this ONCE when you need to pivot to a filing not currently in view. The "
+                    "response's `latestByForm` dict is the direct lookup: "
+                    "`latestByForm['10-K'].accession` / `.primaryDocument` give you everything "
+                    "`sec_filing_section` needs. Do NOT scan the flat `filings` array — it's "
+                    "chronological, so 8-Ks cluster at the top and the 10-K/10-Q you want may be in "
+                    "position 5+.\n"
+                    "If a filing is already shown in the user's view context, DON'T call this tool at "
+                    "all — the accession and primaryDocument live in `current_view_context.selection`.\n"
+                    "OUTPUT FORMAT — pick by question type:\n"
+                    "• Quantitative filing analysis ('analyze the 10-Q', 'what do the numbers say'): "
+                    "(1) lead with a '## TL;DR' of 3-5 bullets where each bullet is a punchline number "
+                    "or concrete insight — no filler adjectives; "
+                    "(2) follow with a compact '## Key numbers' table (≤6 rows) comparing current vs "
+                    "prior-year period, showing only metrics that move the thesis; tables MUST include "
+                    "the `| --- |` header-separator row after the header row; "
+                    "(3) narrate with named subsections ('### The X story', '### The Y anomaly') of "
+                    "≤3 sentences each, **bolding** one driver number per sentence maximum; "
+                    "(4) close with '## Not disclosed in this filing' as a short bulleted list.\n"
+                    "• Qualitative/descriptive question ('what is their business', 'how do they make "
+                    "money', 'what are the risks'): 2-4 short paragraphs grounded in the full section "
+                    "body (you MUST have called sec_filing_section first — don't answer off the 4 KB "
+                    "excerpt). Lead with the single most important sentence, then add specifics: "
+                    "products/segments, go-to-market, differentiation, any concrete numbers the "
+                    "filing discloses. Skip the TL;DR bullets and Key-numbers table — they're for "
+                    "quantitative questions, not descriptive ones.\n"
+                    "EDITORIAL DISCIPLINE (strict — reviewers will reject otherwise): "
+                    "(a) no adjectives not grounded in the filing text — avoid 'notable', 'heavy lifting', "
+                    "'nearly wiped', 'pristine'; if you flip management's spin, cite the arithmetic that "
+                    "supports the flip (and report the net number management disclosed); "
+                    "(b) numbers in the TL;DR MUST match the Key-numbers table exactly — no '+12%' in one "
+                    "and '+11.6%' in the other for the same metric; "
+                    "(c) when the fixture provides both QoQ and YoY deltas (or both Q and YTD), report "
+                    "both — a QoQ drop can hide YoY expansion and vice versa; "
+                    "(d) scan every statement for line items moving >50% YoY and surface them — a "
+                    "13x jump in a small bucket or a credits line halving is exactly what skimmers want; "
+                    "(e) if MD&A rounding or direction contradicts what you compute from the statements, "
+                    "report BOTH and prefer the statement-derived number, flagging the discrepancy."
+                ),
+                handler=resolved_service.sec_filings,
+                focus_extractor=_focus_from_input_keys("ticker"),
+            ),
+            TerraFinCapability(
+                name="sec_filing_document",
+                description=(
+                    "Fetch the table of contents (section titles, slugs, and sizes) for a specific "
+                    "10-K, 10-Q, or other SEC filing. Returns structure only — use `sec_filing_section` "
+                    "to pull the actual prose. Requires the accession and primaryDocument fields from "
+                    "`sec_filings` or the current view context.\n"
+                    "Analyst discovery protocol — do NOT assume fixed item numbers across different "
+                    "forms. Instead, scan the TOC for titles containing these keywords:\n"
+                    "• Financial Data: 'Financial Statements', 'Notes', 'Consolidated Statements'.\n"
+                    "• Strategy & Operations: 'Business', 'Management's Discussion', 'MD&A'.\n"
+                    "• Risk & Legal: 'Risk Factors', 'Legal Proceedings', 'Controls'.\n"
+                    "Plan to fetch the specific sections that contain the evidence needed for your "
+                    "answer rather than guessing from summaries."
+                ),
+                handler=resolved_service.sec_filing_document,
+                focus_extractor=_focus_from_input_keys("ticker"),
+                backgroundable=True,
+            ),
+            TerraFinCapability(
+                name="sec_filing_section",
+                description=(
+                    "Fetch the verbatim markdown body of a single filing section by slug. "
+                    "The slug MUST come verbatim from a prior `sec_filing_document` call's TOC — "
+                    "NEVER guess slug names from SEC filing conventions (the parser does not always "
+                    "match convention; trust the actual TOC, not your prior knowledge).\n"
+                    "\n"
+                    "REQUIRED WORKFLOW (follow in order):\n"
+                    "1. Call `sec_filing_document(ticker, accession, primaryDocument, form)` first to "
+                    "obtain the TOC. Every entry has `{slug, text, charCount}`.\n"
+                    "2. Pick the slug whose `text` matches what the user is asking about. If no text "
+                    "matches cleanly (e.g. user asked about 'earnings' but there is no Item labelled "
+                    "'Financial Statements'), use `charCount` as a size signal — the LARGEST section "
+                    "in the relevant Part usually contains the content. 10-K MD&A and Financial "
+                    "Statements often appear as a single very large section when the parser misses the "
+                    "Item 7 / Item 8 split; a 200 KB section body in Part II is almost certainly "
+                    "financial reporting regardless of what its heading says.\n"
+                    "3. Pass that exact slug string to this tool. Do not reformat it, translate it, or "
+                    "guess a canonical form.\n"
+                    "\n"
+                    "IF THIS TOOL RETURNS 'section not found': do NOT tell the user the section "
+                    "doesn't exist. The error response includes the full list of available slugs with "
+                    "their sizes. Pick one from that list (prefer the largest one in the relevant Part "
+                    "if no name matches), and retry this tool immediately. Only after a second real "
+                    "failure should you report inability to find the content.\n"
+                    "\n"
+                    "OUTPUT PROPERTIES:\n"
+                    "- Returns raw, un-truncated markdown including tables. Use the tables to "
+                    "recompute margins, growth rates, and capital allocation signals directly from "
+                    "source data — do not fall back to the `financials` summary tool.\n"
+                    "- If the user is viewing a filing, the `sectionExcerpt` in their view-context is "
+                    "only ~4 KB. Substantive questions (strategy, full financials, segment detail) "
+                    "REQUIRE this tool to fetch the full section body (often 100 KB+).\n"
+                    "\n"
+                    "VERBATIM CITATION RULE:\n"
+                    "When you quote risk factors, MD&A language, forward-looking statements, or "
+                    "legal commitments from the returned body, copy the exact wording inside "
+                    "quotation marks and name the section. Do NOT paraphrase — users need to be "
+                    "able to verify what the filing actually says, not what you think it says. "
+                    "Paraphrasing into friendlier English in safety-sensitive sections is a bug."
+                ),
+                handler=resolved_service.sec_filing_section,
                 focus_extractor=_focus_from_input_keys("ticker"),
                 backgroundable=True,
             ),

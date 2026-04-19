@@ -128,6 +128,67 @@ class _FakeService:
             "processing": _processing(),
         }
 
+    def sec_filings(self, ticker: str) -> dict[str, object]:
+        return {"ticker": ticker, "cik": 1, "forms": ["10-K"], "filings": [], "processing": _processing()}
+
+    def sec_filing_document(
+        self, ticker: str, accession: str, primaryDocument: str, *, form: str = "10-Q"
+    ) -> dict[str, object]:
+        return {
+            "ticker": ticker,
+            "accession": accession,
+            "primaryDocument": primaryDocument,
+            "toc": [],
+            "charCount": 0,
+            "indexUrl": "",
+            "documentUrl": "",
+            "processing": _processing(),
+        }
+
+    def sec_filing_section(
+        self,
+        ticker: str,
+        accession: str,
+        primaryDocument: str,
+        sectionSlug: str,
+        *,
+        form: str = "10-Q",
+    ) -> dict[str, object]:
+        return {
+            "ticker": ticker,
+            "accession": accession,
+            "sectionSlug": sectionSlug,
+            "sectionTitle": "stub",
+            "markdown": "",
+            "charCount": 0,
+            "documentUrl": "",
+            "processing": _processing(),
+        }
+
+    def fear_greed(self) -> dict[str, object]:
+        return {"score": 50, "rating": "Neutral", "processing": _processing()}
+
+    def sp500_dcf(self) -> dict[str, object]:
+        return {"status": "ready", "currentIntrinsicValue": 5000.0, "processing": _processing()}
+
+    def beta_estimate(self, ticker: str) -> dict[str, object]:
+        return {"symbol": ticker, "beta": 1.0, "adjustedBeta": 1.0, "rSquared": 0.5, "processing": _processing()}
+
+    def top_companies(self) -> dict[str, object]:
+        return {"companies": [], "count": 0, "processing": _processing()}
+
+    def market_regime(self) -> dict[str, object]:
+        return {"summary": "stub", "confidence": "low", "signals": [], "processing": _processing()}
+
+    def trailing_forward_pe(self) -> dict[str, object]:
+        return {"date": "2026-04-01", "latestValue": 0.0, "history": [], "processing": _processing()}
+
+    def market_breadth(self) -> dict[str, object]:
+        return {"metrics": [], "processing": _processing()}
+
+    def watchlist(self) -> dict[str, object]:
+        return {"items": [], "count": 0, "processing": _processing()}
+
 
 class _RetryingFakeService(_FakeService):
     def __init__(self) -> None:
@@ -281,6 +342,69 @@ def test_run_tool_retries_with_repaired_macro_alias_before_exposing_error() -> N
 
     assert result.payload["ticker"] == "Nasdaq"
     assert service.calls == ["NASDAQ COMPOSITE", "Nasdaq"]
+
+
+class _SecFilingSlugNotFoundService(_FakeService):
+    """Service fake where sec_filing_section raises the exact LookupError
+    shape the real service emits when the slug isn't in the TOC."""
+
+    def sec_filing_section(
+        self,
+        ticker: str,
+        accession: str,
+        primaryDocument: str,
+        sectionSlug: str,
+        *,
+        form: str = "10-Q",
+    ) -> dict[str, object]:
+        raise LookupError(
+            f"Section '{sectionSlug}' not found. "
+            "Do NOT report 'section doesn't exist' — retry this tool with one of the available "
+            "slugs. The 5 largest sections in this filing are: "
+            "item-6-reserved (213068 chars, 'Item 6. Reserved.'), "
+            "item-1-business (180091 chars, 'Item 1. Business.'), "
+            "part-ii (218055 chars, 'Part II'), "
+            "part-i (185218 chars, 'PART I'), "
+            "item-3-legal-proceedings (4203 chars, 'Item 3. Legal Proceedings.'). "
+            "All 7 available slugs: part-i, item-1-business, item-2-properties, "
+            "item-3-legal-proceedings, part-ii, item-5-market, item-6-reserved"
+        )
+
+
+def test_run_tool_classifies_sec_filing_section_bad_slug_as_retryable() -> None:
+    """The `sec_filing_section` service raises a rich LookupError with
+    the full TOC slug list and explicit retry guidance. Without the
+    classifier recognizing it, the exception propagates raw — the model
+    sees an unstructured error, paraphrases it, and gives up instead
+    of retrying with a valid slug (the exact ZETA 10-K failure mode).
+
+    Regression for QA-identified CRITICAL #2."""
+    adapter = _adapter(service=_SecFilingSlugNotFoundService())
+    session = adapter.runtime.create_session(DEFAULT_HOSTED_AGENT_NAME, session_id="tool:sec-slug-not-found")
+
+    result = adapter.run_tool(
+        session.session.session_id,
+        "sec_filing_section",
+        {
+            "ticker": "ZETA",
+            "accession": "0000000000-26-000000",
+            "primaryDocument": "zeta.htm",
+            "sectionSlug": "financial-statements",  # bad guess, not in TOC
+            "form": "10-K",
+        },
+    )
+
+    assert result.is_error is True
+    assert result.retryable is True
+    assert result.error_code == "sec_filing_section_slug_not_found"
+    assert result.payload["accepted"] is False
+    assert result.payload["error"]["retryable"] is True
+    # Model hint must tell the LLM to retry and include the full slug list.
+    hint = result.payload["error"]["modelHint"]
+    assert "DO NOT tell the user" in hint
+    assert "item-6-reserved" in hint  # largest slug surfaced
+    assert "part-ii" in hint  # Part II reference for 10-K earnings guidance
+    assert "MD&A" in hint or "earnings" in hint  # earnings/MD&A hint
 
 
 def test_run_tool_returns_internal_retryable_error_result_for_symbol_resolution_failures() -> None:

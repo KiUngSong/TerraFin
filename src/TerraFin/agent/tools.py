@@ -2,18 +2,22 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass, field
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 from TerraFin.interface.market_insights.payloads import canonical_macro_name, resolve_macro_type
 from TerraFin.interface.stock.payloads import resolve_ticker_query
 
-from .definitions import TerraFinAgentDefinition
+from .definitions import TerraFinAgentDefinition, is_internal_agent_definition
 from .hosted_runtime import (
     TerraFinAgentApprovalRequiredError,
     TerraFinHostedAgentRuntime,
 )
 from .runtime import TerraFinCapability, TerraFinTaskRecord
 from .tool_contracts import HOSTED_TOOL_CONTRACT_VERSION, get_hosted_tool_contract
+
+
+if TYPE_CHECKING:
+    from .loop import TerraFinHostedAgentLoop
 
 
 ToolExecutionMode = Literal["invoke", "task"]
@@ -63,9 +67,26 @@ class _ToolErrorDisposition:
     model_hint: str | None = None
 
 
+_PERSONA_CONSULT_TOOLS = {
+    "consult_warren_buffett": "warren-buffett",
+    "consult_howard_marks": "howard-marks",
+    "consult_stanley_druckenmiller": "stanley-druckenmiller",
+}
+
+
 class TerraFinHostedToolAdapter:
     def __init__(self, runtime: TerraFinHostedAgentRuntime) -> None:
         self.runtime = runtime
+        # The loop reference is injected after loop construction because the
+        # adapter and loop are mutually dependent: the loop owns the adapter;
+        # the adapter needs the loop to dispatch `consult_<persona>` tools
+        # (persona subagents are full model loops, which the top-level loop
+        # runs). Plain session-scoped capability calls don't need the loop —
+        # they go through `runtime.invoke`.
+        self._loop: "TerraFinHostedAgentLoop" | None = None
+
+    def attach_loop(self, loop: "TerraFinHostedAgentLoop") -> None:
+        self._loop = loop
 
     def list_tools_for_agent(self, agent_name: str) -> tuple[TerraFinToolDefinition, ...]:
         definition = self.runtime.get_agent_definition(agent_name)
@@ -107,6 +128,20 @@ class TerraFinHostedToolAdapter:
                     session_id,
                     view_context_id=_optional_string(resolved_arguments.get("viewContextId")),
                 )
+            elif tool.name in _PERSONA_CONSULT_TOOLS:
+                if self._loop is None:
+                    raise RuntimeError(
+                        "Tool adapter has no loop reference; consult_<persona> "
+                        "tools require `attach_loop(...)` to have been called "
+                        "after loop construction."
+                    )
+                guru_name = _PERSONA_CONSULT_TOOLS[tool.name]
+                question = _optional_string(resolved_arguments.get("question")) or ""
+                if not question:
+                    raise ValueError(
+                        f"{tool.name} requires a non-empty `question` argument."
+                    )
+                payload = self._loop.consult_guru(session_id, guru_name, question)
             elif tool.execution_mode == "task":
                 task = self.runtime.start_task(session_id, tool.capability_name, **resolved_arguments)
                 payload = {
@@ -197,7 +232,92 @@ class TerraFinHostedToolAdapter:
             if definition.allow_background_tasks and capability.backgroundable:
                 tools.append(self._build_tool_definition(capability, execution_mode="task"))
         tools.append(self._build_current_view_context_tool())
+        # Persona-consult tools — only the user-facing orchestrator gets
+        # them. Persona subagents themselves (hiddenInternal guru roles)
+        # must not recurse through consult_* onto each other, so they are
+        # filtered out by `is_internal_agent_definition`.
+        if not is_internal_agent_definition(definition):
+            tools.append(self._build_consult_warren_buffett_tool())
+            tools.append(self._build_consult_howard_marks_tool())
+            tools.append(self._build_consult_stanley_druckenmiller_tool())
         return tuple(tools)
+
+    def _build_consult_warren_buffett_tool(self) -> TerraFinToolDefinition:
+        contract = get_hosted_tool_contract("consult_warren_buffett")
+        return TerraFinToolDefinition(
+            name="consult_warren_buffett",
+            capability_name="consult_warren_buffett",
+            description=(
+                "Consult the hidden Warren Buffett subagent for a business-quality / "
+                "long-term-ownership lens. Best when the user asks about moats, "
+                "competitive advantage, earnings power, capital allocation, intrinsic "
+                "value under conservative assumptions, or whether a business is worth "
+                "owning for the long run. Pass the specific question as `question`. "
+                "Returns a structured memo with stance, confidence (0-100, "
+                "self-reported by the persona agent based on evidence quality), "
+                "thesis, key_evidence, risks, open_questions, citations. "
+                "Call this alongside `consult_howard_marks` or "
+                "`consult_stanley_druckenmiller` when the user explicitly asks for "
+                "multiple investor perspectives."
+            ),
+            input_schema=contract["input_schema"],
+            execution_mode="invoke",
+            side_effecting=False,
+            metadata={
+                "backgroundable": False,
+                "capabilityName": "consult_warren_buffett",
+                "contractVersion": HOSTED_TOOL_CONTRACT_VERSION,
+                "responseModel": contract["response_model"],
+            },
+        )
+
+    def _build_consult_howard_marks_tool(self) -> TerraFinToolDefinition:
+        contract = get_hosted_tool_contract("consult_howard_marks")
+        return TerraFinToolDefinition(
+            name="consult_howard_marks",
+            capability_name="consult_howard_marks",
+            description=(
+                "Consult the hidden Howard Marks subagent for a cycle / "
+                "risk-premium / second-level-thinking lens. Best when the user asks "
+                "about downside risk, what's priced in, cycle position, bear cases, "
+                "valuation sensitivity, or whether the market is complacent. "
+                "Returns a structured memo (same schema as `consult_warren_buffett`). "
+                "Complementary to Buffett for quality vs. price tension."
+            ),
+            input_schema=contract["input_schema"],
+            execution_mode="invoke",
+            side_effecting=False,
+            metadata={
+                "backgroundable": False,
+                "capabilityName": "consult_howard_marks",
+                "contractVersion": HOSTED_TOOL_CONTRACT_VERSION,
+                "responseModel": contract["response_model"],
+            },
+        )
+
+    def _build_consult_stanley_druckenmiller_tool(self) -> TerraFinToolDefinition:
+        contract = get_hosted_tool_contract("consult_stanley_druckenmiller")
+        return TerraFinToolDefinition(
+            name="consult_stanley_druckenmiller",
+            capability_name="consult_stanley_druckenmiller",
+            description=(
+                "Consult the hidden Stanley Druckenmiller subagent for a macro / "
+                "liquidity / regime / momentum lens. Best when the user asks about "
+                "Fed policy impact, rates higher-for-longer, risk-on/off regime, "
+                "liquidity conditions, currency or commodity backdrop, or when an "
+                "asset's fate depends more on the macro tape than on its own "
+                "fundamentals. Returns a structured memo (same schema)."
+            ),
+            input_schema=contract["input_schema"],
+            execution_mode="invoke",
+            side_effecting=False,
+            metadata={
+                "backgroundable": False,
+                "capabilityName": "consult_stanley_druckenmiller",
+                "contractVersion": HOSTED_TOOL_CONTRACT_VERSION,
+                "responseModel": contract["response_model"],
+            },
+        )
 
     def _preflight_tool_misuse(
         self,
@@ -278,7 +398,42 @@ class TerraFinHostedToolAdapter:
             capability_name="current_view_context",
             description=(
                 "Read the user's current TerraFin page/view context when the request depends on "
-                "what they are looking at right now. Do not use unless the request is view-dependent."
+                "what they are looking at right now (pronouns like 'this', 'their', 'it', or implicit "
+                "subjects).\n"
+                "If the user is viewing a SEC filing, `selection` will carry "
+                "`{ticker, form, accession, primaryDocument, sectionSlug, sectionTitle, "
+                "sectionExcerpt, documentUrl, indexUrl}`. Key rules:\n"
+                "1. USE `selection.accession` AND `selection.primaryDocument` DIRECTLY (don't "
+                "call `sec_filings` first) — the filing the user is viewing is already identified. "
+                "But the `selection.sectionSlug` may be stale relative to the filing's current TOC "
+                "(the browser cached it earlier). So the correct workflow when user asks about the "
+                "in-view filing:\n"
+                "   a. Call `sec_filing_document(ticker=selection.ticker, accession=selection.accession, "
+                "primaryDocument=selection.primaryDocument, form=selection.form)` FIRST to get the "
+                "current TOC.\n"
+                "   b. Pick a `sectionSlug` from that TOC that matches the user's question. For "
+                "earnings / revenue / MD&A / financial statements in a 10-K, prefer the LARGEST slug "
+                "in Part II — 10-K parsers sometimes leave MD&A and Financial Statements inside an "
+                "oversized neighbor slug (e.g. `item-6-reserved` with 200 KB of body).\n"
+                "   c. Call `sec_filing_section(...)` with the TOC-sourced slug.\n"
+                "If `selection.sectionSlug` exists AND the user's question is scoped to that exact "
+                "section, you MAY skip step (a) and pass `selection.sectionSlug` directly — but on "
+                "a 'section not found' error, always fall back to the TOC workflow above.\n"
+                "2. The excerpt is only ~4 KB, usually a small slice of a much larger section "
+                "(Item 1 Business in a 10-K is typically 100-200 KB). For any substantive question — "
+                "business model, operations, strategy, risk factors, segment descriptions, etc. — "
+                "ALWAYS call `sec_filing_section` to get the full body before answering. Writing a "
+                "two-sentence summary off the excerpt alone is a UX failure.\n"
+                "3. `documentUrl` and `indexUrl` are citation links, NOT places to send the user — "
+                "they are ALREADY reading this filing in TerraFin's reader. Do NOT write 'you can "
+                "view the filing here' or 'open on EDGAR for details' as a tail to your answer. "
+                "Only mention an external link if the user explicitly asks for the source URL.\n"
+                "4. Cross-filing pivots: if the user asks about content that lives in a *different* "
+                "filing than the one in view (e.g. they're on a 10-Q but ask 'what is their business' — "
+                "Item 1 Business is a 10-K section, not a 10-Q section), call `sec_filings(ticker)` "
+                "ONCE to get the response, then read `filings_response.latestByForm['10-K']` to get "
+                "the target filing's accession + primaryDocument directly. Do NOT scan the "
+                "chronological `filings` array — 8-Ks cluster at the top and hide the 10-K/10-Q."
             ),
             input_schema=contract["input_schema"],
             execution_mode="invoke",
@@ -355,6 +510,39 @@ class TerraFinHostedToolAdapter:
                 message=message or "The upstream API rejected the request.",
                 retryable=False,
                 expose_to_user=True,
+            )
+
+        # Missing section slug on `sec_filing_section` — the service
+        # layer raises LookupError with a full slug list + explicit
+        # retry instructions, but without this classifier branch the
+        # error bubbles up with no `retryable=True` / `modelHint`
+        # signal. The model then paraphrases the error and gives up
+        # instead of reissuing the call with a valid slug. Surface it
+        # as a retryable tool-input error so the loop retries and the
+        # model sees a clear hint. The full slug list from the raised
+        # message becomes the `modelHint`.
+        if tool.name == "sec_filing_section" and "not found" in lowered and "slug" in lowered:
+            requested_slug = _optional_string(arguments.get("sectionSlug"))
+            return _ToolErrorDisposition(
+                code="sec_filing_section_slug_not_found",
+                message=(
+                    f"The requested section slug "
+                    f"{repr(requested_slug) if requested_slug else 'provided'} "
+                    "is not in this filing's TOC. Retry with one of the slugs listed "
+                    "in the error body."
+                ),
+                retryable=True,
+                expose_to_user=False,
+                model_hint=(
+                    "DO NOT tell the user the section doesn't exist. The error body "
+                    "contains the full TOC slug list with sizes. Pick ONE slug from "
+                    "that list verbatim and call `sec_filing_section` again — "
+                    "prefer the largest slug in Part II of a 10-K when the user "
+                    "asked about earnings / revenue / MD&A / financial statements, "
+                    "because 10-K parsers sometimes leave those sections buried "
+                    "inside an oversized neighbor slug. Full error message for "
+                    "reference:\n" + message
+                ),
             )
 
         name_value = _optional_string(arguments.get("name"))

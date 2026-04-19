@@ -11,6 +11,8 @@ from TerraFin.analytics.analysis.risk import estimate_beta_5y_monthly, estimate_
 from TerraFin.interface.stock.payloads import (
     build_company_info_payload,
     build_earnings_payload,
+    build_filing_document_payload,
+    build_filings_list_payload,
     build_financial_statement_payload,
     resolve_ticker_query,
 )
@@ -82,6 +84,54 @@ class ResolveTickerResponse(BaseModel):
     type: str  # "stock" or "macro"
     name: str
     path: str
+
+
+class FilingRowResponse(BaseModel):
+    accession: str
+    form: str
+    filingDate: str
+    reportDate: str | None = None
+    primaryDocument: str
+    primaryDocDescription: str | None = None
+    indexUrl: str
+    documentUrl: str
+
+
+class FilingLatestByFormEntry(BaseModel):
+    accession: str
+    primaryDocument: str
+    filingDate: str
+    reportDate: str | None = None
+    documentUrl: str
+
+
+class FilingsListResponse(BaseModel):
+    ticker: str
+    cik: int
+    forms: list[str]
+    filings: list[FilingRowResponse]
+    # Shortcut: `latestByForm["10-K"].accession` gives direct access to the
+    # newest filing of a given form without scanning the chronological list.
+    latestByForm: dict[str, FilingLatestByFormEntry] = {}
+
+
+class TocEntry(BaseModel):
+    level: int
+    text: str
+    lineIndex: int
+    slug: str
+    charCount: int
+
+
+class FilingDocumentResponse(BaseModel):
+    ticker: str
+    accession: str
+    primaryDocument: str
+    markdown: str
+    toc: list[TocEntry]
+    charCount: int
+    indexUrl: str
+    documentUrl: str
 
 
 class BetaEstimateResponse(BaseModel):
@@ -206,5 +256,30 @@ def create_stock_data_router() -> APIRouter:
     @router.get("/resolve-ticker", response_model=ResolveTickerResponse)
     def api_resolve_ticker(q: str = Query(..., min_length=1)):
         return ResolveTickerResponse(**resolve_ticker_query(q))
+
+    @router.get(f"{STOCK_API_PREFIX}/filings", response_model=FilingsListResponse)
+    def api_filings(
+        ticker: str = Query(..., min_length=1),
+        limit: int = Query(default=20, ge=1, le=100),
+    ):
+        return FilingsListResponse(**build_filings_list_payload(ticker, limit=limit))
+
+    @router.get(f"{STOCK_API_PREFIX}/filing-document", response_model=FilingDocumentResponse)
+    def api_filing_document(
+        ticker: str = Query(..., min_length=1),
+        accession: str = Query(..., min_length=1),
+        primaryDocument: str = Query(..., min_length=1),
+        form: str = Query(default="10-Q", min_length=1),
+        includeImages: bool = Query(default=False),
+    ):
+        return FilingDocumentResponse(
+            **build_filing_document_payload(
+                ticker,
+                accession,
+                primaryDocument,
+                form=form,
+                include_images=includeImages,
+            )
+        )
 
     return router

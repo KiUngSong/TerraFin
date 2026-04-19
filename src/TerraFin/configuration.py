@@ -20,6 +20,7 @@ DEFAULT_CACHE_INTERVALS = {
     "yfinance": 43200,
     "portfolio": 259200,
     "ticker_info": 43200,
+    "sec_filings": 2592000,
 }
 
 DEFAULT_WATCHLIST_DATABASE = "terrafin_status_db"

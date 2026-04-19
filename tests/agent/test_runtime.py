@@ -121,6 +121,43 @@ class _FakeService:
             "processing": _processing(),
         }
 
+    def sec_filings(self, ticker: str) -> dict[str, object]:
+        return {"ticker": ticker, "cik": 1, "forms": [], "filings": [], "processing": _processing()}
+
+    def sec_filing_document(
+        self, ticker: str, accession: str, primaryDocument: str, *, form: str = "10-Q"
+    ) -> dict[str, object]:
+        return {"ticker": ticker, "accession": accession, "primaryDocument": primaryDocument, "toc": [], "charCount": 0, "indexUrl": "", "documentUrl": "", "processing": _processing()}
+
+    def sec_filing_section(
+        self, ticker: str, accession: str, primaryDocument: str, sectionSlug: str, *, form: str = "10-Q"
+    ) -> dict[str, object]:
+        return {"ticker": ticker, "accession": accession, "sectionSlug": sectionSlug, "sectionTitle": "stub", "markdown": "", "charCount": 0, "documentUrl": "", "processing": _processing()}
+
+    def fear_greed(self) -> dict[str, object]:
+        return {"score": 50, "rating": "Neutral", "processing": _processing()}
+
+    def sp500_dcf(self) -> dict[str, object]:
+        return {"status": "ready", "currentIntrinsicValue": 5000.0, "processing": _processing()}
+
+    def beta_estimate(self, ticker: str) -> dict[str, object]:
+        return {"symbol": ticker, "beta": 1.0, "adjustedBeta": 1.0, "rSquared": 0.5, "processing": _processing()}
+
+    def top_companies(self) -> dict[str, object]:
+        return {"companies": [], "count": 0, "processing": _processing()}
+
+    def market_regime(self) -> dict[str, object]:
+        return {"summary": "stub", "confidence": "low", "signals": [], "processing": _processing()}
+
+    def trailing_forward_pe(self) -> dict[str, object]:
+        return {"date": "2026-04-01", "latestValue": 0.0, "history": [], "processing": _processing()}
+
+    def market_breadth(self) -> dict[str, object]:
+        return {"metrics": [], "processing": _processing()}
+
+    def watchlist(self) -> dict[str, object]:
+        return {"items": [], "count": 0, "processing": _processing()}
+
 
 class _ExplodingService(_FakeService):
     def market_snapshot(self, name: str, *, depth: str = "auto", view: str = "daily") -> dict[str, object]:
@@ -160,10 +197,24 @@ def test_default_capability_registry_contains_kernel_capabilities() -> None:
         "economic",
         "macro_focus",
         "calendar_events",
+        # Dashboard widget-parity capabilities, inserted before `open_chart` so
+        # registry ordering tracks grouping (research read-only first, then
+        # chart-opening, then SEC filings).
+        "fear_greed",
+        "sp500_dcf",
+        "beta_estimate",
+        "top_companies",
+        "market_regime",
+        "trailing_forward_pe",
+        "market_breadth",
+        "watchlist",
         "open_chart",
         "fundamental_screen",
         "risk_profile",
         "valuation",
+        "sec_filings",
+        "sec_filing_document",
+        "sec_filing_section",
     )
 
 

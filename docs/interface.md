@@ -293,9 +293,10 @@ routes.
 Source: `src/TerraFin/interface/stock/`
 
 Stock Analysis combines a chart-first page route with a small API family for
-company profile, earnings history, financials, and search routing. The page
-itself uses the shared TerraFin chart session and progressive `3Y -> full`
-history loading described in [chart-architecture.md](./chart-architecture.md).
+company profile, earnings history, financials, SEC filings, and search routing.
+The page itself uses the shared TerraFin chart session and progressive
+`3Y -> full` history loading described in
+[chart-architecture.md](./chart-architecture.md).
 
 ### Page routes
 
@@ -311,7 +312,52 @@ history loading described in [chart-architecture.md](./chart-architecture.md).
 | `GET` | `/stock/api/company-info` | Company profile and price summary (`?ticker=`) |
 | `GET` | `/stock/api/earnings` | Earnings history (`?ticker=`) |
 | `GET` | `/stock/api/financials` | Financial statements (`?ticker=`, `statement=`, `period=`) |
+| `GET` | `/stock/api/filings` | Recent 10-K / 10-Q / 8-K list with EDGAR URLs (`?ticker=`, `limit=`) |
+| `GET` | `/stock/api/filing-document` | Parsed markdown + TOC for one filing (`?ticker=`, `accession=`, `primaryDocument=`, `form=`, `includeImages=`) |
 | `GET` | `/resolve-ticker` | Resolve free-form search into `/stock/...` or `/market-insights?...` |
+
+### SEC Filings panel
+
+The `/stock/{ticker}` page includes a **SEC Filings** card for every US-listed
+issuer. The card is hidden automatically for tickers without an SEC CIK (e.g.
+KOSPI / TSE / HKEX issuers) so non-US pages stay uncluttered.
+
+For supported tickers the card surfaces:
+
+- a form dropdown derived from `df.form.unique()` (covers 10-K, 10-Q,
+  amendments, 8-K, 20-F, 40-F, etc.);
+- a chronological filing list with a **View on EDGAR** link per row pointing
+  at the SEC inline-XBRL viewer (`/ix?doc=/Archives/...`);
+- a reader that opens inline below the list, with:
+    - a two-level accordion preserving Part I / Part II as outer collapsibles
+      and Items (Item 1, Item 2 MD&A, …) as nested inner collapsibles;
+    - a compact custom markdown renderer that handles our `parse_sec_filing`
+      output (`##`/`###` headings, paragraphs, GFM pipe tables, blockquote
+      fallbacks, inline-image placeholders) without pulling in a general
+      markdown dep;
+    - a "View source on EDGAR" pill in the reader header.
+
+The parsed markdown is cached for 30 days via the shared `sec_filings`
+CacheManager namespace (see [caching.md](./caching.md)), so reopening a filing
+is free across sessions. See [data-layer.md](./data-layer.md) for the
+underlying `parse_sec_filing` / `build_toc` / `get_sec_data` helpers.
+
+### Agent integration
+
+When the user opens a filing, the panel publishes the currently-focused
+section to the agent side-panel via `publishAgentViewContext`. The `selection`
+carries `ticker`, `form`, `accession`, `primaryDocument`, `sectionSlug`,
+`sectionTitle`, a bounded `sectionExcerpt` (≤ 4 KB), and EDGAR URLs. The
+hosted agent's `current_view_context` tool reads this payload, and the agent
+can call `sec_filings`, `sec_filing_document`, or `sec_filing_section` to
+fetch the full body when the excerpt is not enough (e.g. "summarize their
+business" on a 10-Q will trigger a cross-filing pivot to the most recent
+10-K's Item 1. Business). See [agent/usage.md](./agent/usage.md#10-k--10-q-research).
+
+For the full end-to-end view-context pipeline (how `publishAgentViewContext`
+reaches the agent, how sessionStorage routes identity, why the session link
+sometimes goes stale, and how to debug when the agent "doesn't know what I'm
+looking at"), see [agent/view-context.md](./agent/view-context.md).
 
 ---
 

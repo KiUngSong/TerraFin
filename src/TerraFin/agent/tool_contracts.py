@@ -215,6 +215,98 @@ HOSTED_TOOL_CONTRACTS: dict[str, dict[str, Any]] = {
         ),
         "response_model": "ValuationResponse",
     },
+    "sec_filings": {
+        "input_schema": _object_schema(
+            properties={"ticker": {"type": "string", "minLength": 1}},
+            required=["ticker"],
+        ),
+        "response_model": "SecFilingsListResponse",
+    },
+    "sec_filing_document": {
+        "input_schema": _object_schema(
+            properties={
+                "ticker": {"type": "string", "minLength": 1},
+                "accession": {"type": "string", "minLength": 1},
+                "primaryDocument": {"type": "string", "minLength": 1},
+                "form": {"type": "string", "minLength": 1, "default": "10-Q"},
+            },
+            required=["ticker", "accession", "primaryDocument"],
+        ),
+        "response_model": "SecFilingDocumentResponse",
+    },
+    "sec_filing_section": {
+        "input_schema": _object_schema(
+            properties={
+                "ticker": {"type": "string", "minLength": 1},
+                "accession": {"type": "string", "minLength": 1},
+                "primaryDocument": {"type": "string", "minLength": 1},
+                "sectionSlug": {"type": "string", "minLength": 1},
+                "form": {"type": "string", "minLength": 1, "default": "10-Q"},
+            },
+            required=["ticker", "accession", "primaryDocument", "sectionSlug"],
+        ),
+        "response_model": "SecFilingSectionResponse",
+    },
+    "fear_greed": {
+        "input_schema": _object_schema(properties={}, required=[]),
+        "response_model": "FearGreedResponse",
+    },
+    "sp500_dcf": {
+        "input_schema": _object_schema(properties={}, required=[]),
+        "response_model": "DCFValuationResponse",
+    },
+    "beta_estimate": {
+        "input_schema": _object_schema(
+            properties={"ticker": {"type": "string", "minLength": 1}},
+            required=["ticker"],
+        ),
+        "response_model": "BetaEstimateResponse",
+    },
+    "top_companies": {
+        "input_schema": _object_schema(properties={}, required=[]),
+        "response_model": "TopCompaniesResponse",
+    },
+    "market_regime": {
+        "input_schema": _object_schema(properties={}, required=[]),
+        "response_model": "MarketRegimeResponse",
+    },
+    "trailing_forward_pe": {
+        "input_schema": _object_schema(properties={}, required=[]),
+        "response_model": "TrailingForwardPeSpreadResponse",
+    },
+    "market_breadth": {
+        "input_schema": _object_schema(properties={}, required=[]),
+        "response_model": "MarketBreadthResponse",
+    },
+    "watchlist": {
+        "input_schema": _object_schema(properties={}, required=[]),
+        "response_model": "WatchlistResponse",
+    },
+    # Persona-consult tools. Each takes a single `question` arg (the
+    # orchestrator-scoped prompt sent to the persona subagent) and returns
+    # a `GuruResearchMemo`-shaped payload. See
+    # `docs/agent/architecture.md#orchestrator--persona-subagents`.
+    "consult_warren_buffett": {
+        "input_schema": _object_schema(
+            properties={"question": {"type": "string", "minLength": 1}},
+            required=["question"],
+        ),
+        "response_model": "GuruResearchMemo",
+    },
+    "consult_howard_marks": {
+        "input_schema": _object_schema(
+            properties={"question": {"type": "string", "minLength": 1}},
+            required=["question"],
+        ),
+        "response_model": "GuruResearchMemo",
+    },
+    "consult_stanley_druckenmiller": {
+        "input_schema": _object_schema(
+            properties={"question": {"type": "string", "minLength": 1}},
+            required=["question"],
+        ),
+        "response_model": "GuruResearchMemo",
+    },
 }
 
 

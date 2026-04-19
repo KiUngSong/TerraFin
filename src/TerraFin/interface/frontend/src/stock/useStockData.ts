@@ -51,7 +51,44 @@ interface ChartPoint {
   close: number;
 }
 
-export type { CompanyInfo, EarningsRecord, FinancialRow, FinancialStatement, ChartPoint };
+interface FilingRow {
+  accession: string;
+  form: string;
+  filingDate: string;
+  reportDate: string | null;
+  primaryDocument: string;
+  primaryDocDescription: string | null;
+  indexUrl: string;
+  documentUrl: string;
+}
+
+interface FilingsListResponse {
+  ticker: string;
+  cik: number;
+  forms: string[];
+  filings: FilingRow[];
+}
+
+interface TocEntry {
+  level: number;
+  text: string;
+  lineIndex: number;
+  slug: string;
+  charCount: number;
+}
+
+interface FilingDocument {
+  ticker: string;
+  accession: string;
+  primaryDocument: string;
+  markdown: string;
+  toc: TocEntry[];
+  charCount: number;
+  indexUrl: string;
+  documentUrl: string;
+}
+
+export type { ChartPoint, CompanyInfo, EarningsRecord, FilingDocument, FilingRow, FilingsListResponse, FinancialRow, FinancialStatement, TocEntry };
 
 export function useCompanyInfo(ticker: string, enabled = true) {
   const [data, setData] = useState<CompanyInfo | null>(null);
@@ -123,6 +160,61 @@ export function useFinancials(ticker: string, statement: string, period: string,
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
   }, [enabled, period, statement, ticker]);
+
+  return { data, loading, error };
+}
+
+export function useFilings(ticker: string, enabled = true) {
+  const [data, setData] = useState<FilingsListResponse | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!ticker || !enabled) {
+      setData(null);
+      setError(null);
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
+    setError(null);
+    fetch(`/stock/api/filings?ticker=${encodeURIComponent(ticker)}`)
+      .then((res) => (res.ok ? res.json() : Promise.reject(new Error(`${res.status}`))))
+      .then((d: FilingsListResponse) => setData(d))
+      .catch((e) => setError(e.message))
+      .finally(() => setLoading(false));
+  }, [enabled, ticker]);
+
+  return { data, loading, error };
+}
+
+export function useFilingDocument(
+  ticker: string,
+  accession: string | null,
+  primaryDocument: string | null,
+  form: string,
+  enabled = true,
+) {
+  const [data, setData] = useState<FilingDocument | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!enabled || !ticker || !accession || !primaryDocument) {
+      setData(null);
+      setError(null);
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
+    setError(null);
+    const qs = new URLSearchParams({ ticker, accession, primaryDocument, form });
+    fetch(`/stock/api/filing-document?${qs.toString()}`)
+      .then((res) => (res.ok ? res.json() : Promise.reject(new Error(`${res.status}`))))
+      .then((d: FilingDocument) => setData(d))
+      .catch((e) => setError(e.message))
+      .finally(() => setLoading(false));
+  }, [accession, enabled, form, primaryDocument, ticker]);
 
   return { data, loading, error };
 }

@@ -12,6 +12,7 @@ import StockHeader from './components/StockHeader';
 import StockChart from './components/StockChart';
 import CompanyProfile from './components/CompanyProfile';
 import EarningsTable from './components/EarningsTable';
+import SecFilings from './components/SecFilings';
 import { useCompanyInfo, useEarnings } from './useStockData';
 
 const TICKER_GROUPS = [
@@ -117,6 +118,14 @@ const StockPage: React.FC = () => {
 
   React.useEffect(() => {
     setIsReverseDcfOpen(false);
+  }, [ticker]);
+
+  // SEC filings section hides itself for non-US tickers (KOSPI, TSE, etc.)
+  // where the ticker has no SEC CIK. Reset on ticker change so switching
+  // from 005930.KS to AAPL re-shows the section.
+  const [hideSecFilings, setHideSecFilings] = React.useState(false);
+  React.useEffect(() => {
+    setHideSecFilings(false);
   }, [ticker]);
 
   React.useEffect(() => {
@@ -377,6 +386,19 @@ const StockPage: React.FC = () => {
         </section>
 
         {!isMobile ? dcfResultCard : null}
+
+        {!hideSecFilings ? (
+          <section>
+            <InsightCard
+              title="SEC Filings"
+              subtitle={`10-K / 10-Q filings for ${ticker}. Open a filing to browse section-by-section.`}
+              fillContent
+              allowOverflow
+            >
+              <SecFilings ticker={ticker} onUnavailable={() => setHideSecFilings(true)} />
+            </InsightCard>
+          </section>
+        ) : null}
 
         <section style={reverseDcfToggleCardStyle}>
           <button

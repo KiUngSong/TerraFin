@@ -7,6 +7,7 @@ from TerraFin.analytics.analysis.fundamental.dcf import (
     build_stock_dcf_payload,
     build_stock_reverse_dcf_payload,
 )
+from TerraFin.analytics.analysis.fundamental.dcf.presenters import build_sp500_dcf_payload
 from TerraFin.analytics.analysis.fundamental.screen import run_fundamental_screen
 from TerraFin.analytics.analysis.risk.profile import run_risk_profile
 from TerraFin.analytics.analysis.risk.returns import extract_close_series
@@ -33,9 +34,12 @@ from TerraFin.interface.market_insights.payloads import (
     resolve_macro_type,
 )
 from TerraFin.interface.private_data_service import get_private_data_service
+from TerraFin.interface.stock.data_routes import build_beta_estimate_payload
 from TerraFin.interface.stock.payloads import (
     build_company_info_payload,
     build_earnings_payload,
+    build_filing_document_payload,
+    build_filings_list_payload,
     build_financial_statement_payload,
     resolve_ticker_query,
 )
@@ -424,10 +428,19 @@ class TerraFinAgentService:
         }
 
     def market_snapshot(self, name: str, *, depth: str = "auto", view: str = "daily") -> dict[str, Any]:
+        """Per-ticker price action + indicators only.
+
+        Previously bundled market-wide `market_breadth` and `watchlist`
+        inside this response, which mixed a per-ticker view with
+        whole-market state — the agent would reference breadth numbers
+        alongside a ticker snapshot and risk diverging from the
+        standalone MarketBreadthCard widget if the widget refreshed on
+        its own. Use the `market_breadth` and `watchlist` capabilities
+        for those (matching the standalone widgets).
+        """
         payload = self._market_series(name, depth=depth, view=view)
         series = payload["series"]
         indicator_results, _ = _compute_indicator_results(series, ["rsi", "macd", "bb"])
-        private_service = get_private_data_service()
         return {
             "ticker": payload["name"],
             "price_action": _price_action(series),
@@ -436,8 +449,6 @@ class TerraFinAgentService:
                 "macd_signal": indicator_results.get("macd", {}).get("values", {}).get("signal"),
                 "bb_position": indicator_results.get("bb", {}).get("values", {}).get("position"),
             },
-            "market_breadth": private_service.get_market_breadth(),
-            "watchlist": get_watchlist_service().get_watchlist_snapshot(),
             "processing": payload["processing"],
         }
 
@@ -512,13 +523,139 @@ class TerraFinAgentService:
         )
         return payload
 
+    def sec_filings(self, ticker: str) -> dict[str, Any]:
+        """List recent 10-K / 10-Q / 8-K filings for a ticker with EDGAR links."""
+        payload = build_filings_list_payload(ticker)
+        return {
+            **payload,
+            "processing": _full_processing(
+                requested_depth="full",
+                source_version="sec-filings-list",
+                view=None,
+                frame=None,
+            ),
+        }
+
+    def sec_filing_document(
+        self,
+        ticker: str,
+        accession: str,
+        primaryDocument: str,
+        *,
+        form: str = "10-Q",
+    ) -> dict[str, Any]:
+        """Fetch a filing's structured table of contents without the full markdown body.
+
+        Agents use this to decide which sections are worth reading before pulling
+        their prose via ``sec_filing_section`` — keeps the model's working
+        context small even for 60 KB+ filings.
+        """
+        payload = build_filing_document_payload(ticker, accession, primaryDocument, form=form)
+        return {
+            "ticker": payload["ticker"],
+            "accession": payload["accession"],
+            "primaryDocument": payload["primaryDocument"],
+            "toc": payload["toc"],
+            "charCount": payload["charCount"],
+            "indexUrl": payload["indexUrl"],
+            "documentUrl": payload["documentUrl"],
+            "processing": _full_processing(
+                requested_depth="full",
+                source_version="sec-filing-document",
+                view=None,
+                frame=None,
+            ),
+        }
+
+    def sec_filing_section(
+        self,
+        ticker: str,
+        accession: str,
+        primaryDocument: str,
+        sectionSlug: str,
+        *,
+        form: str = "10-Q",
+    ) -> dict[str, Any]:
+        """Fetch a single section body by slug from a filing.
+
+        Returns only the target section's markdown, keeping the agent's context
+        small for iterative section-by-section analysis.
+        """
+        payload = build_filing_document_payload(ticker, accession, primaryDocument, form=form)
+        toc = payload["toc"]
+        try:
+            entry = next(e for e in toc if e["slug"] == sectionSlug)
+        except StopIteration as exc:
+            # Surface the FULL TOC with sizes so the agent has everything it
+            # needs to retry without another `sec_filing_document` round-trip.
+            # Sort suggestions by charCount descending — when the intended
+            # section wasn't caught by the parser (common for 10-K Item 7/8),
+            # the wanted content usually lives inside the largest neighbor.
+            sorted_entries = sorted(
+                ({"slug": e["slug"], "text": e["text"], "charCount": e["charCount"]} for e in toc),
+                key=lambda e: e["charCount"],
+                reverse=True,
+            )
+            top_hint = ", ".join(
+                f"{e['slug']} ({e['charCount']:,} chars, '{e['text']}')"
+                for e in sorted_entries[:5]
+            )
+            raise LookupError(
+                f"Section '{sectionSlug}' not found. "
+                f"Do NOT report 'section doesn't exist' — retry this tool with one of the available "
+                f"slugs. The 5 largest sections in this filing are: {top_hint}. "
+                f"If the user asked about earnings/financials/MD&A and no slug matches those names "
+                f"directly, pick the LARGEST slug in Part II — 10-K parsers often leave MD&A and "
+                f"Financial Statements inside an oversized neighbor section. "
+                f"All {len(toc)} available slugs: "
+                + ", ".join(e["slug"] for e in toc)
+            ) from exc
+
+        # Upper bound = next raw TOC entry (by ascending lineIndex), so the body
+        # stops at the exact next heading in the markdown.
+        lines = payload["markdown"].split("\n")
+        later = [e for e in toc if e["lineIndex"] > entry["lineIndex"]]
+        end_line = later[0]["lineIndex"] if later else len(lines)
+        body = "\n".join(lines[entry["lineIndex"] + 1 : end_line]).strip()
+
+        return {
+            "ticker": payload["ticker"],
+            "accession": payload["accession"],
+            "sectionSlug": sectionSlug,
+            "sectionTitle": entry["text"],
+            "markdown": body,
+            "charCount": len(body),
+            "documentUrl": payload["documentUrl"],
+            "processing": _full_processing(
+                requested_depth="full",
+                source_version="sec-filing-section",
+                view=None,
+                frame=None,
+            ),
+        }
+
     def portfolio(self, guru: str) -> dict[str, Any]:
         output = get_portfolio_data(guru)
+        # Mirror the route's `topHoldings` pre-computation so the agent and
+        # the UI's treemap/ranking use the same top 8. Without this, the
+        # agent would have to re-sort the full `holdings` list and could
+        # diverge on ties or sort-key interpretation (DA Med-9).
+        df = output.df
+        if not df.empty and {"Stock", "% of Portfolio", "Recent Activity", "Updated"}.issubset(df.columns):
+            top_holdings = (
+                df[["Stock", "% of Portfolio", "Recent Activity", "Updated"]]
+                .sort_values(by="% of Portfolio", ascending=False)
+                .head(8)
+                .to_dict(orient="records")
+            )
+        else:
+            top_holdings = []
         return {
             "guru": guru,
             "info": dict(output.info),
-            "holdings": output.df.to_dict(orient="records"),
-            "count": len(output.df),
+            "holdings": df.to_dict(orient="records"),
+            "topHoldings": top_holdings,
+            "count": len(df),
             "processing": _full_processing(
                 requested_depth="full",
                 source_version="portfolio",
@@ -572,11 +709,64 @@ class TerraFinAgentService:
             ),
         }
 
-    def macro_focus(self, name: str, *, depth: str = "auto", view: str = "daily") -> dict[str, Any]:
+    def macro_focus(
+        self,
+        name: str,
+        *,
+        depth: str = "auto",
+        view: str = "daily",
+        session_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Macro summary + chart-ready series for a named instrument.
+
+        If `session_id` is supplied and the user has stored a named series
+        on that session (e.g. a custom range loaded into the macro chart
+        via the market-insights page), prefer that session-local frame —
+        matches `/market-insights/api/macro-info`'s behavior, where the
+        frontend sends `X-Session-ID` to avoid ignoring the user's chart
+        state. Without session-awareness the agent would answer questions
+        about a different time range than the user was staring at.
+        """
         resolved_name = canonical_macro_name(name)
         indicator_type = resolve_macro_type(resolved_name)
         if indicator_type is None:
             raise LookupError(f"Unknown macro instrument: '{resolved_name}'")
+
+        session_frame = None
+        if session_id:
+            try:
+                from TerraFin.interface.chart.state import get_named_series
+
+                session_frame = get_named_series(session_id).get(resolved_name)
+            except Exception:
+                session_frame = None
+
+        if session_frame is not None:
+            # User has a custom macro series loaded in their session. Use it
+            # verbatim so agent's view matches what they're looking at.
+            session_frame.name = resolved_name
+            series_payload = _primary_series(session_frame, view=_normalize_view(view))
+            info = build_macro_info_payload(
+                resolved_name,
+                get_macro_description(resolved_name),
+                session_frame,
+                indicator_type=indicator_type,
+            )
+            processing = _full_processing(
+                requested_depth=_normalize_depth(depth),
+                source_version="macro-session",
+                view=_normalize_view(view),
+                frame=session_frame,
+            )
+            return {
+                "name": resolved_name,
+                "info": info,
+                "seriesType": series_payload.get("seriesType", "line"),
+                "count": len(series_payload.get("data", [])),
+                "data": _series_points(series_payload),
+                "processing": processing,
+            }
+
         payload = self._market_series(resolved_name, depth=depth, view=view)
         frame = payload["frame"]
         info = build_macro_info_payload(
@@ -709,35 +899,188 @@ class TerraFinAgentService:
         if intrinsic_value and current_price and current_price > 0:
             margin_of_safety = round((intrinsic_value - current_price) / current_price * 100, 2)
 
+        # Pass the full route payloads through verbatim so the agent sees the
+        # exact same `DCFValuationResponse` / `ReverseDCFResponse` structure
+        # that renders in the frontend's DcfValuationPanel — scenarios,
+        # sensitivity matrix, methods, rateCurve, dataQuality, all of it.
+        # Previously this method cherry-picked 4 fields from each, which
+        # broke user↔agent view parity (audit: DA High-1, High-2).
         return {
             "ticker": normalized,
-            "dcf": {
-                "status": dcf.get("status"),
-                "intrinsic_value": dcf.get("currentIntrinsicValue"),
-                "upside_pct": dcf.get("upsidePct"),
-                "assumptions": dcf.get("assumptions"),
-                "warnings": dcf.get("warnings", []),
-            },
-            "reverse_dcf": {
-                "status": reverse_dcf.get("status"),
-                "implied_growth_pct": reverse_dcf.get("impliedGrowthPct"),
-                "model_price": reverse_dcf.get("modelPrice"),
-                "warnings": reverse_dcf.get("warnings", []),
-            },
+            "dcf": dcf,
+            "reverseDcf": reverse_dcf,
             "relative": {
-                "trailing_pe": trailing_pe,
-                "forward_pe": forward_pe,
-                "price_to_book": (
+                "trailingPE": trailing_pe,
+                "forwardPE": forward_pe,
+                "priceToBook": (
                     round(current_price / bvps, 2)
                     if current_price and bvps and bvps > 0 else None
                 ),
             },
-            "graham_number": graham_number,
-            "margin_of_safety_pct": margin_of_safety,
-            "current_price": current_price,
+            "grahamNumber": graham_number,
+            "marginOfSafetyPct": margin_of_safety,
+            "currentPrice": current_price,
             "processing": _full_processing(
                 requested_depth="full",
                 source_version="valuation",
+                view=None,
+                frame=None,
+            ),
+        }
+
+    # -----------------------------------------------------------------
+    # Capabilities that expose standalone widgets the dashboard and
+    # market-insights pages render. Before these existed, the agent
+    # could not answer questions about data the user was clearly
+    # looking at (Fear & Greed, S&P 500 DCF, beta R², top companies,
+    # regime summary, trailing-forward P/E). Every method here returns
+    # the route's payload verbatim (camelCase intact) so the agent
+    # sees the same fields the frontend renders.
+    # -----------------------------------------------------------------
+
+    def fear_greed(self) -> dict[str, Any]:
+        """CNN Fear & Greed index — matches `/dashboard/api/fear-greed`."""
+        payload = dict(get_private_data_service().get_fear_greed_current())
+        payload["processing"] = _full_processing(
+            requested_depth="full",
+            source_version="fear-greed",
+            view=None,
+            frame=None,
+        )
+        return payload
+
+    def sp500_dcf(self) -> dict[str, Any]:
+        """Full S&P 500 DCF — matches `/market-insights/api/dcf/sp500`.
+
+        Returns the same DCFValuationResponse shape (scenarios, sensitivity,
+        methods, rateCurve, dataQuality) the SP500 DCF panel renders.
+        """
+        payload = dict(build_sp500_dcf_payload())
+        payload["processing"] = _full_processing(
+            requested_depth="full",
+            source_version="sp500-dcf",
+            view=None,
+            frame=None,
+        )
+        return payload
+
+    def beta_estimate(self, ticker: str) -> dict[str, Any]:
+        """5-year monthly beta estimate — matches `/stock/api/beta-estimate`.
+
+        Returns beta, adjusted beta, R², observations, benchmark, warnings.
+        The `company_info` tool only surfaces a string `beta` field; use this
+        capability when you need the statistical quality of the estimate.
+        """
+        payload = dict(build_beta_estimate_payload(ticker))
+        payload["processing"] = _full_processing(
+            requested_depth="full",
+            source_version="beta-estimate",
+            view=None,
+            frame=None,
+        )
+        return payload
+
+    def top_companies(self) -> dict[str, Any]:
+        """Market-insights top-companies list — matches `/market-insights/api/top-companies`."""
+        try:
+            companies = get_private_data_service().get_top_companies()
+        except Exception:
+            companies = []
+        return {
+            "companies": companies,
+            "count": len(companies),
+            "processing": _full_processing(
+                requested_depth="full",
+                source_version="top-companies",
+                view=None,
+                frame=None,
+            ),
+        }
+
+    def market_regime(self) -> dict[str, Any]:
+        """Market regime summary — matches `/market-insights/api/regime`.
+
+        The route currently returns a static placeholder; the agent sees the
+        same placeholder so the two views never diverge. If the route is
+        upgraded to a real regime model later, this capability will
+        automatically reflect the change without code edits here.
+        """
+        # Mirror the route's placeholder exactly — user↔agent parity trumps
+        # "placeholder data should be obvious to callers". If the route is
+        # updated to a real model, update both sides together.
+        return {
+            "summary": "Mixed regime with selective risk-taking and elevated event sensitivity.",
+            "confidence": "low",
+            "signals": [
+                "Breadth is improving in pockets but still uneven.",
+                "Macro event concentration this week can raise short-term volatility.",
+                "Leadership remains concentrated in a handful of large-cap names.",
+            ],
+            "processing": _full_processing(
+                requested_depth="full",
+                source_version="market-regime-placeholder",
+                view=None,
+                frame=None,
+            ),
+        }
+
+    def trailing_forward_pe(self) -> dict[str, Any]:
+        """Trailing minus forward P/E spread — matches `/dashboard/api/trailing-forward-pe-spread`."""
+        private_service = get_private_data_service()
+        payload = private_service.get_trailing_forward_pe() or {}
+        summary = payload.get("summary", {}) if isinstance(payload, dict) else {}
+        coverage = payload.get("coverage", {}) if isinstance(payload, dict) else {}
+        history = payload.get("history", []) if isinstance(payload, dict) else []
+        return {
+            "date": str(payload.get("date", "")) if isinstance(payload, dict) else "",
+            "description": (
+                "Trailing P/E minus forward P/E, used as a rough proxy for how much "
+                "future earnings expectations diverge from trailing earnings."
+            ),
+            "latestValue": summary.get("trailing_forward_pe_spread"),
+            "usableCount": coverage.get("usable"),
+            "requestedCount": coverage.get("requested"),
+            "history": list(history),
+            "processing": _full_processing(
+                requested_depth="full",
+                source_version="trailing-forward-pe",
+                view=None,
+                frame=None,
+            ),
+        }
+
+    def market_breadth(self) -> dict[str, Any]:
+        """Market breadth metrics — matches `/dashboard/api/market-breadth`.
+
+        Was previously bundled inside `market_snapshot`, which mixed a
+        per-ticker view with whole-market state. Now a standalone capability
+        so agent and the MarketBreadthCard widget query the same data.
+        """
+        metrics = get_private_data_service().get_market_breadth()
+        return {
+            "metrics": list(metrics),
+            "processing": _full_processing(
+                requested_depth="full",
+                source_version="market-breadth",
+                view=None,
+                frame=None,
+            ),
+        }
+
+    def watchlist(self) -> dict[str, Any]:
+        """User's watchlist — matches the WatchlistSection dashboard widget.
+
+        Was previously bundled inside `market_snapshot`. Standalone here so
+        agent and the widget query the same list without ticker-scoped
+        confusion.
+        """
+        snapshot = get_watchlist_service().get_watchlist_snapshot() or []
+        return {
+            "items": list(snapshot),
+            "count": len(snapshot),
+            "processing": _full_processing(
+                requested_depth="full",
+                source_version="watchlist",
                 view=None,
                 frame=None,
             ),
