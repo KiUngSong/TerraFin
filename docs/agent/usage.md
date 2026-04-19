@@ -58,12 +58,37 @@ and Stanley Druckenmiller.
 Important product rules:
 
 - users still talk only to `TerraFin Agent`
-- hidden guru routing is policy-first and view-context-aware
+- `TerraFin Agent` is the **orchestrator**; hidden persona roles are
+  reached by its own LLM via `consult_warren_buffett`,
+  `consult_howard_marks`, and `consult_stanley_druckenmiller` tool
+  calls (no pre-intercept router — see the architecture diagrams in
+  [architecture.md](./architecture.md#orchestrator--persona-subagents))
 - the hidden guru path is research-only in v1
 - hidden guru sessions are not shown in normal session history
 - hidden guru roles cannot be created through the normal public runtime API
 - hidden guru session ids are not valid public session/task/approval resources
 - internal guru handoff uses a structured memo contract before the main assistant synthesizes a reply
+
+## Disclosure
+
+The hosted TerraFin Agent produces **research-oriented analysis, not personalized
+investment advice**. A few properties follow from that framing and should be
+called out to downstream product surfaces, integrators, and end users:
+
+- the agent cannot place trades, hold funds, or take fiduciary responsibility
+- outputs are grounded in tool results and what the user says in the same
+  session; the agent should not invent numbers it has not seen in a tool result
+- persona consults (Buffett, Marks, Druckenmiller) are framed as research
+  voices, not registered advisor recommendations
+- a `confidence` score ≥ 80 returned by a persona consult carries at least one
+  citation — the `GuruResearchMemo` validator clamps unsupported high-confidence
+  memos to 60 before returning them to the orchestrator (see
+  [guru.py](../../src/TerraFin/agent/guru.py))
+
+The orchestrator's system prompt carries a matching `DISCLOSURE` paragraph so the
+model stays inside this framing. Product surfaces that embed the widget or call
+the runtime HTTP API are responsible for any **user-facing** disclosure copy
+their jurisdiction requires — the agent itself does not render one.
 
 ## Choose a transport
 

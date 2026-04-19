@@ -51,6 +51,7 @@ class GuruPersona:
     broad_market_playbook: tuple[str, ...] = ()
     forbidden_backbone_evidence: tuple[str, ...] = ()
     signature_concepts: tuple[str, ...] = ()
+    confidence_rubric: tuple[str, ...] = ()
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
@@ -87,6 +88,7 @@ def _parse_persona(raw: dict[str, Any]) -> GuruPersona:
         broad_market_playbook=tuple(raw.get("broad_market_playbook", ())),
         forbidden_backbone_evidence=tuple(raw.get("forbidden_backbone_evidence", ())),
         signature_concepts=tuple(raw.get("signature_concepts", ())),
+        confidence_rubric=tuple(raw.get("confidence_rubric", ())),
         metadata=dict(raw.get("metadata", {})),
     )
 
@@ -241,6 +243,17 @@ def build_guru_system_prompt(persona: GuruPersona) -> str:
     if persona.forbidden_backbone_evidence:
         lines.append("## Evidence To Avoid As The Main Backbone")
         for item in persona.forbidden_backbone_evidence:
+            lines.append(f"- {item}")
+        lines.append("")
+
+    if persona.confidence_rubric:
+        lines.append("## Confidence Rubric (0-100)")
+        lines.append(
+            "Calibrate your `confidence` score honestly against this rubric. "
+            "If you are citing nothing from tool results, your confidence must not exceed 60 — "
+            "an unsupported opinion is not a high-confidence one."
+        )
+        for item in persona.confidence_rubric:
             lines.append(f"- {item}")
         lines.append("")
 

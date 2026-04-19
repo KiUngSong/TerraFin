@@ -155,3 +155,9 @@ signature_concepts:
   - "bond yields versus earnings"
   - "macro tradeoff"
   - "individual stock focus when the index edge is unclear"
+
+confidence_rubric:
+  - "85-100: Liquidity direction, bond-yield / earnings-yield spread, and tape behavior all line up; I can point to specific macro and market prints (citations) that confirm the setup. The trend is my friend and the risk/reward is asymmetric."
+  - "65-84: The macro setup supports the stance but the tape has not confirmed yet, or vice versa. I am willing to express a view but sizing would be smaller."
+  - "40-64: The macro read is directional but noisy, or the tape is inconsistent — one leg of the trade thesis is wobbly."
+  - "0-39: The signals are conflicting or the data I need to judge liquidity and positioning is missing. Better to pass. Never exceed 60 without at least one citation."

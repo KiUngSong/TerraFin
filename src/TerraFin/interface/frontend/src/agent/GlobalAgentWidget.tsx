@@ -1091,7 +1091,10 @@ const GlobalAgentWidget: React.FC = () => {
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ content: trimmedContent }),
+          // Include the browser's live viewContextId so the server can refresh
+          // the session's link and `current_view_context` reads the user's
+          // actual current view (not the snapshot at session-creation time).
+          body: JSON.stringify({ content: trimmedContent, viewContextId: getAgentViewContextId() }),
         },
         'Running assistant request',
         SEND_REQUEST_TIMEOUT_MS
@@ -1329,30 +1332,11 @@ const GlobalAgentWidget: React.FC = () => {
         onClick={(event) => event.stopPropagation()}
       >
         <div className="tf-agent-widget__header">
-          <div className="tf-agent-widget__header-copy">
-            <div className="tf-agent-widget__title-row">
-              <div className="tf-agent-widget__title">{AGENT_UI_NAME}</div>
-              <span className={`tf-agent-widget__runtime-chip tf-agent-widget__runtime-chip--${runtimeState.toLowerCase().replace(/\s+/g, '-')}`}>
-                {runtimeState}
-              </span>
-              {primaryRuntimeModelLabel ? (
-                <span className="tf-agent-widget__meta-pill tf-agent-widget__meta-pill--inline">
-                  {primaryRuntimeModelLabel}
-                </span>
-              ) : null}
-            </div>
-            {showSessionLabel || newChatRuntimeModelLabel ? (
-              <div className="tf-agent-widget__meta-row">
-                {showSessionLabel ? (
-                  <span className="tf-agent-widget__session-pill">{currentSessionLabel}</span>
-                ) : null}
-                {newChatRuntimeModelLabel ? (
-                <span className="tf-agent-widget__meta-pill tf-agent-widget__meta-pill--accent">
-                    {newChatRuntimeModelLabel}
-                </span>
-                ) : null}
-              </div>
-            ) : null}
+          <div className="tf-agent-widget__title-group">
+            <div className="tf-agent-widget__title">{AGENT_UI_NAME}</div>
+            <span className={`tf-agent-widget__runtime-chip tf-agent-widget__runtime-chip--${runtimeState.toLowerCase().replace(/\s+/g, '-')}`}>
+              {runtimeState}
+            </span>
           </div>
           <div className="tf-agent-widget__header-actions">
             <button
@@ -1394,6 +1378,24 @@ const GlobalAgentWidget: React.FC = () => {
             </button>
           </div>
         </div>
+
+        {primaryRuntimeModelLabel || showSessionLabel || newChatRuntimeModelLabel ? (
+          <div className="tf-agent-widget__header-sub">
+            {primaryRuntimeModelLabel ? (
+              <span className="tf-agent-widget__meta-pill tf-agent-widget__meta-pill--inline">
+                {primaryRuntimeModelLabel}
+              </span>
+            ) : null}
+            {showSessionLabel ? (
+              <span className="tf-agent-widget__session-pill">{currentSessionLabel}</span>
+            ) : null}
+            {newChatRuntimeModelLabel ? (
+              <span className="tf-agent-widget__meta-pill tf-agent-widget__meta-pill--accent">
+                {newChatRuntimeModelLabel}
+              </span>
+            ) : null}
+          </div>
+        ) : null}
 
         <div className="tf-agent-widget__body">
           {isSessionsDrawerOpen ? (
