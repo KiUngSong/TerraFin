@@ -81,4 +81,9 @@ def get_default_cache_policies() -> list[CachePolicy]:
             mode="clear_only",
             interval_seconds=cache_config.interval_seconds_for("ticker_info"),
         ),
+        CachePolicy(
+            source="sec_filings.cache",
+            mode="clear_only",
+            interval_seconds=cache_config.interval_seconds_for("sec_filings"),
+        ),
     ]

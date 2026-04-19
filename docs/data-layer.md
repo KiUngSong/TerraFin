@@ -116,7 +116,7 @@ It carries:
 | Computed macro indicators | FRED-derived logic | `get("Buffett Indicator")` | Built from public series |
 | Credit and risk indicators | FRED and FRED-derived | `get("High Yield Spread")`, `get("Net Liquidity")` | HY spread, RRP, net liquidity, 18M forward rate spread, credit spread |
 | Corporate fundamentals | yfinance statement adapter | `get_corporate_data("AAPL")` | Returns a plain pandas frame |
-| SEC filings | SEC EDGAR | provider-level usage | Corporate filing helpers live under `providers/corporate/filings/` |
+| SEC filings | SEC EDGAR | `get_sec_data(ticker, filing_type)`, `get_sec_toc(ticker, filing_type)` | Parses 10-K / 10-Q HTML into markdown + TOC; cached 30 days under the `sec_filings` namespace |
 | Guru portfolios | SEC EDGAR 13F | `get_portfolio_data("Warren Buffett")` | Returns `PortfolioOutput` |
 | Private dashboard data | Private endpoint with fallbacks | dashboard and market-insights APIs | Watchlist, breadth, trailing-forward P/E spread, CAPE, calendar, fear/greed, top companies |
 | Macro events | FRED plus yfinance | calendar API | Fetched locally, but managed through the private-data cache lifecycle |

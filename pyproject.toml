@@ -20,7 +20,8 @@ classifiers = [
     "Topic :: Software Development :: Libraries :: Python Modules"
 ]
 dependencies = [
-    "cachetools",
+    "beautifulsoup4",
+    "defusedxml",
     "fastapi>=0.115.0",
     "fredapi",
     "numpy",
