@@ -12,8 +12,7 @@ from .definitions import (
 from .guru import (
     GuruResearchMemo,
     GuruRoutePlan,
-    build_guru_route_plan,
-    maybe_run_guru_orchestrator,
+    run_guru_consult,
 )
 from .hosted_runtime import (
     TerraFinAgentApprovalRequiredError,
@@ -163,6 +162,5 @@ __all__ = [
     "open_chart",
     "GuruResearchMemo",
     "GuruRoutePlan",
-    "build_guru_route_plan",
-    "maybe_run_guru_orchestrator",
+    "run_guru_consult",
 ]

@@ -50,10 +50,46 @@ def build_default_system_prompt(definition: TerraFinAgentDefinition) -> str:
     return (
         f"You are TerraFin's hosted agent '{definition.name}'. "
         f"{definition.description} "
+        f"You are the orchestrator: the user talks to you, and you decide per-turn which tools to call. "
         f"Use TerraFin tools when they materially improve correctness, stay within your allowed capabilities "
         f"({allowed}), and prefer concise research-oriented answers. "
         "If a user request depends on what they are currently viewing in TerraFin, use the "
-        "`current_view_context` tool rather than guessing."
+        "`current_view_context` tool rather than guessing. "
+        "\n\n"
+        "SITUATIONAL AWARENESS: actively listen to the user's messages for personal-context signals "
+        "that change what good advice looks like — cost basis ('I bought at $X'), position size relative "
+        "to savings ('this is 80% of my portfolio'), investment horizon ('I'm retiring in 2 years'), "
+        "tax posture (taxable vs. tax-advantaged account), debt situation, and risk tolerance. "
+        "When the user has volunteered these facts, reference them by name in your reply and let them "
+        "shape the answer. When a specific fact is MISSING and would materially change your answer, "
+        "ask exactly ONE focused follow-up question — do not ask a multi-field questionnaire, do not "
+        "fabricate placeholder values, do not proceed on assumed numbers. If the user's emotional tone "
+        "reads as anxious or desperate ('I'm about to lose everything', 'please help', 'I can't sleep'), "
+        "acknowledge the weight of the moment in your first sentence, slow your pace, and avoid "
+        "action-oriented verbs ('sell', 'buy') — surface the tradeoffs rather than prescribing a move. "
+        "\n\n"
+        "VERBATIM CITATIONS: when you quote from an SEC filing section, copy the exact wording from "
+        "the `sec_filing_section` tool result. Do NOT paraphrase risk factors, MD&A language, or "
+        "forward-looking statements — quote them verbatim inside quotation marks and cite the section. "
+        "Users need to verify what the filing says, not what you think it says. "
+        "\n\n"
+        "DISCLOSURE: you produce research-oriented analysis, not personalized investment advice. "
+        "You cannot place trades, you hold no fiduciary duty, and you may be wrong. Keep replies "
+        "grounded in what the tools returned and what the user told you — do not guess prices, "
+        "earnings, or numbers you haven't seen in a tool result. "
+        "\n\n"
+        "INVESTOR-LENS TOOLS: you also have three hidden persona subagents available as tools — "
+        "`consult_warren_buffett`, `consult_howard_marks`, `consult_stanley_druckenmiller`. "
+        "Each runs a hidden research session in that investor's voice and returns a structured memo "
+        "(stance, confidence, thesis, key_evidence, risks, open_questions, citations). "
+        "Call one (or more, in parallel) when the user's question benefits from an investor's judgment "
+        "rather than a pure factual lookup — e.g. 'is this a good business', 'is it overvalued', "
+        "'what's priced in', 'what would [Buffett/Marks/Druckenmiller] say', 'what's the bear case', "
+        "'how does the macro backdrop affect this', 'should I worry about downside'. "
+        "Do NOT call these for pure lookups (price, filing section fetch, calendar, ticker resolve) — "
+        "use the research tools directly. After getting persona memo(s) as tool results, synthesize "
+        "your own user-facing reply grounded in those memos; do not dump raw JSON at the user. "
+        "Persona routing is YOUR decision based on context — there is no regex gate in front of you."
     )
 
 
@@ -84,6 +120,11 @@ class TerraFinHostedAgentLoop:
         self.runtime = runtime
         self.model_client = model_client
         self.tool_adapter = tool_adapter or TerraFinHostedToolAdapter(runtime)
+        # The adapter dispatches `consult_<persona>` tool-calls through
+        # `self.consult_guru(...)`, so it needs a back-reference to this
+        # loop. Plain capability tools don't need the back-reference —
+        # they go through runtime.invoke directly.
+        self.tool_adapter.attach_loop(self)
         self.system_prompt_builder = system_prompt_builder or build_default_system_prompt
         self.max_steps = max_steps
         self.max_tool_calls = max_tool_calls
@@ -220,26 +261,14 @@ class TerraFinHostedAgentLoop:
         )
         self._append_conversation_message(conversation, user_message, added=added)
 
-        routed_response = self._maybe_run_guru_router(
-            session_id=session_id,
-            user_message=content,
-            conversation=conversation,
-        )
-        if routed_response is not None:
-            assistant_message, total_steps, route_log = routed_response
-            self._append_conversation_message(conversation, assistant_message, added=added)
-            final_message = assistant_message
-            self._record_guru_route_history(conversation, route_log)
-            self._persist_conversation_runtime_state(session_id, conversation)
-            return TerraFinHostedRunResult(
-                session_id=session_id,
-                agent_name=conversation.agent_name,
-                final_message=final_message,
-                messages_added=tuple(added),
-                tool_results=tuple(tool_results),
-                steps=total_steps,
-            )
+        # No pre-intercept router. The orchestrator agent's own LLM decides
+        # when to consult a hidden persona (Buffett / Marks / Druckenmiller)
+        # via `consult_<persona>` tool-calls handled by the tool adapter.
+        # See `docs/agent/architecture.md#orchestrator--persona-subagents`.
 
+        # Track (tool_name, canonical_args) call counts across this run so we
+        # can break LLM loops that re-issue the same tool call step after step.
+        tool_call_fingerprint_counts: dict[str, int] = {}
         for step in range(1, self.max_steps + 1):
             definition = self.runtime.get_session_definition(session_id)
             context = self.runtime.get_session(session_id)
@@ -280,7 +309,21 @@ class TerraFinHostedAgentLoop:
                         f"Hosted TerraFin agent loop exceeded max_tool_calls={self.max_tool_calls} "
                         f"for session '{session_id}'."
                     )
-                outcome = self.tool_execution_engine.execute(session_id, tool_call)
+                fingerprint = _tool_call_fingerprint(tool_call)
+                tool_call_fingerprint_counts[fingerprint] = (
+                    tool_call_fingerprint_counts.get(fingerprint, 0) + 1
+                )
+                if tool_call_fingerprint_counts[fingerprint] > 2:
+                    # LLM is wedged — calling the same tool with the same args
+                    # repeatedly. Short-circuit with a synthetic error nudging
+                    # the model to pivot or answer with what it already has,
+                    # instead of burning all max_steps on dead repeats.
+                    outcome = self.tool_execution_engine.build_loop_guard_outcome(
+                        tool_call,
+                        count=tool_call_fingerprint_counts[fingerprint],
+                    )
+                else:
+                    outcome = self.tool_execution_engine.execute(session_id, tool_call)
                 if outcome.kind == "fatal_error":
                     assert outcome.error is not None
                     raise outcome.error
@@ -447,31 +490,43 @@ class TerraFinHostedAgentLoop:
         if isinstance(runtime_model, dict):
             conversation.metadata[RUNTIME_MODEL_METADATA_KEY] = dict(runtime_model)
 
-    def _maybe_run_guru_router(
+    def consult_guru(
         self,
-        *,
         session_id: str,
-        user_message: str,
-        conversation: TerraFinHostedConversation,
-    ) -> tuple[TerraFinConversationMessage, int, dict[str, Any]] | None:
-        if conversation.agent_name != DEFAULT_HOSTED_AGENT_NAME:
-            return None
-        if conversation.metadata.get("disableGuruRouting"):
-            return None
-        from .guru import maybe_run_guru_orchestrator
+        guru_name: str,
+        question: str,
+    ) -> dict[str, Any]:
+        """Spawn a hidden persona subagent and return its structured memo.
 
-        return maybe_run_guru_orchestrator(
+        Public entry point for `consult_<persona>` tool-calls from the
+        main orchestrator agent. Dispatches to `guru.run_guru_consult`,
+        which owns the hidden-session lifecycle and memo-tool contract.
+
+        Hidden-internal sessions (the persona subagents themselves) are
+        never allowed to call this method — `TerraFinHostedToolAdapter`
+        only registers the `consult_<persona>` tools for non-internal
+        agent definitions, so persona subagents cannot recurse.
+        """
+        from .guru import run_guru_consult
+
+        return run_guru_consult(
             loop=self,
-            session_id=session_id,
-            user_message=user_message,
-            conversation=conversation,
+            parent_session_id=session_id,
+            guru_name=guru_name,
+            question=question,
         )
 
-    def _record_guru_route_history(
-        self,
-        conversation: TerraFinHostedConversation,
-        route_log: Mapping[str, Any],
-    ) -> None:
-        history = conversation.metadata.setdefault("guruRouterHistory", [])
-        if isinstance(history, list):
-            history.append(dict(route_log))
+
+def _tool_call_fingerprint(tool_call: TerraFinToolCall) -> str:
+    """Stable key for 'same tool, same arguments' loop detection.
+
+    Canonicalises the arg mapping by sorted keys so dict ordering differences
+    don't defeat the match.
+    """
+    import json as _json
+
+    try:
+        args = _json.dumps(dict(tool_call.arguments or {}), sort_keys=True, default=str)
+    except Exception:
+        args = repr(tool_call.arguments)
+    return f"{tool_call.tool_name}::{args}"

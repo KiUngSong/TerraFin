@@ -587,6 +587,31 @@ class TerraFinHostedAgentRuntime:
     def get_view_context(self, context_id: str) -> TerraFinHostedViewContextRecord:
         return self.session_store.get_view_context(context_id)
 
+    def relink_session_view_context(self, session_id: str, view_context_id: str) -> None:
+        """Update the session's linked viewContextId.
+
+        A hosted session records the viewContextId it was created with, but a
+        long-lived session can outlive a single browser sessionStorage (new
+        tab, cleared storage, …). Callers — chiefly the message-submit path —
+        refresh the link on every request so `current_view_context` always
+        reads what the user is looking at *now*, not the snapshot from
+        session-creation time.
+
+        The mutation MUST be persisted through the session store — in-memory
+        mutation alone is invisible to SQLite-backed stores across workers /
+        processes that share only the DB, not the cache. `session_store.persist`
+        serializes the updated record back to disk.
+        """
+        if not view_context_id:
+            return
+        record = self.get_session_record(session_id)
+        previous = record.context.session.metadata.get("viewContextId")
+        if previous == view_context_id:
+            return
+        record.context.session.metadata["viewContextId"] = view_context_id
+        record.metadata["viewContextId"] = view_context_id
+        self.session_store.persist(record)
+
     def read_linked_view_context(
         self,
         session_id: str,
@@ -914,7 +939,11 @@ class TerraFinHostedAgentRuntime:
             resolved["depth"] = definition.default_depth
         if "view" in parameters and resolved.get("view") is None:
             resolved["view"] = definition.default_view
-        if capability.name == "open_chart" and "session_id" in parameters and resolved.get("session_id") is None:
+        # Auto-inject the runtime's session_id when the handler accepts one.
+        # `open_chart` binds its chart session to the assistant session;
+        # `macro_focus` uses it to pick up session-local named series so the
+        # agent reads the same macro frame the user loaded on the chart.
+        if "session_id" in parameters and resolved.get("session_id") is None:
             resolved["session_id"] = runtime_session_id
         return resolved
 

@@ -1,23 +1,25 @@
-"""Hidden guru-router orchestration for TerraFin's main assistant.
+"""Hidden investor-persona subagents for the main ``TerraFin Agent``.
 
-The user-facing product surface stays as a single ``TerraFin Agent``. This
-module provides deterministic routing rules that let the main orchestrator
-invoke hidden investor-persona sessions when the request clearly benefits from
-those lenses.
+The user-facing product surface stays as a single ``TerraFin Agent``. That
+main assistant acts as the **orchestrator**: it decides, per-turn, whether
+to consult one or more hidden investor-persona subagents (Warren Buffett,
+Howard Marks, Stanley Druckenmiller) by calling a ``consult_<persona>``
+tool. The LLM makes that decision with context in hand — this module no
+longer gates behaviour on a regex router; it exposes the memo-generation
+machinery the orchestrator drives via tool-calls.
+
+Public entry point: :func:`run_guru_consult`.
 """
 
 import json
 import re
 from dataclasses import dataclass
-from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, Literal, Mapping
-from uuid import uuid4
 
-from pydantic import BaseModel, Field, ValidationError, field_validator
+from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
 
 from .conversation import TerraFinConversationMessage, make_text_block, make_tool_result_block
 from .conversation_state import record_tool_call_history
-from .definitions import DEFAULT_HOSTED_AGENT_NAME
 from .personas import GuruPersona, PersonaRegistry, build_default_persona_registry
 from .recovery import RecoveryTracker
 from .tools import TerraFinToolDefinition
@@ -29,92 +31,32 @@ if TYPE_CHECKING:
 
 
 GuruStance = Literal["bullish", "bearish", "neutral", "abstain"]
-GuruRouteType = Literal["explicit", "portfolio", "macro", "valuation"]
+# `consult` is the only route type today. It marks a hidden persona subagent
+# session that was spawned by a `consult_<persona>` tool-call from the main
+# orchestrator agent (see `docs/agent/architecture.md#orchestrator--persona-subagents`).
+# Legacy literal values stay in the type for transcript-log replay of sessions
+# created before the orchestrator-as-tool refactor.
+GuruRouteType = Literal["consult", "explicit", "portfolio", "macro", "valuation"]
 
 WARREN_BUFFETT = "warren-buffett"
 HOWARD_MARKS = "howard-marks"
 STANLEY_DRUCKENMILLER = "stanley-druckenmiller"
 
-_PERSONA_MENTION_PATTERNS: tuple[tuple[str, str], ...] = (
-    (WARREN_BUFFETT, r"\b(buffett|warren buffett|oracle of omaha)\b"),
-    (HOWARD_MARKS, r"\b(howard marks|marks|oaktree)\b"),
-    (STANLEY_DRUCKENMILLER, r"\b(druckenmiller|stanley druckenmiller)\b"),
-)
-
-_PORTFOLIO_TERMS = (
-    "portfolio",
-    "holdings",
-    "13f",
-    "guru holdings",
-    "moat",
-    "owner earnings",
-    "business quality",
-    "quality of the business",
-    "margin of safety",
-)
-_MACRO_TERMS = (
-    "macro",
-    "liquidity",
-    "rates",
-    "yield",
-    "fed",
-    "central bank",
-    "regime",
-    "dollar",
-    "dxy",
-    "treasury",
-    "inflation",
-    "momentum",
-    "price action",
-    "risk-on",
-    "risk off",
-)
-_VALUATION_TERMS = (
-    "valuation",
-    "dcf",
-    "reverse dcf",
-    "intrinsic value",
-    "downside",
-    "second look",
-    "risk premium",
-    "cycle",
-    "assumptions",
-    "deserve a second look",
-)
-_ANALYSIS_INTENT_TERMS = (
-    "how would",
-    "stand out",
-    "stands out",
-    "what stands out",
-    "deserve",
-    "second look",
-    "read on",
-    "thesis",
-    "main risk",
-    "key risk",
-    "investor lens",
-    "buffett lens",
-    "marks lens",
-    "druckenmiller lens",
-)
-_COMPARISON_TERMS = (
-    "disagree",
-    "difference",
-    "different",
-    "compare",
-    "comparison",
-    "versus",
-    "vs",
-    "debate",
-)
-
 
 @dataclass(frozen=True, slots=True)
 class GuruRoutePlan:
-    route_type: GuruRouteType
-    selected_gurus: tuple[str, ...]
-    reason: str
-    matched_terms: tuple[str, ...]
+    """Metadata threaded into a persona subagent's research prompt.
+
+    Under the orchestrator-as-tool architecture, each `consult_<persona>`
+    call produces one plan scoped to one guru (`selected_gurus` is always
+    length-1 for new-style plans). The shape is kept for transcript-log
+    continuity and to avoid rewriting `_run_guru_research_memo` /
+    `_build_guru_research_prompt` — they accept this dataclass.
+    """
+    route_type: GuruRouteType = "consult"
+    selected_gurus: tuple[str, ...] = ()
+    reason: str = ""
+    matched_terms: tuple[str, ...] = ()
     view_context: dict[str, Any] | None = None
 
 
@@ -139,203 +81,98 @@ class GuruResearchMemo(BaseModel):
             return [str(item).strip() for item in value if str(item).strip()]
         return [str(value).strip()] if str(value).strip() else []
 
+    @model_validator(mode="after")
+    def _clamp_unsupported_confidence(self) -> "GuruResearchMemo":
+        # A persona that claims high conviction without any citations is almost
+        # always overstating. Clamp to keep the orchestrator from treating an
+        # unsupported guess as a strong signal. The orchestrator surfaces the
+        # note appended to `thesis` so the user sees why confidence dropped.
+        if self.confidence >= 80 and not self.citations:
+            self.confidence = 60
+            note = "(confidence reduced: no citations supplied)"
+            if note not in self.thesis:
+                self.thesis = f"{self.thesis.rstrip()} {note}"
+        return self
 
-@dataclass(frozen=True, slots=True)
-class GuruOrchestratedReply:
-    assistant_message: TerraFinConversationMessage
-    steps: int
-    route_log: dict[str, Any]
 
 
 _GURU_MEMO_TOOL_NAME = "submit_guru_research_memo"
 _GURU_MEMO_TOOL_DESCRIPTION = "Submit the final structured guru research memo after you finish tool-based research."
 
 
-def maybe_run_guru_orchestrator(
+def run_guru_consult(
     *,
     loop: "TerraFinHostedAgentLoop",
-    session_id: str,
-    user_message: str,
-    conversation: "TerraFinHostedConversation",
+    parent_session_id: str,
+    guru_name: str,
+    question: str,
     persona_registry: PersonaRegistry | None = None,
-) -> tuple[TerraFinConversationMessage, int, dict[str, Any]] | None:
+) -> dict[str, Any]:
+    """Consult one hidden persona subagent and return its structured memo.
+
+    This is the single public entry point for the orchestrator-as-tool
+    architecture. The main orchestrator agent calls a
+    `consult_<persona>` tool, which dispatches here, which spins up a
+    hidden session running the persona-specific research loop and
+    returns the persona's `GuruResearchMemo` as a JSON-ready dict for
+    the orchestrator to read as its tool_result.
+
+    See `docs/agent/architecture.md#orchestrator--persona-subagents` for
+    the authoritative shape.
+    """
     registry = persona_registry or build_default_persona_registry()
-    route_plan = build_guru_route_plan(
+    try:
+        registry.get(guru_name)
+    except KeyError:
+        return {
+            "status": "error",
+            "guru": guru_name,
+            "reason": f"Unknown persona: {guru_name!r}. "
+            f"Valid personas: {WARREN_BUFFETT}, {HOWARD_MARKS}, {STANLEY_DRUCKENMILLER}.",
+            "steps": 0,
+        }
+
+    view_context = loop.runtime.read_linked_view_context(parent_session_id)
+    route_plan = GuruRoutePlan(
+        route_type="consult",
+        selected_gurus=(guru_name,),
+        reason="Consulted by the main orchestrator via tool-call.",
+        matched_terms=(),
+        view_context=view_context if view_context.get("available") else None,
+    )
+
+    memo, steps, failure_reason = _run_guru_research_memo(
         loop=loop,
-        session_id=session_id,
-        user_message=user_message,
+        parent_session_id=parent_session_id,
+        guru_name=guru_name,
+        user_message=question,
+        route_plan=route_plan,
         persona_registry=registry,
     )
-    if route_plan is None:
-        return None
 
-    memos: list[GuruResearchMemo] = []
-    failures: list[dict[str, str]] = []
-    total_steps = 0
-    for guru_name in route_plan.selected_gurus:
-        memo, steps, failure_reason = _run_guru_research_memo(
-            loop=loop,
-            parent_session_id=session_id,
-            guru_name=guru_name,
-            user_message=user_message,
-            route_plan=route_plan,
-            persona_registry=registry,
-        )
-        total_steps += steps
-        if memo is not None:
-            memos.append(memo)
-            continue
-        failures.append({"guru": guru_name, "reason": failure_reason or "Guru memo generation failed."})
+    if memo is None:
+        return {
+            "status": "failed",
+            "guru": guru_name,
+            "reason": failure_reason
+            or "The consulted persona could not produce a structured memo.",
+            "steps": steps,
+        }
 
-    if not memos:
-        history = conversation.metadata.setdefault("guruRouterFailures", [])
-        if isinstance(history, list):
-            history.append(
-                {
-                    "createdAt": datetime.now(UTC).isoformat(),
-                    "routeType": route_plan.route_type,
-                    "selectedGurus": list(route_plan.selected_gurus),
-                    "failures": failures,
-                }
-            )
-        if route_plan.route_type == "explicit":
-            assistant_message = _build_explicit_guru_failure_reply(
-                route_plan=route_plan,
-                failures=failures,
-                persona_registry=registry,
-            )
-            route_log = {
-                "createdAt": datetime.now(UTC).isoformat(),
-                "routeType": route_plan.route_type,
-                "reason": route_plan.reason,
-                "selectedGurus": list(route_plan.selected_gurus),
-                "matchedTerms": list(route_plan.matched_terms),
-                "failedGurus": failures,
-                "renderMode": "explicit-failure",
-            }
-            return assistant_message, total_steps, route_log
-        return None
-
-    if _should_direct_render_multi_guru(user_message=user_message, route_plan=route_plan):
-        assistant_message = _render_multi_guru_comparison_reply(
-            memos=memos,
-            route_plan=route_plan,
-            persona_registry=registry,
-            failures=failures,
-        )
-        render_mode = "multi-memo-direct"
-    elif len(memos) == 1:
-        assistant_message = _render_single_guru_memo_reply(
-            memo=memos[0],
-            route_plan=route_plan,
-            persona_registry=registry,
-            failures=failures,
-        )
-        render_mode = "single-memo-direct"
-    else:
-        assistant_message = _synthesize_memos(
-            loop=loop,
-            parent_session_id=session_id,
-            user_message=user_message,
-            conversation=conversation,
-            route_plan=route_plan,
-            memos=memos,
-            persona_registry=registry,
-        )
-        total_steps += 1
-        render_mode = "multi-memo-synthesis"
-    route_log = {
-        "createdAt": datetime.now(UTC).isoformat(),
-        "routeType": route_plan.route_type,
-        "reason": route_plan.reason,
-        "selectedGurus": list(route_plan.selected_gurus),
-        "matchedTerms": list(route_plan.matched_terms),
-        "viewContextId": None if route_plan.view_context is None else route_plan.view_context.get("contextId"),
-        "pageType": None if route_plan.view_context is None else route_plan.view_context.get("pageType"),
-        "memoSummary": [
-            {
-                "guru": memo.guru,
-                "stance": memo.stance,
-                "confidence": memo.confidence,
-            }
-            for memo in memos
-        ],
-        "failedGurus": failures,
-        "renderMode": render_mode,
+    return {
+        "status": "ok",
+        "guru": guru_name,
+        "stance": memo.stance,
+        "confidence": memo.confidence,
+        "thesis": memo.thesis,
+        "keyEvidence": list(memo.key_evidence),
+        "risks": list(memo.risks),
+        "openQuestions": list(memo.open_questions),
+        "citations": list(memo.citations),
+        "steps": steps,
     }
-    return assistant_message, total_steps, route_log
 
 
-def build_guru_route_plan(
-    *,
-    loop: "TerraFinHostedAgentLoop",
-    session_id: str,
-    user_message: str,
-    persona_registry: PersonaRegistry | None = None,
-) -> GuruRoutePlan | None:
-    _ = persona_registry
-    normalized_request = _normalize_text(user_message)
-    explicit = _explicit_guru_mentions(normalized_request)
-    view_context = loop.runtime.read_linked_view_context(session_id)
-    normalized_context = _normalize_text(_flatten_view_context(view_context))
-    page_type = str(view_context.get("pageType") or "").strip().lower() if view_context.get("available") else ""
-
-    if explicit:
-        return GuruRoutePlan(
-            route_type="explicit",
-            selected_gurus=tuple(explicit[:3]),
-            reason="The user explicitly requested named investor perspectives.",
-            matched_terms=tuple(explicit),
-            view_context=view_context if view_context.get("available") else None,
-        )
-
-    if not _analysis_requested(normalized_request, page_type=page_type):
-        return None
-
-    portfolio_matches = _matched_terms(normalized_request, normalized_context, _PORTFOLIO_TERMS)
-    macro_matches = _matched_terms(normalized_request, normalized_context, _MACRO_TERMS)
-    valuation_matches = _matched_terms(normalized_request, normalized_context, _VALUATION_TERMS)
-
-    if page_type == "dcf" or valuation_matches:
-        selected = [HOWARD_MARKS]
-        if _contains_any(normalized_request, ("moat", "margin of safety", "business quality")):
-            selected.append(WARREN_BUFFETT)
-        matched_terms = valuation_matches or (["dcf"] if page_type == "dcf" else [])
-        return GuruRoutePlan(
-            route_type="valuation",
-            selected_gurus=tuple(selected[:2]),
-            reason="The request is valuation- or downside-oriented, so cycle and risk-premium framing comes first.",
-            matched_terms=tuple(matched_terms),
-            view_context=view_context if view_context.get("available") else None,
-        )
-
-    if page_type == "market-insights" or portfolio_matches:
-        selected = [WARREN_BUFFETT]
-        if _contains_any(normalized_request, ("risk", "cycle", "downside", "second-level")):
-            selected.append(HOWARD_MARKS)
-        matched_terms = portfolio_matches or (["market-insights"] if page_type == "market-insights" else [])
-        return GuruRoutePlan(
-            route_type="portfolio",
-            selected_gurus=tuple(selected[:2]),
-            reason="The request is about holdings, business quality, or portfolio interpretation.",
-            matched_terms=tuple(matched_terms),
-            view_context=view_context if view_context.get("available") else None,
-        )
-
-    if macro_matches or _macro_chart_context(view_context):
-        selected = [STANLEY_DRUCKENMILLER]
-        if _contains_any(normalized_request, ("risk", "cycle", "downside", "valuation")):
-            selected.append(HOWARD_MARKS)
-        matched_terms = macro_matches or (["macro-context"] if _macro_chart_context(view_context) else [])
-        return GuruRoutePlan(
-            route_type="macro",
-            selected_gurus=tuple(selected[:2]),
-            reason="The request is macro, regime, or liquidity focused.",
-            matched_terms=tuple(matched_terms),
-            view_context=view_context if view_context.get("available") else None,
-        )
-
-    return None
 
 
 def _run_guru_research_memo(
@@ -563,6 +400,7 @@ def _execute_guru_worker(
                 persona=persona,
                 route_plan=route_plan,
                 memo=memo,
+                user_message=request,
             )
             if fit_feedback:
                 if persona_fit_retry_used:
@@ -638,247 +476,6 @@ def _execute_guru_worker(
         (f"Guru worker exceeded max_steps={loop.max_steps} before submitting a structured memo."),
     )
 
-
-def _synthesize_memos(
-    *,
-    loop: "TerraFinHostedAgentLoop",
-    parent_session_id: str,
-    user_message: str,
-    conversation: "TerraFinHostedConversation",
-    route_plan: GuruRoutePlan,
-    memos: list[GuruResearchMemo],
-    persona_registry: PersonaRegistry,
-) -> TerraFinConversationMessage:
-    parent_record = loop.runtime.get_session_record(parent_session_id)
-    definition = loop.runtime.get_agent_definition(DEFAULT_HOSTED_AGENT_NAME)
-    prompt = _build_synthesis_prompt(
-        user_message=user_message,
-        route_plan=route_plan,
-        memos=memos,
-        persona_registry=persona_registry,
-    )
-    synthesis_conversation = type(conversation)(
-        session_id=f"orchestrator:{uuid4().hex}",
-        agent_name=DEFAULT_HOSTED_AGENT_NAME,
-        created_at=datetime.now(UTC),
-        metadata=dict(parent_record.context.session.metadata),
-    )
-    system_message = TerraFinConversationMessage(
-        role="system",
-        content=(
-            "You are TerraFin's main orchestrator. Synthesize internal guru research into one user-facing answer. "
-            "Do not mention hidden routing mechanics. Present differentiated investor lenses when useful. "
-            "Stay research-only and do not give trade sizing or execution instructions."
-        ),
-    )
-    user_turn = TerraFinConversationMessage(role="user", content=prompt)
-    synthesis_conversation.messages.extend([system_message, user_turn])
-    turn = loop.complete_model_turn(
-        agent=definition,
-        session=parent_record.context.session,
-        conversation=synthesis_conversation,
-        tools=(),
-    )
-    assistant = turn.assistant_message
-    if assistant is None or not assistant.content.strip():
-        assistant = TerraFinConversationMessage(
-            role="assistant",
-            content=_fallback_synthesis_text(memos=memos, persona_registry=persona_registry),
-        )
-    else:
-        assistant = loop._normalize_assistant_message(assistant)
-    metadata = dict(assistant.metadata)
-    metadata.update(
-        {
-            "guruRouterApplied": True,
-            "guruRouteType": route_plan.route_type,
-            "selectedGurus": list(route_plan.selected_gurus),
-            "memoSummary": [
-                {"guru": memo.guru, "stance": memo.stance, "confidence": memo.confidence} for memo in memos
-            ],
-        }
-    )
-    return TerraFinConversationMessage(
-        role="assistant",
-        content=assistant.content,
-        name=assistant.name,
-        tool_call_id=assistant.tool_call_id,
-        metadata=metadata,
-    )
-
-
-def _render_single_guru_memo_reply(
-    *,
-    memo: GuruResearchMemo,
-    route_plan: GuruRoutePlan,
-    persona_registry: PersonaRegistry,
-    failures: list[dict[str, str]],
-) -> TerraFinConversationMessage:
-    persona = persona_registry.get(memo.guru)
-    lines = _persona_render_lines(persona=persona, memo=memo)
-    metadata = {
-        "guruRouterApplied": True,
-        "guruRouteType": route_plan.route_type,
-        "selectedGurus": [memo.guru],
-        "memoSummary": [
-            {
-                "guru": memo.guru,
-                "stance": memo.stance,
-                "confidence": memo.confidence,
-            }
-        ],
-        "guruDirectRender": True,
-    }
-    if failures:
-        metadata["failedGurus"] = list(failures)
-    return TerraFinConversationMessage(
-        role="assistant",
-        content="\n".join(lines),
-        metadata=metadata,
-    )
-
-
-def _build_explicit_guru_failure_reply(
-    *,
-    route_plan: GuruRoutePlan,
-    failures: list[dict[str, str]],
-    persona_registry: PersonaRegistry,
-) -> TerraFinConversationMessage:
-    if len(route_plan.selected_gurus) == 1:
-        persona = persona_registry.get(route_plan.selected_gurus[0])
-        lines = _persona_partial_failure_lines(persona=persona, route_plan=route_plan)
-        lines.extend(
-            [
-                "",
-                "I could not complete the full persona-specific research path cleanly this turn, so treat this as a low-confidence partial read rather than a finished memo.",
-                "If you retry with a tighter ticker, portfolio, or page-specific context, I can usually produce a much sharper version of this lens.",
-            ]
-        )
-        return TerraFinConversationMessage(
-            role="assistant",
-            content="\n".join(lines),
-            metadata={
-                "guruRouterApplied": True,
-                "guruRouteType": route_plan.route_type,
-                "selectedGurus": list(route_plan.selected_gurus),
-                "guruRouterFailure": True,
-                "guruRouterPartial": True,
-                "failedGurus": list(failures),
-            },
-        )
-
-    persona_names = [persona_registry.get(name).display_name for name in route_plan.selected_gurus]
-    if len(persona_names) == 1:
-        subject = persona_names[0]
-    else:
-        subject = ", ".join(persona_names[:-1]) + f", and {persona_names[-1]}"
-    lines = [
-        f"I tried to answer this through the {subject} lens, but I couldn't complete that persona-specific research path cleanly.",
-        "Rather than pretend with a generic summary, I'm stopping here.",
-        "Please retry the question, or narrow it to a ticker, portfolio, or specific page context so I can re-run that investor lens properly.",
-    ]
-    return TerraFinConversationMessage(
-        role="assistant",
-        content="\n".join(lines),
-        metadata={
-            "guruRouterApplied": False,
-            "guruRouteType": route_plan.route_type,
-            "selectedGurus": list(route_plan.selected_gurus),
-            "guruRouterFailure": True,
-            "failedGurus": list(failures),
-        },
-    )
-
-
-def _persona_partial_failure_lines(
-    *,
-    persona: GuruPersona,
-    route_plan: GuruRoutePlan,
-) -> list[str]:
-    broad_market = route_plan.route_type in {"explicit", "macro"} and _is_broad_market_request(
-        _normalize_text(" ".join(route_plan.matched_terms) + " " + route_plan.reason),
-        view_context=route_plan.view_context,
-    )
-    if persona.name == WARREN_BUFFETT:
-        lines = [
-            f"From a {persona.display_name} lens, the default instinct is still patience rather than activity.",
-            "If the broad market is not offering a clear margin of safety, cash and optionality matter more than having an opinion every day.",
-        ]
-        if not broad_market:
-            lines[1] = "If the business quality and price discipline cannot both be defended cleanly, the right move is usually to wait rather than stretch."
-        return lines
-    if persona.name == HOWARD_MARKS:
-        return [
-            f"From a {persona.display_name} lens, the first question is still where we are in the cycle and whether investors are being paid enough for the risk they are taking.",
-            "Even without a finished memo, the default read is caution when optimism outruns compensation for risk and psychology gets friendlier than the payoff warrants.",
-        ]
-    if persona.name == STANLEY_DRUCKENMILLER:
-        lines = [
-            f"From a {persona.display_name} lens, the broad-market issue is still the macro tradeoff between liquidity, rates, and what the tape is confirming.",
-            "If that tradeoff is messy rather than one-way, the cleaner edge is often in selective stocks or sectors, not in pretending the index has a perfect setup.",
-        ]
-        if not broad_market:
-            lines[1] = "If the macro tailwind and price confirmation are not lining up cleanly, this is usually a low-edge setup rather than a bet to press."
-        return lines
-    return [
-        f"From a {persona.display_name} lens, the right move is to avoid pretending the evidence is cleaner than it is.",
-    ]
-
-
-def _build_synthesis_prompt(
-    *,
-    user_message: str,
-    route_plan: GuruRoutePlan,
-    memos: list[GuruResearchMemo],
-    persona_registry: PersonaRegistry,
-) -> str:
-    memo_payload = []
-    for memo in memos:
-        persona = persona_registry.get(memo.guru)
-        memo_payload.append(
-            {
-                "guru": memo.guru,
-                "displayName": persona.display_name,
-                "stance": memo.stance,
-                "confidence": memo.confidence,
-                "thesis": memo.thesis,
-                "keyEvidence": memo.key_evidence,
-                "risks": memo.risks,
-                "openQuestions": memo.open_questions,
-                "citations": memo.citations,
-            }
-        )
-    return "\n".join(
-        [
-            f"User request: {user_message}",
-            f"Route type: {route_plan.route_type}",
-            "Internal guru research memos:",
-            json.dumps(memo_payload, ensure_ascii=False, indent=2),
-            "",
-            "Write one clear TerraFin answer that:",
-            "- highlights agreements and disagreements",
-            "- attributes ideas as Buffett/Marks/Druckenmiller lenses when useful",
-            "- cites concrete evidence from the memos",
-            "- stays in research mode and avoids trade sizing",
-        ]
-    )
-
-
-def _fallback_synthesis_text(
-    *,
-    memos: list[GuruResearchMemo],
-    persona_registry: PersonaRegistry,
-) -> str:
-    lines = ["Here is the research read from the investor lenses I applied:"]
-    for memo in memos:
-        persona = persona_registry.get(memo.guru)
-        lines.append("")
-        lines.append(f"{persona.display_name}: {memo.thesis}")
-        if memo.key_evidence:
-            lines.append(f"Key evidence: {memo.key_evidence[0]}")
-        if memo.risks:
-            lines.append(f"Main risk: {memo.risks[0]}")
-    return "\n".join(lines)
 
 
 def _special_guru_research_guidance(
@@ -1067,33 +664,6 @@ def _contains_any(text: str, terms: tuple[str, ...]) -> bool:
     return any(term in text for term in terms)
 
 
-def _analysis_requested(text: str, *, page_type: str) -> bool:
-    if _contains_any(text, _ANALYSIS_INTENT_TERMS):
-        return True
-    if page_type == "dcf" and _contains_any(
-        text, ("assumption", "assumptions", "second look", "deserve", "valuation")
-    ):
-        return True
-    return False
-
-
-def _matched_terms(request_text: str, context_text: str, terms: tuple[str, ...]) -> list[str]:
-    matched: list[str] = []
-    combined = f"{request_text} {context_text}".strip()
-    for term in terms:
-        if term in combined and term not in matched:
-            matched.append(term)
-    return matched
-
-
-def _explicit_guru_mentions(text: str) -> list[str]:
-    selected: list[str] = []
-    for guru_name, pattern in _PERSONA_MENTION_PATTERNS:
-        if re.search(pattern, text):
-            selected.append(guru_name)
-    return selected
-
-
 def _flatten_view_context(view_context: Mapping[str, Any]) -> str:
     if not view_context.get("available"):
         return ""
@@ -1178,6 +748,7 @@ def _persona_fit_feedback(
     persona: GuruPersona,
     route_plan: GuruRoutePlan,
     memo: GuruResearchMemo,
+    user_message: str | None = None,
 ) -> str | None:
     thesis = _normalize_text(memo.thesis)
     combined = _normalize_text(
@@ -1194,8 +765,18 @@ def _persona_fit_feedback(
     technical_terms = ("rsi", "bollinger", "macd", "upper band", "overbought")
     technical_hits = sum(1 for term in technical_terms if term in combined)
     signature_hits = sum(1 for term in persona.signature_concepts if term.lower() in combined)
+    # Broad-market detection needs the raw question text — legacy routes
+    # stashed signal into `route_plan.matched_terms` / `route_plan.reason`,
+    # but `consult_<persona>` tool calls leave both empty. Prefer the
+    # user_message when supplied; fall back to the route-plan fields for
+    # transcript-replay of legacy plans.
+    broad_market_text = _normalize_text(
+        user_message
+        if user_message is not None
+        else " ".join(route_plan.matched_terms) + " " + route_plan.reason
+    )
     broad_market = _is_broad_market_request(
-        _normalize_text(" ".join(route_plan.matched_terms) + " " + route_plan.reason),
+        broad_market_text,
         view_context=route_plan.view_context,
     ) or route_plan.route_type in {"explicit", "macro"}
 
@@ -1395,159 +976,13 @@ def _displayable_memo_points(
     return selected
 
 
-def _persona_render_lines(*, persona: GuruPersona, memo: GuruResearchMemo) -> list[str]:
-    display_questions = _displayable_open_questions(memo.open_questions)
-    if persona.name == WARREN_BUFFETT:
-        evidence = [
-            item
-            for item in memo.key_evidence
-            if not _contains_any(_normalize_text(item), ("rsi", "macd", "bollinger", "overbought", "upper band"))
-        ]
-        if not evidence:
-            evidence = memo.key_evidence
-        evidence = _displayable_memo_points(persona=persona, items=evidence, point_type="evidence")
-        risks = _displayable_memo_points(persona=persona, items=memo.risks, point_type="risks")
-        lines = [
-            f"From a {persona.display_name} lens, I would not make too much of day-to-day market swings.",
-            "Mr. Market may be cheerful here, but that is not the same as offering a generous price.",
-            memo.thesis.strip(),
-        ]
-        if evidence:
-            lines.append("")
-            lines.append("What would matter in that frame:")
-            for item in evidence[:3]:
-                lines.append(f"- {item}")
-        if risks:
-            lines.append("")
-            lines.append("Why that lens would still stay patient:")
-            for item in risks[:2]:
-                lines.append(f"- {item}")
-        if display_questions:
-            lines.append("")
-            lines.append("What Buffett would want to know before doing more:")
-            for item in display_questions[:2]:
-                lines.append(f"- {item}")
-        return lines
-    if persona.name == HOWARD_MARKS:
-        evidence = _displayable_memo_points(persona=persona, items=memo.key_evidence, point_type="evidence")
-        risks = _displayable_memo_points(persona=persona, items=memo.risks, point_type="risks")
-        lines = [
-            f"From a {persona.display_name} lens, the first question is where we are in the cycle and whether investors are mistaking optimism for safety.",
-            memo.thesis.strip(),
-        ]
-        if evidence:
-            lines.append("")
-            lines.append("What supports that cycle read:")
-            for item in evidence[:3]:
-                lines.append(f"- {item}")
-        if risks:
-            lines.append("")
-            lines.append("What could make that judgment too neat:")
-            for item in risks[:2]:
-                lines.append(f"- {item}")
-        if display_questions:
-            lines.append("")
-            lines.append("What Marks would still want to test:")
-            for item in display_questions[:2]:
-                lines.append(f"- {item}")
-        return lines
-    if persona.name == STANLEY_DRUCKENMILLER:
-        evidence = _displayable_memo_points(persona=persona, items=memo.key_evidence, point_type="evidence")
-        risks = _displayable_memo_points(persona=persona, items=memo.risks, point_type="risks")
-        lines = [
-            f"From a {persona.display_name} lens, the real issue is the macro tradeoff rather than a tidy one-line market call.",
-            "When the tape stays decent but rates and liquidity are still a live constraint, the broad index bet usually gets messier than the headline looks.",
-            memo.thesis.strip(),
-        ]
-        if evidence:
-            lines.append("")
-            lines.append("What is driving that macro read:")
-            for item in evidence[:3]:
-                lines.append(f"- {item}")
-        if risks:
-            lines.append("")
-            lines.append("What could flip the setup:")
-            for item in risks[:2]:
-                lines.append(f"- {item}")
-        if display_questions:
-            lines.append("")
-            lines.append("What Druckenmiller would want to clarify next:")
-            for item in display_questions[:2]:
-                lines.append(f"- {item}")
-        return lines
-
-    stance_text = {
-        "bullish": "leans constructive",
-        "bearish": "leans cautious",
-        "neutral": "leans cautious neutrality",
-        "abstain": "would avoid forcing a conclusion",
-    }[memo.stance]
-    lines = [f"From a {persona.display_name} lens, the current read {stance_text}.", memo.thesis.strip()]
-    if memo.key_evidence:
-        lines.append("")
-        lines.append("What drives that view:")
-        for item in memo.key_evidence[:3]:
-            lines.append(f"- {item}")
-    return lines
-
-
-def _should_direct_render_multi_guru(*, user_message: str, route_plan: GuruRoutePlan) -> bool:
-    normalized_request = _normalize_text(user_message)
-    return route_plan.route_type == "explicit" and len(route_plan.selected_gurus) > 1 and (
-        _contains_any(normalized_request, _COMPARISON_TERMS) or len(route_plan.selected_gurus) >= 3
-    )
-
-
-def _render_multi_guru_comparison_reply(
-    *,
-    memos: list[GuruResearchMemo],
-    route_plan: GuruRoutePlan,
-    persona_registry: PersonaRegistry,
-    failures: list[dict[str, str]],
-) -> TerraFinConversationMessage:
-    memo_by_guru = {memo.guru: memo for memo in memos}
-    ordered = [memo_by_guru[guru] for guru in route_plan.selected_gurus if guru in memo_by_guru]
-    lines = ["Here is how the investor lenses separate on this setup:"]
-    for memo in ordered:
-        persona = persona_registry.get(memo.guru)
-        display_questions = _displayable_open_questions(memo.open_questions)
-        lines.append("")
-        lines.append(f"{persona.display_name}:")
-        lines.append(f"- Core read: {memo.thesis}")
-        if memo.key_evidence:
-            lines.append(f"- What this lens leans on: {memo.key_evidence[0]}")
-        if memo.risks:
-            lines.append(f"- What keeps this lens careful: {memo.risks[0]}")
-        if display_questions:
-            lines.append(f"- What this lens would still test: {display_questions[0]}")
-    if failures:
-        lines.append("")
-        lines.append("Incomplete lenses:")
-        for failure in failures:
-            persona = persona_registry.get(failure["guru"])
-            lines.append(f"- {persona.display_name}: research path did not complete cleanly.")
-    return TerraFinConversationMessage(
-        role="assistant",
-        content="\n".join(lines),
-        metadata={
-            "guruRouterApplied": True,
-            "guruRouteType": route_plan.route_type,
-            "selectedGurus": list(route_plan.selected_gurus),
-            "memoSummary": [
-                {"guru": memo.guru, "stance": memo.stance, "confidence": memo.confidence} for memo in ordered
-            ],
-            "guruDirectRender": True,
-            "guruComparisonRender": True,
-            "failedGurus": list(failures),
-        },
-    )
-
 
 __all__ = [
-    "GuruOrchestratedReply",
     "GuruResearchMemo",
     "GuruRoutePlan",
+    "WARREN_BUFFETT",
+    "HOWARD_MARKS",
+    "STANLEY_DRUCKENMILLER",
     "_select_guru_worker_tools",
-    "build_guru_route_plan",
-    "maybe_run_guru_orchestrator",
+    "run_guru_consult",
 ]

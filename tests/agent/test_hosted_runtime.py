@@ -139,6 +139,43 @@ class _FakeService:
             "processing": _processing(),
         }
 
+    def sec_filings(self, ticker: str) -> dict[str, object]:
+        return {"ticker": ticker, "cik": 1, "forms": [], "filings": [], "processing": _processing()}
+
+    def sec_filing_document(
+        self, ticker: str, accession: str, primaryDocument: str, *, form: str = "10-Q"
+    ) -> dict[str, object]:
+        return {"ticker": ticker, "accession": accession, "primaryDocument": primaryDocument, "toc": [], "charCount": 0, "indexUrl": "", "documentUrl": "", "processing": _processing()}
+
+    def sec_filing_section(
+        self, ticker: str, accession: str, primaryDocument: str, sectionSlug: str, *, form: str = "10-Q"
+    ) -> dict[str, object]:
+        return {"ticker": ticker, "accession": accession, "sectionSlug": sectionSlug, "sectionTitle": "stub", "markdown": "", "charCount": 0, "documentUrl": "", "processing": _processing()}
+
+    def fear_greed(self) -> dict[str, object]:
+        return {"score": 50, "rating": "Neutral", "processing": _processing()}
+
+    def sp500_dcf(self) -> dict[str, object]:
+        return {"status": "ready", "currentIntrinsicValue": 5000.0, "processing": _processing()}
+
+    def beta_estimate(self, ticker: str) -> dict[str, object]:
+        return {"symbol": ticker, "beta": 1.0, "adjustedBeta": 1.0, "rSquared": 0.5, "processing": _processing()}
+
+    def top_companies(self) -> dict[str, object]:
+        return {"companies": [], "count": 0, "processing": _processing()}
+
+    def market_regime(self) -> dict[str, object]:
+        return {"summary": "stub", "confidence": "low", "signals": [], "processing": _processing()}
+
+    def trailing_forward_pe(self) -> dict[str, object]:
+        return {"date": "2026-04-01", "latestValue": 0.0, "history": [], "processing": _processing()}
+
+    def market_breadth(self) -> dict[str, object]:
+        return {"metrics": [], "processing": _processing()}
+
+    def watchlist(self) -> dict[str, object]:
+        return {"items": [], "count": 0, "processing": _processing()}
+
 
 def _fake_chart_opener(
     data_or_names,
@@ -424,6 +461,87 @@ def test_read_linked_view_context_returns_published_page_state() -> None:
     assert payload["available"] is True
     assert payload["route"] == "/market-insights"
     assert payload["selection"]["guru"] == "Buffett"
+
+
+def test_sqlite_session_store_reloads_cached_record_when_another_worker_persists(tmp_path) -> None:
+    """Simulate two FastAPI workers sharing one SQLite DB. Worker A has the
+    record cached in-process. Worker B mutates the session (e.g. relinks
+    the viewContextId) and persists. The next `get()` on Worker A must
+    return the fresh metadata — not the stale cached copy — or the
+    pull-based `current_view_context` tool will read the wrong tab's
+    view context.
+
+    Regression for hostile-review finding C2: the get() path previously
+    returned cached records unconditionally, and only the WRITE side of
+    the relink fix (0a54535) was in place."""
+    service = _FakeService()
+    registry = build_default_capability_registry(service, chart_opener=_fake_chart_opener)
+    db_path = tmp_path / "coherency.sqlite3"
+    store_a = SQLiteHostedSessionStore(db_path=db_path, service=service, registry=registry)
+    store_b = SQLiteHostedSessionStore(db_path=db_path, service=service, registry=registry)
+
+    runtime_a = TerraFinHostedAgentRuntime(service=service, capability_registry=registry, session_store=store_a)
+    runtime_b = TerraFinHostedAgentRuntime(service=service, capability_registry=registry, session_store=store_b)
+
+    runtime_a.create_session(
+        DEFAULT_HOSTED_AGENT_NAME,
+        session_id="hosted:coherency",
+        metadata={"viewContextId": "ctx-A"},
+    )
+    # Prime worker B's cache by doing a read first.
+    record_before = runtime_b.get_session_record("hosted:coherency")
+    assert record_before.context.session.metadata.get("viewContextId") == "ctx-A"
+
+    # Worker A mutates through a relink — persist updates SQLite AND worker
+    # A's cache, but leaves worker B's cache stale.
+    import time as _time
+    _time.sleep(0.01)  # ensure strictly-later updated_at
+    runtime_a.relink_session_view_context("hosted:coherency", "ctx-B")
+
+    # Worker B's next read should detect the newer SQLite updated_at and
+    # reload, picking up the new viewContextId.
+    record_after = runtime_b.get_session_record("hosted:coherency")
+    assert record_after.context.session.metadata.get("viewContextId") == "ctx-B"
+
+    runtime_a.shutdown()
+    runtime_b.shutdown()
+
+
+def test_relink_session_view_context_persists_across_runtime_instances(tmp_path) -> None:
+    """The relink must survive a runtime restart — in-memory mutation alone is
+    invisible to the SQLite store, so other workers / processes would keep
+    reading the stale viewContextId. Regression for live-server bug where
+    `relink_session_view_context` mutated the cached record but didn't save it,
+    so `current_view_context` kept reading the creation-time snapshot."""
+    service = _FakeService()
+    registry = build_default_capability_registry(service, chart_opener=_fake_chart_opener)
+    db_path = tmp_path / "hosted-runtime.sqlite3"
+    transcript_root = tmp_path / "transcripts"
+    runtime_a = TerraFinHostedAgentRuntime(
+        service=service,
+        capability_registry=registry,
+        session_store=SQLiteHostedSessionStore(db_path=db_path, service=service, registry=registry),
+        transcript_store=HostedTranscriptStore(root_dir=transcript_root),
+    )
+    context = runtime_a.create_session(
+        DEFAULT_HOSTED_AGENT_NAME,
+        session_id="hosted:relink",
+        metadata={"viewContextId": "creation-time-id"},
+    )
+    sid = context.session.session_id
+
+    runtime_a.relink_session_view_context(sid, "live-id")
+    runtime_a.shutdown()
+
+    runtime_b = TerraFinHostedAgentRuntime(
+        service=service,
+        capability_registry=registry,
+        session_store=SQLiteHostedSessionStore(db_path=db_path, service=service, registry=registry),
+        transcript_store=HostedTranscriptStore(root_dir=transcript_root),
+    )
+    reloaded = runtime_b.get_session_record(sid)
+    assert reloaded.context.session.metadata.get("viewContextId") == "live-id"
+    runtime_b.shutdown()
 
 
 def test_sqlite_session_store_restores_session_state_after_runtime_restart(tmp_path) -> None:

@@ -17,9 +17,12 @@ TerraFin's agent surface has three separate jobs:
     command family, and the GitHub Copilot login flow. TerraFin's hosted
     runtime, financial capability kernel, session/task model, widget, and API
     wiring are TerraFin-specific unless a page says otherwise. The hosted
-    runtime's hidden guru-router architecture also borrows the high-level idea
-    of explicit analyst-role separation from `ai-hedge-fund`, while keeping
-    TerraFin's shared capability kernel instead of per-guru Python modules.
+    runtime's orchestrator-agent-with-persona-subagents architecture also
+    borrows the high-level idea of explicit analyst-role separation from
+    `ai-hedge-fund`, while keeping TerraFin's shared capability kernel
+    instead of per-guru Python modules. See the architecture diagrams in
+    [architecture.md § Orchestrator + persona subagents](./architecture.md#orchestrator--persona-subagents)
+    for the authoritative shape.
 
 ## Start Here
 
@@ -50,9 +53,12 @@ Hosted runtime history is now local and transcript-first:
 
 Hosted runtime also keeps one public assistant surface:
 
-- `TerraFin Agent` is the only default user-facing chat surface
-- hidden guru roles may run behind the scenes for research requests
-- guru routing is policy-first and research-only in v1
+- `TerraFin Agent` is the only default user-facing chat surface. It
+  acts as the orchestrator; its own LLM decides when to call
+  `consult_warren_buffett`, `consult_howard_marks`, or
+  `consult_stanley_druckenmiller` tool-calls.
+- hidden persona subagents run behind the scenes for research requests
+  and are research-only in v1 (no position sizing, no trade execution)
 
 ## Related Docs
 

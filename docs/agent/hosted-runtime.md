@@ -22,10 +22,12 @@ It answers a narrower question:
     used by OpenClaw and Claude Code: append-only per-session transcripts with a
     separate session index and explicit rewrite paths. TerraFin's runtime
     controller, financial capability kernel, task/approval flow, widget, and API
-    integration remain TerraFin-specific. The hidden guru-router pattern also
-    takes inspiration from the role-separation style in `ai-hedge-fund`, but
-    TerraFin keeps shared capabilities and prompt-level persona policy instead
-    of hardcoded per-guru analysis modules.
+    integration remain TerraFin-specific. The orchestrator-agent-with-persona-
+    subagents pattern also takes inspiration from the role-separation style in
+    `ai-hedge-fund`, but TerraFin keeps shared capabilities and prompt-level
+    persona policy instead of hardcoded per-guru analysis modules — see the
+    diagrams in [architecture.md](./architecture.md#orchestrator--persona-subagents)
+    for the authoritative shape.
 
 ## Current runtime shape
 
@@ -39,7 +41,10 @@ Today the hosted runtime has:
 - a provider registry with OpenAI, Gemini, and GitHub Copilot adapters
 - Python, CLI, HTTP, notebook, and browser widget adapters
 - transcript-first local session history
-- a main-orchestrator router for hidden guru research roles
+- hidden persona subagents (Buffett / Marks / Druckenmiller) reached by
+  the main orchestrator agent via `consult_<persona>` tool-calls (see
+  the architecture diagrams in
+  [architecture.md](./architecture.md#orchestrator--persona-subagents))
 - a structured internal tool-result/error protocol
 - transcript normalization and repair before model calls
 - a proactive context-budget manager with reactive fallback retries
@@ -184,9 +189,11 @@ What is already there:
 - provider-backed model loop
 - transcript-first local session history
 - archived session delete behavior
-- policy-first hidden guru routing from the main assistant
-- structured internal guru memos for orchestrator synthesis through an internal
-  memo tool-call contract, not JSON scraped from prose
+- hidden persona subagents reached by the main orchestrator agent via
+  `consult_<persona>` tool-calls (authoritative shape: [architecture.md
+  § Orchestrator + persona subagents](./architecture.md#orchestrator--persona-subagents))
+- structured internal guru memos returned to the orchestrator through a
+  dedicated memo tool-call contract, not JSON scraped from prose
 - notebook helper surface
 - browser widget over the runtime endpoints
 

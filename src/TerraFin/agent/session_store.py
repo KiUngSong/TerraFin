@@ -834,9 +834,30 @@ class SQLiteHostedSessionStore(HostedSessionStore):
 
     def get(self, session_id: str) -> TerraFinHostedSessionRecord:
         with self._lock:
-            if session_id in self._cache:
-                return self._cache[session_id]
-            return self._load_record(session_id)
+            cached = self._cache.get(session_id)
+            if cached is None:
+                return self._load_record(session_id)
+            # Cross-worker coherency: another process may have persisted a
+            # newer version of this record (e.g. a relink on a different
+            # FastAPI worker) since we cached ours. Peek at SQLite's
+            # updated_at column — one indexed column read — and reload if
+            # our cache is stale. Without this check, `viewContextId` and
+            # other metadata silently lag across workers (see the relink
+            # persistence fix at 0a54535 for the write-side sibling).
+            with self._connect() as connection:
+                row = connection.execute(
+                    "SELECT updated_at FROM hosted_sessions WHERE session_id = ?",
+                    (session_id,),
+                ).fetchone()
+            if row is None:
+                # Row was deleted underneath us. Drop the stale cache and
+                # surface the KeyError via _load_record's path.
+                self._cache.pop(session_id, None)
+                return self._load_record(session_id)
+            stored_updated_at = _parse_datetime(str(row[0]))
+            if stored_updated_at is not None and stored_updated_at > cached.updated_at:
+                return self._load_record(session_id)
+            return cached
 
     def list(self) -> tuple[TerraFinHostedSessionRecord, ...]:
         with self._lock:

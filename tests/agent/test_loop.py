@@ -13,9 +13,8 @@ from TerraFin.agent.guru import (
     _build_guru_memo_tool,
     _build_guru_research_prompt,
     _persona_fit_feedback,
-    _persona_render_lines,
     _select_guru_worker_tools,
-    build_guru_route_plan,
+    run_guru_consult,
 )
 from TerraFin.agent.hosted_runtime import TerraFinHostedAgentRuntime
 from TerraFin.agent.loop import (
@@ -151,6 +150,43 @@ class _FakeService:
             "current_price": 107.0,
             "processing": _processing(),
         }
+
+    def sec_filings(self, ticker: str) -> dict[str, object]:
+        return {"ticker": ticker, "cik": 1, "forms": [], "filings": [], "processing": _processing()}
+
+    def sec_filing_document(
+        self, ticker: str, accession: str, primaryDocument: str, *, form: str = "10-Q"
+    ) -> dict[str, object]:
+        return {"ticker": ticker, "accession": accession, "primaryDocument": primaryDocument, "toc": [], "charCount": 0, "indexUrl": "", "documentUrl": "", "processing": _processing()}
+
+    def sec_filing_section(
+        self, ticker: str, accession: str, primaryDocument: str, sectionSlug: str, *, form: str = "10-Q"
+    ) -> dict[str, object]:
+        return {"ticker": ticker, "accession": accession, "sectionSlug": sectionSlug, "sectionTitle": "stub", "markdown": "", "charCount": 0, "documentUrl": "", "processing": _processing()}
+
+    def fear_greed(self) -> dict[str, object]:
+        return {"score": 50, "rating": "Neutral", "processing": _processing()}
+
+    def sp500_dcf(self) -> dict[str, object]:
+        return {"status": "ready", "currentIntrinsicValue": 5000.0, "processing": _processing()}
+
+    def beta_estimate(self, ticker: str) -> dict[str, object]:
+        return {"symbol": ticker, "beta": 1.0, "adjustedBeta": 1.0, "rSquared": 0.5, "processing": _processing()}
+
+    def top_companies(self) -> dict[str, object]:
+        return {"companies": [], "count": 0, "processing": _processing()}
+
+    def market_regime(self) -> dict[str, object]:
+        return {"summary": "stub", "confidence": "low", "signals": [], "processing": _processing()}
+
+    def trailing_forward_pe(self) -> dict[str, object]:
+        return {"date": "2026-04-01", "latestValue": 0.0, "history": [], "processing": _processing()}
+
+    def market_breadth(self) -> dict[str, object]:
+        return {"metrics": [], "processing": _processing()}
+
+    def watchlist(self) -> dict[str, object]:
+        return {"items": [], "count": 0, "processing": _processing()}
 
 
 def _fake_chart_opener(
@@ -599,6 +635,32 @@ def test_submit_user_message_raises_when_model_never_finishes() -> None:
         loop.submit_user_message(conversation.session_id, "keep going")
 
 
+def test_loop_guard_short_circuits_identical_tool_calls() -> None:
+    """Duplicate-call detection: after 2 identical (tool_name, args) invocations
+    in a single run, the 3rd+ call is short-circuited with a loop_guard error
+    instead of executing the real tool again. Verified via the service-level
+    call counter: the backing handler runs at most twice."""
+    call_count = {"market_snapshot": 0}
+
+    class _CountingService(_FakeService):
+        def market_snapshot(self, name: str, *, depth: str = "auto", view: str = "daily") -> dict[str, object]:
+            call_count["market_snapshot"] += 1
+            return super().market_snapshot(name, depth=depth, view=view)
+
+    loop = _loop(_LoopingModel(), max_steps=6, service=_CountingService())
+    conversation = loop.create_session(DEFAULT_HOSTED_AGENT_NAME, session_id="loop:guarded")
+
+    # LoopingModel always returns the same (tool_name, args). Without the guard
+    # this would execute market_snapshot 6 times (once per step).
+    with pytest.raises(RuntimeError, match="exceeded max_steps=6"):
+        loop.submit_user_message(conversation.session_id, "loop on me")
+
+    # Guard fires on the 3rd call → only the first 2 actually execute.
+    assert call_count["market_snapshot"] == 2, (
+        f"expected 2 real executions, got {call_count['market_snapshot']}"
+    )
+
+
 def test_submit_user_message_keeps_recoverable_tool_errors_inside_the_loop_until_model_recovers() -> None:
     model = _ToolErrorRecoveryModel()
     loop = _loop(model, service=_CurrentMarketStateFailureService())
@@ -704,135 +766,6 @@ def test_create_session_binds_guru_persona_prompt_without_manual_override() -> N
     assert "Warren Buffett" in conversation.messages[0].content
     assert "circle of competence" in conversation.messages[0].content
     assert "Time Horizon" in conversation.messages[0].content
-
-
-def test_build_guru_route_plan_prefers_marks_for_dcf_review() -> None:
-    loop = _loop_with_gurus(_DirectAnswerModel())
-    conversation = loop.create_session(
-        DEFAULT_HOSTED_AGENT_NAME,
-        session_id="loop:route-dcf",
-        metadata={"viewContextId": "view:dcf"},
-    )
-    loop.runtime.upsert_view_context(
-        "view:dcf",
-        route="/stock/AAPL/dcf",
-        page_type="dcf",
-        title="AAPL DCF",
-        selection={"dcfWorkbench": {"mode": "stock", "label": "AAPL"}},
-    )
-
-    plan = build_guru_route_plan(
-        loop=loop,
-        session_id=conversation.session_id,
-        user_message="Tell me which assumptions deserve a second look.",
-    )
-
-    assert plan is not None
-    assert plan.route_type == "valuation"
-    assert plan.selected_gurus == ("howard-marks",)
-
-
-def test_build_guru_route_plan_keeps_all_explicitly_named_gurus() -> None:
-    loop = _loop_with_gurus(_DirectAnswerModel())
-    conversation = loop.create_session(
-        DEFAULT_HOSTED_AGENT_NAME,
-        session_id="loop:route-explicit-all-gurus",
-    )
-
-    plan = build_guru_route_plan(
-        loop=loop,
-        session_id=conversation.session_id,
-        user_message="How would Buffett, Howard Marks, and Druckenmiller disagree on this setup?",
-    )
-
-    assert plan is not None
-    assert plan.route_type == "explicit"
-    assert plan.selected_gurus == ("warren-buffett", "howard-marks", "stanley-druckenmiller")
-
-
-def test_submit_user_message_treats_cycle_question_as_broad_market_marks_route() -> None:
-    loop = _loop_with_gurus(_RetryingMalformedGuruMemoModel())
-    conversation = loop.create_session(
-        DEFAULT_HOSTED_AGENT_NAME,
-        session_id="loop:marks-cycle-broad-market",
-    )
-
-    result = loop.submit_user_message(conversation.session_id, "From a Howard Marks lens, where are we in the cycle right now?")
-
-    assert result.final_message is not None
-    assert "Howard Marks lens" in result.final_message.content
-    assert result.final_message.metadata["selectedGurus"] == ["howard-marks"]
-
-
-def test_submit_user_message_routes_default_assistant_through_hidden_guru_sessions() -> None:
-    loop = _loop_with_gurus(_GuruRouterModel())
-    conversation = loop.create_session(
-        DEFAULT_HOSTED_AGENT_NAME,
-        session_id="loop:portfolio-route",
-        metadata={"viewContextId": "view:buffett"},
-    )
-    loop.runtime.upsert_view_context(
-        "view:buffett",
-        route="/market-insights",
-        page_type="market-insights",
-        title="Warren Buffett Portfolio View",
-        selection={"selectedGuru": "Warren Buffett"},
-        entities=[{"kind": "portfolio", "id": "Warren Buffett"}],
-    )
-
-    result = loop.submit_user_message(conversation.session_id, "What stands out in this portfolio?")
-
-    assert result.final_message is not None
-    assert "Warren Buffett lens" in result.final_message.content
-    assert "quality-first lens with durable businesses" in result.final_message.content
-    assert result.final_message.metadata["guruRouterApplied"] is True
-    assert result.final_message.metadata["guruDirectRender"] is True
-    assert result.final_message.metadata["selectedGurus"] == ["warren-buffett"]
-    assert [message.role for message in loop.get_conversation(conversation.session_id).snapshot()] == [
-        "system",
-        "user",
-        "assistant",
-    ]
-    assert tuple(record.session_id for record in loop.runtime.list_sessions()) == (conversation.session_id,)
-
-
-def test_submit_user_message_falls_back_when_guru_memo_validation_fails() -> None:
-    loop = _loop_with_gurus(_MalformedGuruMemoModel())
-    conversation = loop.create_session(
-        DEFAULT_HOSTED_AGENT_NAME,
-        session_id="loop:explicit-guru-failure",
-    )
-
-    result = loop.submit_user_message(conversation.session_id, "How would Howard Marks assess current market status?")
-
-    assert result.final_message is not None
-    assert "Howard Marks lens" in result.final_message.content
-    assert "low-confidence partial read" in result.final_message.content
-    assert result.final_message.metadata["guruRouterApplied"] is True
-    assert result.final_message.metadata["guruRouterFailure"] is True
-    assert result.final_message.metadata["guruRouterPartial"] is True
-    assert result.final_message.metadata["selectedGurus"] == ["howard-marks"]
-    reloaded = loop.get_conversation(conversation.session_id)
-    failures = reloaded.metadata.get("guruRouterFailures", [])
-    assert failures
-    assert failures[-1]["selectedGurus"] == ["howard-marks"]
-
-
-def test_submit_user_message_retries_once_after_guru_memo_validation_error() -> None:
-    model = _RetryingMalformedGuruMemoModel()
-    loop = _loop_with_gurus(model)
-    conversation = loop.create_session(
-        DEFAULT_HOSTED_AGENT_NAME,
-        session_id="loop:explicit-guru-memo-retry",
-    )
-
-    result = loop.submit_user_message(conversation.session_id, "How would Howard Marks assess current market status?")
-
-    assert result.final_message is not None
-    assert "Howard Marks lens" in result.final_message.content
-    assert result.final_message.metadata["guruRouterApplied"] is True
-    assert result.final_message.metadata["selectedGurus"] == ["howard-marks"]
-    assert model.calls == 1
 
 
 def test_buffett_broad_market_prompt_disallows_treating_indices_like_businesses() -> None:
@@ -1072,32 +1005,231 @@ def test_select_guru_worker_tools_uses_distinct_broad_market_allowlists() -> Non
     assert "macro_focus" not in druck_names
 
 
-def test_persona_render_lines_filters_garbled_druckenmiller_points() -> None:
-    registry = build_default_persona_registry()
-    druck = registry.get("stanley-druckenmiller")
+# ---------------------------------------------------------------------------
+# Orchestrator-as-tool architecture tests: the main assistant calls persona
+# subagents via consult_<persona> tools — no regex pre-route.
+# ---------------------------------------------------------------------------
 
-    lines = _persona_render_lines(
-        persona=druck,
-        memo=GuruResearchMemo(
-            guru="stanley-druckenmiller",
-            stance="neutral",
-            confidence=65,
-            thesis="The macro tradeoff is that animal spirits are back, but higher yields can still lean on multiples if earnings do not outrun them.",
-            key_evidence=[
-                "SPY up 3.54% and QQQ up 5.17% over the past week, which tells me the tape still has momentum.",
-                "Decliner trend often characterized (broad sensitivity) hypo-wide",
-                "Treasury yields can still compress equity multiples if liquidity does not improve.",
-            ],
-            risks=[
-                "rates .... adjusted format",
-                "If yields keep rising while breadth stays narrow, the index-level edge fades fast.",
-            ],
-            open_questions=["How will Treasury yield trends affect equity multiples if growth stabilizes?"],
-            citations=[],
-        ),
+
+class _SingleMemoGuruModel:
+    """Model stub that submits a valid guru memo on its first persona-session
+    turn. Orchestrator-side turns (no memo tool present) return a direct
+    no-op answer so only the persona subagent path is exercised."""
+
+    def complete(self, *, agent, session, conversation, messages, tools, **kwargs):
+        _ = agent, session, conversation, messages, kwargs
+        memo_tool = next(
+            (tool for tool in tools if tool.name == "submit_guru_research_memo"),
+            None,
+        )
+        if memo_tool is None:
+            return TerraFinModelTurn(
+                assistant_message=TerraFinConversationMessage(
+                    role="assistant",
+                    content="Orchestrator noop (test stub).",
+                ),
+            )
+        return TerraFinModelTurn(
+            assistant_message=None,
+            tool_calls=(
+                TerraFinToolCall(
+                    call_id=f"memo-{memo_tool.name}",
+                    tool_name=memo_tool.name,
+                    arguments={
+                        "guru": "warren-buffett",
+                        "stance": "neutral",
+                        "confidence": 70,
+                        "thesis": (
+                            "This reads like a wonderful business worth owning, "
+                            "but price discipline matters — only invest with a real margin of safety."
+                        ),
+                        "key_evidence": [
+                            "Simple business model with pricing power and owner-friendly capital allocation.",
+                            "Durable owner earnings justify patience while cash piles up optionality.",
+                        ],
+                        "risks": [
+                            "Capital intensity could erode long-term returns if reinvestment needs grow.",
+                        ],
+                        "open_questions": [
+                            "What price would leave enough margin of safety on a conservative valuation?",
+                        ],
+                        "citations": [],
+                    },
+                ),
+            ),
+            stop_reason="tool_calls",
+        )
+
+
+def test_consult_tools_exposed_only_to_default_assistant_not_to_personas() -> None:
+    """Persona subagents must NOT see consult_<persona> tools themselves —
+    otherwise Buffett → consult Marks → consult Druckenmiller → consult
+    Buffett could recurse. Filtering uses `is_internal_agent_definition`."""
+    loop = _loop_with_gurus(_DirectAnswerModel())
+
+    public_tools = {tool.name for tool in loop.tool_adapter.list_tools_for_agent(DEFAULT_HOSTED_AGENT_NAME)}
+    assert "consult_warren_buffett" in public_tools
+    assert "consult_howard_marks" in public_tools
+    assert "consult_stanley_druckenmiller" in public_tools
+
+    buffett_tools = {tool.name for tool in loop.tool_adapter.list_tools_for_agent("warren-buffett")}
+    assert "consult_warren_buffett" not in buffett_tools
+    assert "consult_howard_marks" not in buffett_tools
+    assert "consult_stanley_druckenmiller" not in buffett_tools
+
+
+def test_consult_tools_carry_contract_descriptions_that_guide_persona_choice() -> None:
+    loop = _loop_with_gurus(_DirectAnswerModel())
+    tools_by_name = {
+        tool.name: tool for tool in loop.tool_adapter.list_tools_for_agent(DEFAULT_HOSTED_AGENT_NAME)
+    }
+
+    buffett = tools_by_name["consult_warren_buffett"]
+    assert "business" in buffett.description.lower() and "moat" in buffett.description.lower()
+
+    marks = tools_by_name["consult_howard_marks"]
+    assert "cycle" in marks.description.lower() and "downside" in marks.description.lower()
+
+    druck = tools_by_name["consult_stanley_druckenmiller"]
+    assert "macro" in druck.description.lower() and "regime" in druck.description.lower()
+
+
+def test_consult_guru_method_returns_structured_memo_dict() -> None:
+    loop = _loop_with_gurus(_SingleMemoGuruModel())
+    conversation = loop.create_session(
+        DEFAULT_HOSTED_AGENT_NAME,
+        session_id="loop:consult-direct",
     )
 
-    rendered = "\n".join(lines)
-    assert "hypo-wide" not in rendered
-    assert "rates .... adjusted format" not in rendered
-    assert "Treasury yields can still compress equity multiples" in rendered
+    result = loop.consult_guru(
+        conversation.session_id,
+        "warren-buffett",
+        "Is this a good business to own long term?",
+    )
+
+    assert result["status"] == "ok"
+    assert result["guru"] == "warren-buffett"
+    assert 0 <= result["confidence"] <= 100
+    assert result["thesis"]
+    assert isinstance(result["keyEvidence"], list)
+    assert isinstance(result["risks"], list)
+
+
+def test_consult_guru_rejects_unknown_persona_with_status_error() -> None:
+    loop = _loop_with_gurus(_SingleMemoGuruModel())
+    conversation = loop.create_session(
+        DEFAULT_HOSTED_AGENT_NAME,
+        session_id="loop:consult-unknown",
+    )
+
+    result = loop.consult_guru(
+        conversation.session_id,
+        "unknown-guru",
+        "any question",
+    )
+
+    assert result["status"] == "error"
+    assert "Unknown persona" in result["reason"]
+
+
+def test_consult_tool_via_tool_adapter_returns_memo_payload() -> None:
+    """End-to-end: orchestrator dispatch `consult_*` through adapter →
+    loop.consult_guru → hidden persona session → memo dict as
+    tool_result payload."""
+    loop = _loop_with_gurus(_SingleMemoGuruModel())
+    conversation = loop.create_session(
+        DEFAULT_HOSTED_AGENT_NAME,
+        session_id="loop:consult-tool-adapter",
+    )
+
+    invocation = loop.tool_adapter.run_tool(
+        conversation.session_id,
+        "consult_warren_buffett",
+        {"question": "What about Apple's moat?"},
+    )
+
+    assert invocation.is_error is False
+    assert invocation.payload["status"] == "ok"
+    assert invocation.payload["guru"] == "warren-buffett"
+    assert invocation.payload["thesis"]
+
+
+def test_consult_tool_rejects_empty_question_argument() -> None:
+    loop = _loop_with_gurus(_SingleMemoGuruModel())
+    conversation = loop.create_session(
+        DEFAULT_HOSTED_AGENT_NAME,
+        session_id="loop:consult-empty-question",
+    )
+
+    with pytest.raises(ValueError, match="question"):
+        loop.tool_adapter.run_tool(
+            conversation.session_id,
+            "consult_warren_buffett",
+            {"question": ""},
+        )
+
+
+def test_persona_fit_broad_market_check_runs_on_user_message_under_consult_route() -> None:
+    """Under `route_type='consult'` (tool-call routes), the persona-fit
+    broad-market branch previously relied on `route_plan.matched_terms`
+    + `route_plan.reason` — both empty for live consult calls — so the
+    technical-hits rejection silently went dead. Fix: `user_message`
+    is now passed through to `_persona_fit_feedback`. Verify: a
+    broad-market Buffett memo that leans on RSI/MACD with no signature
+    concepts still gets rejected under `route_type='consult'`."""
+    registry = build_default_persona_registry()
+    buffett = registry.get("warren-buffett")
+
+    # Broad-market question (index-level, no ticker scope).
+    broad_question = "What should I think about the S&P 500 right now?"
+
+    # Technical-dominant memo with no signature concepts — should reject.
+    bad_memo = GuruResearchMemo(
+        guru="warren-buffett",
+        stance="neutral",
+        confidence=55,
+        thesis="Readings look mixed on the tape.",
+        key_evidence=[
+            "RSI has drifted toward overbought on the S&P 500.",
+            "MACD shows a fading crossover with upper Bollinger bands stretched.",
+        ],
+        risks=["Overbought conditions can extend further."],
+        open_questions=["What does the VIX term structure imply?"],
+        citations=[],
+    )
+    feedback = _persona_fit_feedback(
+        persona=buffett,
+        route_plan=GuruRoutePlan(route_type="consult"),
+        memo=bad_memo,
+        user_message=broad_question,
+    )
+    # Must return non-None feedback — that's what triggers the in-turn retry.
+    assert feedback is not None
+    assert (
+        "technical" in feedback.lower()
+        or "signature" in feedback.lower()
+        or "buffett" in feedback.lower()
+    )
+
+
+def test_submit_user_message_no_longer_pre_intercepts_with_guru_router() -> None:
+    """Regression: the old regex pre-route that hijacked `submit_user_message`
+    before the main model saw the request is gone. An analytical prompt
+    like 'how would Howard Marks see this' must flow into the orchestrator
+    model loop as a normal turn."""
+    loop = _loop_with_gurus(_DirectAnswerModel())
+    conversation = loop.create_session(
+        DEFAULT_HOSTED_AGENT_NAME,
+        session_id="loop:no-pre-route",
+    )
+
+    result = loop.submit_user_message(
+        conversation.session_id,
+        "How would Howard Marks see cycle risk right now?",
+    )
+
+    # Direct answer from the stub, not a guru-memo render.
+    assert result.final_message is not None
+    assert result.final_message.content == "No tool call needed for this greeting."
+    # No hidden intercept — `selectedGurus` metadata key is not present.
+    assert (result.final_message.metadata or {}).get("selectedGurus") is None
