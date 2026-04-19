@@ -398,6 +398,11 @@ class HostedAgentSessionCreateRequest(BaseModel):
 
 class HostedAgentMessageRequest(BaseModel):
     content: str = Field(min_length=1)
+    # Browser's current view-context id. The hosted session records the
+    # viewContextId it was created with, but a long-lived session outlives a
+    # single sessionStorage (new tab, cleared storage, etc.), so the browser
+    # sends its live id on every message and the server refreshes the link.
+    viewContextId: str | None = None
 
 
 class HostedApprovalDecisionRequest(BaseModel):

@@ -633,6 +633,11 @@ def create_agent_data_router() -> APIRouter:
             loop = get_hosted_agent_loop()
             record = _get_public_session_record(loop, session_id)
             _raise_if_hosted_runtime_unavailable(loop, session=record.context.session)
+            # Refresh the session's viewContextId link before running the loop
+            # so `current_view_context` reads the user's live view, not the
+            # stale snapshot captured at session-creation time.
+            if request.viewContextId:
+                loop.runtime.relink_session_view_context(session_id, request.viewContextId)
             run_result = loop.submit_user_message(session_id, request.content)
             record = _get_public_session_record(loop, session_id)
             return _run_response(
