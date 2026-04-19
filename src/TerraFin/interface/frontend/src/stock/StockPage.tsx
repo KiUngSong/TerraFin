@@ -385,7 +385,7 @@ const StockPage: React.FC = () => {
           </InsightCard>
         </section>
 
-        {!isMobile ? dcfResultCard : null}
+        {dcfResultCard}
 
         {!hideSecFilings ? (
           <section>
@@ -457,8 +457,6 @@ const StockPage: React.FC = () => {
             </InsightCard>
           </section>
         ) : null}
-
-        {isMobile ? dcfResultCard : null}
       </main>
     </div>
   );
