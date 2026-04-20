@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { FONT_FAMILY } from '../constants';
 import { computeRiskMetrics } from './riskMetrics';
 
@@ -7,6 +7,7 @@ interface RiskAnalyticsPanelProps {
   onClose: () => void;
   closes: number[];
   mobile?: boolean;
+  anchorRef?: React.RefObject<HTMLElement | null>;
 }
 
 const METRIC_UNITS: Record<string, string> = {
@@ -34,10 +35,19 @@ const METRIC_ORDER = [
   'CVaR 99%',
 ];
 
-const RiskAnalyticsPanel: React.FC<RiskAnalyticsPanelProps> = ({ visible, onClose, closes, mobile = false }) => {
+const RiskAnalyticsPanel: React.FC<RiskAnalyticsPanelProps> = ({ visible, onClose, closes, mobile = false, anchorRef }) => {
   const containerRef = useRef<HTMLDivElement>(null);
+  const [anchorRect, setAnchorRect] = useState<DOMRect | null>(null);
 
   const metrics = useMemo(() => (visible ? computeRiskMetrics(closes) : null), [visible, closes]);
+
+  useEffect(() => {
+    if (!visible || mobile || !anchorRef?.current) {
+      setAnchorRect(null);
+      return;
+    }
+    setAnchorRect(anchorRef.current.getBoundingClientRect());
+  }, [visible, mobile, anchorRef]);
 
   // Close on click outside
   useEffect(() => {
@@ -71,15 +81,22 @@ const RiskAnalyticsPanel: React.FC<RiskAnalyticsPanelProps> = ({ visible, onClos
 
   const sorted = METRIC_ORDER.filter((k) => metrics && k in metrics);
 
+  const desktopAnchored = !mobile && anchorRect != null;
+  const positionStyle: React.CSSProperties = mobile
+    ? { position: 'absolute', top: 'auto', right: 8, left: 8, bottom: 8 }
+    : desktopAnchored
+      ? {
+          position: 'fixed',
+          top: Math.round(anchorRect!.bottom) + 4,
+          right: Math.max(8, Math.round(window.innerWidth - anchorRect!.right)),
+        }
+      : { position: 'absolute', top: 8, right: 8 };
+
   return (
     <div
       ref={containerRef}
       style={{
-        position: 'absolute',
-        top: mobile ? 'auto' : 8,
-        right: mobile ? 8 : 8,
-        left: mobile ? 8 : 'auto',
-        bottom: mobile ? 8 : 'auto',
+        ...positionStyle,
         background: 'rgba(255,255,255,0.95)',
         border: '1px solid #e0e0e0',
         borderRadius: mobile ? 12 : 8,
@@ -87,8 +104,8 @@ const RiskAnalyticsPanel: React.FC<RiskAnalyticsPanelProps> = ({ visible, onClos
         zIndex: 100,
         fontFamily: FONT_FAMILY,
         fontSize: 12,
-        minWidth: mobile ? 'auto' : 200,
-        maxHeight: mobile ? 'min(60%, 320px)' : 'none',
+        minWidth: mobile ? 'auto' : 220,
+        maxHeight: mobile ? 'min(60%, 320px)' : 'min(60vh, 440px)',
         padding: 0,
         overflow: 'hidden',
         display: 'flex',

@@ -146,6 +146,7 @@ const ChartComponentInner = React.forwardRef<ChartComponentHandle, ChartComponen
   const [selectedIndicators, setSelectedIndicators] = useState<Set<string>>(DEFAULT_INDICATORS);
   const [riskCloses, setRiskCloses] = useState<number[]>([]);
   const [riskAnalyticsOpen, setRiskAnalyticsOpen] = useState(false);
+  const riskButtonRef = useRef<HTMLButtonElement>(null);
   const [visibleRange, setVisibleRange] = useState<{ from: string; to: string } | null>(null);
 
   const forcePercentage = payload?.forcePercentage === true;
@@ -753,6 +754,7 @@ const ChartComponentInner = React.forwardRef<ChartComponentHandle, ChartComponen
         onSelectedIndicatorsChange={setSelectedIndicators}
         onReset={handleResetIndicators}
         riskAnalyticsOpen={riskAnalyticsOpen}
+        riskButtonRef={riskButtonRef}
         onToggleRiskAnalytics={handleToggleRiskAnalytics}
         seriesCount={entries.length}
         maxSeries={MAX_CHART_SERIES}
@@ -808,6 +810,7 @@ const ChartComponentInner = React.forwardRef<ChartComponentHandle, ChartComponen
               onClose={() => setRiskAnalyticsOpen(false)}
               closes={riskCloses}
               mobile={isMobileChart}
+              anchorRef={riskButtonRef}
             />
           </>
         )}

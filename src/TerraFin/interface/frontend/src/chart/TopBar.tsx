@@ -23,6 +23,7 @@ interface TopBarProps {
   onReset: () => void;
   riskAnalyticsOpen: boolean;
   onToggleRiskAnalytics: () => void;
+  riskButtonRef?: React.Ref<HTMLButtonElement>;
   seriesCount: number;
   maxSeries: number;
   onSeriesAdded: (update: ChartUpdate | null, historyBySeries?: ChartHistoryBySeries | null) => void;
@@ -44,8 +45,10 @@ const Divider: React.FC<{ compact?: boolean }> = ({ compact = false }) => (
   />
 );
 
-const RiskAnalyticsButton: React.FC<{ active: boolean; onClick: () => void }> = ({ active, onClick }) => (
+const RiskAnalyticsButton = React.forwardRef<HTMLButtonElement, { active: boolean; onClick: () => void }>(
+  ({ active, onClick }, ref) => (
   <button
+    ref={ref}
     type="button"
     onClick={onClick}
     style={{
@@ -73,7 +76,9 @@ const RiskAnalyticsButton: React.FC<{ active: boolean; onClick: () => void }> = 
     </svg>
     Risk Analytics
   </button>
+  )
 );
+RiskAnalyticsButton.displayName = 'RiskAnalyticsButton';
 
 const ResetButton: React.FC<{ onClick: () => void }> = ({ onClick }) => (
   <button
@@ -185,6 +190,7 @@ const TopBar: React.FC<TopBarProps> = ({
   onReset,
   riskAnalyticsOpen,
   onToggleRiskAnalytics,
+  riskButtonRef,
   seriesCount,
   maxSeries,
   onSeriesAdded,
@@ -239,7 +245,7 @@ const TopBar: React.FC<TopBarProps> = ({
               {indicatorOptions.length > 0 ? (
                 <>
                   <Divider compact />
-                  <RiskAnalyticsButton active={riskAnalyticsOpen} onClick={onToggleRiskAnalytics} />
+                  <RiskAnalyticsButton ref={riskButtonRef} active={riskAnalyticsOpen} onClick={onToggleRiskAnalytics} />
                 </>
               ) : null}
             </div>
@@ -281,7 +287,7 @@ const TopBar: React.FC<TopBarProps> = ({
       {!isEmpty && (
         <>
           {indicatorOptions.length > 0 && (
-            <RiskAnalyticsButton active={riskAnalyticsOpen} onClick={onToggleRiskAnalytics} />
+            <RiskAnalyticsButton ref={riskButtonRef} active={riskAnalyticsOpen} onClick={onToggleRiskAnalytics} />
           )}
           <div style={{ width: 6 }} />
           {indicatorOptions.length > 0 && selectedIndicators.size > 0 && (
