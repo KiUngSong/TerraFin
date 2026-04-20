@@ -3,7 +3,12 @@ import DashboardHeader from '../dashboard/components/DashboardHeader';
 import InsightCard from '../dashboard/components/InsightCard';
 import DcfWorkbench from '../dcf/DcfWorkbench';
 import { clearAgentViewContextSource, publishAgentViewContext } from '../agent/viewContext';
+import { BREAKPOINTS } from '../shared/responsive';
 import MacroFocusPanel from './components/MacroFocusPanel';
+
+// Page reflows earlier than the shared tablet breakpoint (1023) because the
+// sidebar + macro chart + top-companies grid become cramped well above that.
+const NARROW_LAYOUT_BREAKPOINT = BREAKPOINTS.TABLET_MAX + 97; // 1120
 import PortfolioHoldingDetails from './components/PortfolioHoldingDetails';
 import PortfolioTreemap from './components/PortfolioTreemap';
 import TopCompaniesTable from './components/TopCompaniesTable';
@@ -52,7 +57,7 @@ const MarketInsightsPage: React.FC = () => {
   }, [macroChartReady]);
 
   useEffect(() => {
-    const updateLayoutMode = () => setIsNarrowLayout(window.innerWidth < 1120);
+    const updateLayoutMode = () => setIsNarrowLayout(window.innerWidth < NARROW_LAYOUT_BREAKPOINT);
     updateLayoutMode();
     window.addEventListener('resize', updateLayoutMode);
     return () => window.removeEventListener('resize', updateLayoutMode);

@@ -1,6 +1,7 @@
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { FONT_FAMILY } from '../constants';
+import { flipSideTooltip } from '../../shared/positioningUtils';
 
 const MAX_SELECTED = 5;
 const INFO_TOOLTIP_WIDTH = 280;
@@ -125,16 +126,14 @@ const IndicatorSelector: React.FC<IndicatorSelectorProps> = ({ options, selected
     if (!infoButton) return null;
 
     const rect = infoButton.getBoundingClientRect();
-    const canOpenRight =
-      rect.right + INFO_TOOLTIP_GAP + INFO_TOOLTIP_WIDTH + INFO_TOOLTIP_EDGE_PADDING <= window.innerWidth;
-    const placement: 'left' | 'right' = canOpenRight ? 'right' : 'left';
-    const left =
-      placement === 'right'
-        ? Math.min(rect.right + INFO_TOOLTIP_GAP, window.innerWidth - INFO_TOOLTIP_WIDTH - INFO_TOOLTIP_EDGE_PADDING)
-        : Math.max(INFO_TOOLTIP_EDGE_PADDING, rect.left - INFO_TOOLTIP_WIDTH - INFO_TOOLTIP_GAP);
-
+    const { top, left, placement } = flipSideTooltip(
+      rect,
+      INFO_TOOLTIP_WIDTH,
+      INFO_TOOLTIP_GAP,
+      INFO_TOOLTIP_EDGE_PADDING,
+    );
     return {
-      top: rect.top + rect.height / 2,
+      top,
       left,
       placement,
     };

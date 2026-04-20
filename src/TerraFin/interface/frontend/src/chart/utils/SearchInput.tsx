@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from
 import { createPortal } from 'react-dom';
 import { chartRequest } from '../api';
 import { CHART_API_BASE, FONT_FAMILY } from '../constants';
+import { flipSideTooltip } from '../../shared/positioningUtils';
 import type { ChartHistoryBySeries, ChartUpdate } from '../types';
 
 interface SearchInputProps {
@@ -146,19 +147,12 @@ const SearchInput: React.FC<SearchInputProps> = ({
     if (!infoButton) return null;
 
     const rect = infoButton.getBoundingClientRect();
-    const canOpenRight =
-      rect.right + INFO_TOOLTIP_GAP + INFO_TOOLTIP_WIDTH + INFO_TOOLTIP_EDGE_PADDING <= window.innerWidth;
-    const placement: 'left' | 'right' = canOpenRight ? 'right' : 'left';
-    const left =
-      placement === 'right'
-        ? Math.min(rect.right + INFO_TOOLTIP_GAP, window.innerWidth - INFO_TOOLTIP_WIDTH - INFO_TOOLTIP_EDGE_PADDING)
-        : Math.max(INFO_TOOLTIP_EDGE_PADDING, rect.left - INFO_TOOLTIP_WIDTH - INFO_TOOLTIP_GAP);
-
-    return {
-      top: rect.top + rect.height / 2,
-      left,
-      placement,
-    };
+    return flipSideTooltip(
+      rect,
+      INFO_TOOLTIP_WIDTH,
+      INFO_TOOLTIP_GAP,
+      INFO_TOOLTIP_EDGE_PADDING,
+    );
   };
 
   useLayoutEffect(() => {

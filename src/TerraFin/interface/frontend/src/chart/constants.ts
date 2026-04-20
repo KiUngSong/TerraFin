@@ -1,9 +1,14 @@
 export const POLL_MS = 2000;
 export const CHART_API_BASE = '/chart/api';
 
+import { BREAKPOINTS } from '../shared/responsive';
+
 export const TOP_BAR_HEIGHT = 40;
 export const BOTTOM_BAR_HEIGHT = 40;
-export const DEFAULT_CHART_COMPACT_BREAKPOINT = 1000;
+// Container-width threshold — NOT a viewport breakpoint. Drives toolbar
+// density only; sourced from the shared BREAKPOINTS object for visibility
+// even though it's applied to `el.clientWidth`, not `window.innerWidth`.
+export const DEFAULT_CHART_COMPACT_BREAKPOINT = BREAKPOINTS.CHART_COMPACT_MAX;
 export const DEFAULT_PRICE_SCALE_MARGINS = { top: 0.05, bottom: 0.02 } as const;
 
 export const FONT_FAMILY =

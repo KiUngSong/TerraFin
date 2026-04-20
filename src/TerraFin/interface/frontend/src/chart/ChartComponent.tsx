@@ -28,7 +28,6 @@ import type {
   SeriesHistoryStatus,
 } from './types';
 import { isChartMutation } from './updateUtils';
-import { getResponsiveTier } from '../shared/responsive';
 import { clearAgentViewContextSource, publishAgentViewContext } from '../agent/viewContext';
 
 const DEFAULT_INDICATORS = new Set(['ma-20', 'ma-60', 'ma-120']);
@@ -108,6 +107,11 @@ const ChartComponentInner = React.forwardRef<ChartComponentHandle, ChartComponen
   const entriesRef = useRef<ChartSeriesEntry[]>(initialEntries);
   const historyBySeriesRef = useRef<ChartHistoryBySeries>(initialHistoryBySeries ?? EMPTY_HISTORY_BY_SERIES);
   const [containerWidth, setContainerWidth] = useState(0);
+  // `isNarrow` is driven by the chart's *container* width (ResizeObserver on
+  // `rootRef`), NOT the viewport. It should only drive local toolbar density
+  // (TopBar/BottomBar `compact`). Do not pass it to children that make
+  // viewport-scale positioning decisions — use window.innerWidth + the shared
+  // positioningUtils helpers there instead.
   const [isNarrow, setIsNarrow] = useState(false);
   const [historyBySeries, setHistoryBySeries] = useState<ChartHistoryBySeries>(
     initialHistoryBySeries ?? EMPTY_HISTORY_BY_SERIES
@@ -710,8 +714,6 @@ const ChartComponentInner = React.forwardRef<ChartComponentHandle, ChartComponen
     setSelectedIndicators(new Set());
   }, []);
 
-  const isMobileChart = getResponsiveTier(containerWidth || compactBreakpoint) === 'mobile';
-
   if (error) {
     return (
       <div style={{ padding: 20, color: '#c62828', fontFamily: FONT_FAMILY }}>
@@ -809,7 +811,6 @@ const ChartComponentInner = React.forwardRef<ChartComponentHandle, ChartComponen
               visible={riskAnalyticsOpen}
               onClose={() => setRiskAnalyticsOpen(false)}
               closes={riskCloses}
-              mobile={isMobileChart}
               anchorRef={riskButtonRef}
             />
           </>

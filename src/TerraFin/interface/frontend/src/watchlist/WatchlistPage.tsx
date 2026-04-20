@@ -1,7 +1,13 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import DashboardHeader from '../dashboard/components/DashboardHeader';
 import InsightCard from '../dashboard/components/InsightCard';
+import { BREAKPOINTS } from '../shared/responsive';
 import { useWatchlist } from './useWatchlist';
+
+// Watchlist reflows slightly later than MarketInsights (1120) because the
+// watchlist table needs a bit more horizontal room before a two-column grid
+// becomes readable. Kept local rather than shared to document the intent.
+const NARROW_LAYOUT_BREAKPOINT = BREAKPOINTS.TABLET_MAX + 157; // 1180
 
 const WatchlistPage: React.FC = () => {
   const [searchValue, setSearchValue] = useState('');
@@ -38,7 +44,7 @@ const WatchlistPage: React.FC = () => {
   const managementEnabled = backendConfigured;
 
   useEffect(() => {
-    const updateLayoutMode = () => setIsNarrowLayout(window.innerWidth < 1180);
+    const updateLayoutMode = () => setIsNarrowLayout(window.innerWidth < NARROW_LAYOUT_BREAKPOINT);
     updateLayoutMode();
     window.addEventListener('resize', updateLayoutMode);
     return () => window.removeEventListener('resize', updateLayoutMode);

@@ -1,5 +1,6 @@
 import React from 'react';
 import { createPortal } from 'react-dom';
+import { placeBelowOrAbove } from '../shared/positioningUtils';
 
 const VIEWPORT_MARGIN = 12;
 const PANEL_GAP = 8;
@@ -25,16 +26,11 @@ const InfoHint: React.FC<{ text: string; compact?: boolean }> = ({ text, compact
     const buttonRect = buttonRef.current.getBoundingClientRect();
     const width = compact ? 228 : 260;
     const panelHeight = panelRef.current?.offsetHeight ?? 0;
-
-    let left = compact ? buttonRect.left : buttonRect.right - width;
-    left = Math.min(left, window.innerWidth - width - VIEWPORT_MARGIN);
-    left = Math.max(VIEWPORT_MARGIN, left);
-
-    let top = buttonRect.bottom + PANEL_GAP;
-    if (panelHeight > 0 && top + panelHeight > window.innerHeight - VIEWPORT_MARGIN) {
-      top = Math.max(VIEWPORT_MARGIN, buttonRect.top - panelHeight - PANEL_GAP);
-    }
-
+    const { top, left } = placeBelowOrAbove(buttonRect, width, panelHeight, {
+      gap: PANEL_GAP,
+      edgeMargin: VIEWPORT_MARGIN,
+      align: compact ? 'left' : 'right',
+    });
     setPosition({ top, left, width });
   }, [compact]);
 

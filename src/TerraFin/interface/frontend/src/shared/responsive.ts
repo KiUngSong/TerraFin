@@ -1,7 +1,17 @@
 import { useEffect, useState } from 'react';
 
-export const MOBILE_MAX_WIDTH = 767;
-export const TABLET_MAX_WIDTH = 1023;
+// Canonical viewport-width breakpoints. Anything that makes a *viewport*-scale
+// decision (page grid reflow, full-screen modal, fixed widget) should read
+// these. Container-width decisions (e.g. ChartComponent's ResizeObserver) are
+// intentionally separate and should NOT be routed through these constants.
+export const BREAKPOINTS = {
+  MOBILE_MAX: 767,
+  TABLET_MAX: 1023,
+  CHART_COMPACT_MAX: 1000,
+} as const;
+
+export const MOBILE_MAX_WIDTH = BREAKPOINTS.MOBILE_MAX;
+export const TABLET_MAX_WIDTH = BREAKPOINTS.TABLET_MAX;
 
 export type ResponsiveTier = 'mobile' | 'tablet' | 'desktop';
 

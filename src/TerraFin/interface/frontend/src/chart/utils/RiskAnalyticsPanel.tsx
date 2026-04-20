@@ -1,12 +1,12 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { FONT_FAMILY } from '../constants';
+import { dropdownBelowAnchorRight } from '../../shared/positioningUtils';
 import { computeRiskMetrics } from './riskMetrics';
 
 interface RiskAnalyticsPanelProps {
   visible: boolean;
   onClose: () => void;
   closes: number[];
-  mobile?: boolean;
   anchorRef?: React.RefObject<HTMLElement | null>;
 }
 
@@ -35,7 +35,7 @@ const METRIC_ORDER = [
   'CVaR 99%',
 ];
 
-const RiskAnalyticsPanel: React.FC<RiskAnalyticsPanelProps> = ({ visible, onClose, closes, mobile: _mobile = false, anchorRef }) => {
+const RiskAnalyticsPanel: React.FC<RiskAnalyticsPanelProps> = ({ visible, onClose, closes, anchorRef }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const [anchorRect, setAnchorRect] = useState<DOMRect | null>(null);
 
@@ -82,11 +82,7 @@ const RiskAnalyticsPanel: React.FC<RiskAnalyticsPanelProps> = ({ visible, onClos
   const sorted = METRIC_ORDER.filter((k) => metrics && k in metrics);
 
   const positionStyle: React.CSSProperties = anchorRect
-    ? {
-        position: 'fixed',
-        top: Math.round(anchorRect.bottom) + 4,
-        right: Math.max(8, Math.round(window.innerWidth - anchorRect.right)),
-      }
+    ? { position: 'fixed', ...dropdownBelowAnchorRight(anchorRect) }
     : { position: 'fixed', top: 48, right: 8 };
 
   return (

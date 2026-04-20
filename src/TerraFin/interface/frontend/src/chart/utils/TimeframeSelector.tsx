@@ -2,6 +2,7 @@ import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { chartRequest } from '../api';
 import { DAYS_OPTIONS, FONT_FAMILY, VIEW_LETTER } from '../constants';
+import { dropdownBelowAnchorLeft } from '../../shared/positioningUtils';
 import type { ChartHistoryBySeries, ChartSnapshot } from '../types';
 
 interface TimeframeSelectorProps {
@@ -68,15 +69,7 @@ const TimeframeSelector: React.FC<TimeframeSelectorProps> = ({
       return;
     }
     const rect = compactButtonRef.current.getBoundingClientRect();
-    const menuWidth = 148;
-    const left = Math.min(
-      Math.max(12, rect.left),
-      Math.max(12, window.innerWidth - menuWidth - 12)
-    );
-    setCompactMenuPos({
-      top: rect.bottom + 6,
-      left,
-    });
+    setCompactMenuPos(dropdownBelowAnchorLeft(rect, 148));
   }, [compact, dropdownOpen]);
 
   useEffect(() => {
