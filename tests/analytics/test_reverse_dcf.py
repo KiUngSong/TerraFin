@@ -47,7 +47,7 @@ def _stock_template() -> DCFInputTemplate:
         assumptions={
             "beta": 1.2,
             "equityRiskPremiumPct": 5.0,
-            "cashflowSource": "quarterly_ttm",
+            "cashflowSource": "3yr_avg",
             "growthSource": "eps",
         },
         data_quality={"mode": "live", "sources": ["test"]},

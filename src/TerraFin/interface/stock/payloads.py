@@ -4,6 +4,15 @@ from typing import Any
 
 from fastapi import HTTPException
 
+from TerraFin.analytics.analysis.fundamental.dcf.inputs import (
+    _annual_fcf_series,
+    _latest_annual_fcf,
+    _latest_stock_fcf,
+    _quarterly_ttm_fcf,
+    _safe_float,
+    _select_stock_fcf_base,
+    _three_year_avg_fcf,
+)
 from TerraFin.data import DataFactory
 from TerraFin.data.providers.corporate.filings.sec_edgar import (
     build_toc,
@@ -13,6 +22,7 @@ from TerraFin.data.providers.corporate.filings.sec_edgar import (
     parse_sec_filing,
 )
 from TerraFin.data.providers.corporate.filings.sec_edgar.filing import SecEdgarError
+from TerraFin.data.providers.corporate.fundamentals import get_corporate_data
 from TerraFin.data.providers.market.ticker_info import get_ticker_earnings, get_ticker_info
 from TerraFin.interface.market_insights.payloads import canonical_macro_name, resolve_macro_type
 
@@ -63,6 +73,156 @@ def build_earnings_payload(ticker: str) -> dict[str, Any]:
     return {
         "ticker": normalized,
         "earnings": [dict(record) for record in records],
+    }
+
+
+def build_fcf_history_payload(ticker: str, *, years: int = 10) -> dict[str, Any]:
+    """Annual FCF + FCF/share series and TTM FCF/share.
+
+    Per-year shares are not reliably available from yfinance cashflow data, so
+    every year is divided by current sharesOutstanding. Acceptable for
+    visualization (helps users gauge what a "realistic" FCF/share looks like
+    for the company), not for precise per-year ownership accounting. The
+    response carries a `sharesNote` so the client can disclose this caveat.
+    """
+    normalized = ticker.upper()
+    info = get_ticker_info(normalized) or {}
+    shares_outstanding = _safe_float(info.get("sharesOutstanding"))
+
+    cashflow_quarter = get_corporate_data(normalized, "cashflow", period="quarter")
+    cashflow_annual = get_corporate_data(normalized, "cashflow", period="annual")
+    annual_series = _annual_fcf_series(cashflow_annual)
+    ttm_fcf, ttm_source = _latest_stock_fcf(cashflow_quarter, cashflow_annual)
+
+    import math
+
+    def _finite_or_none(value: Any) -> float | None:
+        try:
+            parsed = float(value) if value is not None else None
+        except (TypeError, ValueError):
+            return None
+        if parsed is None or not math.isfinite(parsed):
+            return None
+        return parsed
+
+    history: list[dict[str, Any]] = []
+    if (
+        annual_series is not None
+        and cashflow_annual is not None
+        and "date" in cashflow_annual.columns
+    ):
+        dates = cashflow_annual["date"].tolist()
+        for date_value, fcf_value in zip(dates[:years], annual_series.head(years).tolist()):
+            fcf_float = _finite_or_none(fcf_value)
+            year_label = str(date_value)[:4] if date_value else None
+            fcf_per_share = (
+                fcf_float / shares_outstanding
+                if fcf_float is not None and shares_outstanding and shares_outstanding > 0
+                else None
+            )
+            history.append(
+                {
+                    "year": year_label,
+                    "fcf": fcf_float,
+                    "fcfPerShare": fcf_per_share,
+                }
+            )
+
+    def _per_share(total: float | None) -> float | None:
+        if total is None or not shares_outstanding or shares_outstanding <= 0:
+            return None
+        return total / shares_outstanding
+
+    ttm_fcf_per_share = _finite_or_none(_per_share(ttm_fcf))
+    three_year_avg = _finite_or_none(_per_share(_three_year_avg_fcf(cashflow_annual)))
+    latest_annual = _finite_or_none(_per_share(_latest_annual_fcf(cashflow_annual)))
+    ttm_per_share_candidate = _finite_or_none(_per_share(_quarterly_ttm_fcf(cashflow_quarter)))
+
+    # Rolling TTM series — each point is a "trailing 12 months of FCF" ending
+    # at a specific date. We assemble two sources:
+    #   (a) Annual year-end values: by definition the annual FCF for fiscal
+    #       year Y equals the TTM at that year's end date. Gives us 4-5 points
+    #       spread across years.
+    #   (b) Quarterly windows from yfinance's last 5-6 quarters: 1-3 additional
+    #       interim points (e.g., 25Q3) that fill in between year-ends.
+    # Combined, we get 6-7 points spanning multiple years.
+    rolling_ttm: list[dict[str, Any]] = []
+    seen_dates: set[str] = set()
+
+    # (a) Annual year-ends. Walk oldest → newest so the resulting list is
+    # chronological once we extend with quarterly points and sort.
+    if (
+        annual_series is not None
+        and cashflow_annual is not None
+        and "date" in cashflow_annual.columns
+    ):
+        annual_dates = cashflow_annual["date"].tolist()
+        for date_value, fcf_value in zip(
+            reversed(annual_dates[:years]),
+            reversed(annual_series.head(years).tolist()),
+        ):
+            fcf_float = _finite_or_none(fcf_value)
+            if fcf_float is None or not date_value:
+                continue
+            iso = str(date_value)[:10]
+            per_share = _finite_or_none(_per_share(fcf_float))
+            if per_share is None:
+                continue
+            rolling_ttm.append({"asOf": iso, "fcfPerShare": per_share})
+            seen_dates.add(iso)
+
+    # (b) Quarterly rolling windows.
+    if cashflow_quarter is not None:
+        quarter_series = _annual_fcf_series(cashflow_quarter)
+        if (
+            quarter_series is not None
+            and "date" in cashflow_quarter.columns
+        ):
+            quarter_dates = cashflow_quarter["date"].tolist()
+            n = len(quarter_series)
+            for end_idx in range(n - 4, -1, -1):
+                window = quarter_series.iloc[end_idx : end_idx + 4]
+                if window.dropna().shape[0] < 4:
+                    continue
+                date_value = quarter_dates[end_idx] if end_idx < len(quarter_dates) else None
+                if not date_value:
+                    continue
+                iso = str(date_value)[:10]
+                if iso in seen_dates:
+                    continue  # already covered by an annual year-end
+                window_sum = float(window.sum())
+                per_share = _finite_or_none(_per_share(window_sum))
+                if per_share is None:
+                    continue
+                rolling_ttm.append({"asOf": iso, "fcfPerShare": per_share})
+                seen_dates.add(iso)
+
+    rolling_ttm.sort(key=lambda p: p["asOf"])
+
+    # Which source would "auto" resolve to given current data? Used by the UI to show
+    # "Auto → 3yr Avg" so the user knows what Auto is actually picking.
+    _, auto_selected_source = _select_stock_fcf_base(
+        cashflow_quarter, cashflow_annual, source="auto"
+    )
+
+    return {
+        "ticker": normalized,
+        "sharesOutstanding": shares_outstanding,
+        "ttmFcfPerShare": ttm_fcf_per_share,
+        "ttmSource": ttm_source,
+        "rollingTtm": rolling_ttm,
+        "candidates": {
+            "threeYearAvg": three_year_avg,
+            "latestAnnual": latest_annual,
+            "ttm": ttm_per_share_candidate,
+        },
+        "autoSelectedSource": auto_selected_source,
+        "sharesNote": (
+            "Per-year FCF/share is computed using current sharesOutstanding; "
+            "historical share counts are not used and so dilution/buybacks "
+            "are not reflected year-over-year."
+        ),
+        "history": list(reversed(history)),  # oldest first for left-to-right plotting
     }
 
 

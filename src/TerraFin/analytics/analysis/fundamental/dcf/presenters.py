@@ -129,6 +129,11 @@ def _scenario_result_for_index_schedule(
     )
 
 
+def _has_turnaround_schedule(template: DCFInputTemplate) -> bool:
+    turnaround = template.assumptions.get("turnaround")
+    return bool(turnaround and turnaround.get("cashFlowsPerShare"))
+
+
 def _scenario_result(template: DCFInputTemplate, scenario: ScenarioDefinition) -> DiscountedCashFlowResult:
     if template.base_cash_flow_per_share is None or template.base_growth_pct is None:
         raise ValueError("Template does not have enough data for valuation")
@@ -136,12 +141,33 @@ def _scenario_result(template: DCFInputTemplate, scenario: ScenarioDefinition) -
         return _scenario_result_for_index_schedule(template, scenario)
 
     terminal_growth_pct = template.terminal_growth_pct + (scenario.terminal_growth_shift_bps / 100.0)
-    growth_rates_pct = build_linear_growth_rates(
-        template.base_growth_pct + scenario.growth_shift_pct,
-        terminal_growth_pct,
-        len(template.yearly_risk_free_rates_pct),
-    )
-    cash_flows = project_cash_flows(template.base_cash_flow_per_share, growth_rates_pct)
+    if _has_turnaround_schedule(template):
+        turnaround = template.assumptions["turnaround"]
+        base_cash_flows = [float(v) for v in turnaround["cashFlowsPerShare"]]
+        # Apply the scenario's growth_shift_pct as a year-over-year compounding
+        # bump so the three scenarios (bear/base/bull) meaningfully differ even
+        # with a user-supplied schedule. scenario.growth_shift_pct is in pct
+        # points per year (e.g., -2 / 0 / +2), applied cumulatively.
+        shift = float(scenario.growth_shift_pct)
+        cash_flows = [
+            cf * ((1.0 + (shift / 100.0)) ** (idx + 1))
+            for idx, cf in enumerate(base_cash_flows)
+        ]
+        growth_rates_pct: list[float] = []
+        previous = turnaround.get("startingCashFlowPerShare", cash_flows[0])
+        for cf in cash_flows:
+            if previous == 0:
+                growth_rates_pct.append(0.0)
+            else:
+                growth_rates_pct.append(((cf / previous) - 1.0) * 100.0)
+            previous = cf
+    else:
+        growth_rates_pct = build_linear_growth_rates(
+            template.base_growth_pct + scenario.growth_shift_pct,
+            terminal_growth_pct,
+            len(template.yearly_risk_free_rates_pct),
+        )
+        cash_flows = project_cash_flows(template.base_cash_flow_per_share, growth_rates_pct)
     discount_shift_pct = scenario.discount_shift_bps / 100.0
     discount_rates_pct = [
         risk_free_rate_pct + template.discount_spread_pct + discount_shift_pct
@@ -317,8 +343,15 @@ def build_sp500_dcf_payload(overrides=None) -> dict[str, Any]:
     return _blend_sp500_payload(shareholder_payload, earnings_power_payload)
 
 
-def build_stock_dcf_payload(ticker: str, overrides=None) -> dict[str, Any]:
-    return build_valuation_payload(build_stock_template(ticker, overrides=overrides))
+def build_stock_dcf_payload(
+    ticker: str,
+    overrides=None,
+    *,
+    projection_years: int | None = None,
+) -> dict[str, Any]:
+    return build_valuation_payload(
+        build_stock_template(ticker, overrides=overrides, projection_years=projection_years)
+    )
 
 
 def _blend_sp500_payload(

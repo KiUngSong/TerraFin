@@ -18,6 +18,8 @@ from .rates import fit_current_treasury_curve
 DEFAULT_ERP_PCT = 5.0
 DEFAULT_TERMINAL_GROWTH_PCT = 3.0
 DEFAULT_STOCK_GROWTH_PCT = 6.0
+DEFAULT_STOCK_PROJECTION_YEARS = 5
+ALLOWED_STOCK_PROJECTION_YEARS = (5, 10, 15)
 SP500Methodology = Literal["shareholder_yield", "earnings_power"]
 
 _SP500_DEFAULTS_PATH = Path(__file__).with_name("sp500_defaults.json")
@@ -128,6 +130,72 @@ def _latest_stock_fcf(cashflow_quarter: pd.DataFrame | None, cashflow_annual: pd
     if annual_fcf is not None and not annual_fcf.dropna().empty:
         return float(annual_fcf.iloc[0]), "annual"
 
+    return None, "missing"
+
+
+def _three_year_avg_fcf(cashflow_annual: pd.DataFrame | None) -> float | None:
+    series = _annual_fcf_series(cashflow_annual)
+    if series is None:
+        return None
+    values = series.dropna().head(3)
+    if len(values) < 2:
+        return None
+    return float(values.mean())
+
+
+def _latest_annual_fcf(cashflow_annual: pd.DataFrame | None) -> float | None:
+    series = _annual_fcf_series(cashflow_annual)
+    if series is None:
+        return None
+    values = series.dropna()
+    if values.empty:
+        return None
+    return float(values.iloc[0])
+
+
+def _quarterly_ttm_fcf(cashflow_quarter: pd.DataFrame | None) -> float | None:
+    series = _annual_fcf_series(cashflow_quarter)
+    if series is None or len(series.dropna()) < 4:
+        return None
+    return float(series.head(4).sum())
+
+
+def _select_stock_fcf_base(
+    cashflow_quarter: pd.DataFrame | None,
+    cashflow_annual: pd.DataFrame | None,
+    *,
+    source: str = "auto",
+) -> tuple[float | None, str]:
+    """Pick the base FCF for DCF from one of four sources.
+
+    source: "auto" | "3yr_avg" | "ttm" | "latest_annual".
+    Under "auto", cascade prefers normalized over recent: 3yr_avg → annual → quarterly_ttm.
+    This is the professional default — DCF capitalizes FCF into perpetuity, so the base
+    should be a defensible run-rate, not a single-period observation that may reflect
+    working-capital swings or capex lumpiness.
+    Explicit picks do not fall back; if the requested source has no data, returns
+    (None, "missing") so callers surface an accurate insufficient-data message.
+    """
+    if source == "3yr_avg":
+        value = _three_year_avg_fcf(cashflow_annual)
+        return (value, "3yr_avg") if value is not None else (None, "missing")
+    if source == "ttm":
+        value = _quarterly_ttm_fcf(cashflow_quarter)
+        return (value, "quarterly_ttm") if value is not None else (None, "missing")
+    if source == "latest_annual":
+        value = _latest_annual_fcf(cashflow_annual)
+        return (value, "annual") if value is not None else (None, "missing")
+
+    # auto cascade
+    value = _three_year_avg_fcf(cashflow_annual)
+    if value is not None:
+        return value, "3yr_avg"
+    value = _latest_annual_fcf(cashflow_annual)
+    if value is not None:
+        return value, "annual"
+    value = _quarterly_ttm_fcf(cashflow_quarter)
+    if value is not None:
+        return value, "quarterly_ttm"
     return None, "missing"
 
 
@@ -310,18 +378,89 @@ def build_sp500_template(
     )
 
 
+def _resolve_projection_years(requested: int | None) -> int:
+    if requested is None:
+        return DEFAULT_STOCK_PROJECTION_YEARS
+    value = int(requested)
+    if value not in ALLOWED_STOCK_PROJECTION_YEARS:
+        raise ValueError(
+            f"projection_years must be one of {ALLOWED_STOCK_PROJECTION_YEARS}, got {value}"
+        )
+    return value
+
+
+def _turnaround_fields_complete(overrides: StockDCFOverrides | None) -> bool:
+    if overrides is None:
+        return False
+    return (
+        overrides.breakeven_year is not None
+        and overrides.breakeven_cash_flow_per_share is not None
+        and overrides.post_breakeven_growth_pct is not None
+    )
+
+
+def _build_turnaround_schedule(
+    *,
+    starting_cash_flow_per_share: float,
+    breakeven_year: int,
+    breakeven_cash_flow_per_share: float,
+    post_breakeven_growth_pct: float,
+    terminal_growth_pct: float,
+    projection_years: int,
+) -> list[float]:
+    """Return explicit FCF/share schedule of length `projection_years`.
+
+    Pre-breakeven years: linear interpolation from `starting_cash_flow_per_share`
+    (possibly negative) to `breakeven_cash_flow_per_share` at year `breakeven_year`.
+    Post-breakeven years: compound at `post_breakeven_growth_pct` with a linear
+    fade toward `terminal_growth_pct` across the remaining horizon.
+    """
+    if projection_years <= 0:
+        return []
+    if breakeven_year < 1:
+        raise ValueError("breakeven_year must be >= 1")
+    if breakeven_year > projection_years:
+        raise ValueError("breakeven_year must not exceed projection_years")
+
+    schedule: list[float] = []
+    start = float(starting_cash_flow_per_share)
+    breakeven = float(breakeven_cash_flow_per_share)
+    for year in range(1, breakeven_year + 1):
+        fraction = year / breakeven_year
+        schedule.append(start + (breakeven - start) * fraction)
+
+    remaining = projection_years - breakeven_year
+    if remaining <= 0:
+        return schedule
+
+    initial_growth = float(post_breakeven_growth_pct)
+    terminal_growth = float(terminal_growth_pct)
+    current = schedule[-1]
+    for idx in range(remaining):
+        if remaining == 1:
+            growth_pct = terminal_growth
+        else:
+            progress = idx / (remaining - 1)
+            growth_pct = initial_growth + (terminal_growth - initial_growth) * progress
+        current = current * (1.0 + (growth_pct / 100.0))
+        schedule.append(current)
+    return schedule
+
+
 def build_stock_template(
     ticker: str,
     *,
     as_of: date | None = None,
     data_factory: DataFactory | None = None,
     overrides: StockDCFOverrides | None = None,
+    projection_years: int | None = None,
 ) -> DCFInputTemplate:
     normalized = ticker.upper()
     snapshot_date = as_of or date.today()
     factory = data_factory or DataFactory()
     warnings: list[str] = []
     curve = fit_current_treasury_curve(data_factory=factory, as_of=snapshot_date)
+    horizon = _resolve_projection_years(projection_years)
 
     info = get_ticker_info(normalized) or {}
     current_price = _coalesce_positive(
@@ -361,7 +500,14 @@ def build_stock_template(
     cashflow_quarter = get_corporate_data(normalized, "cashflow", period="quarter")
     cashflow_annual = get_corporate_data(normalized, "cashflow", period="annual")
     income_annual = get_corporate_data(normalized, "income", period="annual")
-    latest_fcf, cashflow_source = _latest_stock_fcf(cashflow_quarter, cashflow_annual)
+    fcf_base_source = (
+        overrides.fcf_base_source
+        if overrides is not None and overrides.fcf_base_source is not None
+        else "auto"
+    )
+    latest_fcf, cashflow_source = _select_stock_fcf_base(
+        cashflow_quarter, cashflow_annual, source=fcf_base_source
+    )
 
     if latest_fcf is None and not (overrides and overrides.base_cash_flow_per_share is not None):
         warnings.append("Free cash flow data is unavailable.")
@@ -406,10 +552,9 @@ def build_stock_template(
                 growth_source = "default"
                 warnings.append("Growth was inferred from the default 6% fallback after EPS, revenue, and FCF growth inputs were unavailable.")
 
-    if derived_base_cash_flow_per_share is not None and derived_base_cash_flow_per_share <= 0:
-        warnings.append("Free cash flow per share is not positive; valuation marked as insufficient data.")
-    elif base_cash_flow_per_share is not None and base_cash_flow_per_share <= 0:
-        warnings.append("Free cash flow per share is not positive; valuation marked as insufficient data.")
+    turnaround_active = _turnaround_fields_complete(overrides)
+    turnaround_schedule: list[float] | None = None
+    turnaround_assumptions: dict[str, Any] | None = None
 
     equity_risk_premium_pct = _coalesce_positive(
         overrides.equity_risk_premium_pct if overrides else None,
@@ -419,15 +564,87 @@ def build_stock_template(
         overrides.terminal_growth_pct if overrides else None,
         DEFAULT_TERMINAL_GROWTH_PCT,
     )
+
+    if turnaround_active and overrides is not None:
+        breakeven_year = int(overrides.breakeven_year)  # type: ignore[arg-type]
+        breakeven_cash_flow = float(overrides.breakeven_cash_flow_per_share)  # type: ignore[arg-type]
+        post_breakeven_growth = float(overrides.post_breakeven_growth_pct)  # type: ignore[arg-type]
+        if breakeven_year > horizon:
+            raise ValueError("breakeven_year must not exceed projection_years")
+        starting_cash_flow = (
+            float(overrides.base_cash_flow_per_share)
+            if overrides.base_cash_flow_per_share is not None
+            else (derived_base_cash_flow_per_share if derived_base_cash_flow_per_share is not None else 0.0)
+        )
+        turnaround_schedule = _build_turnaround_schedule(
+            starting_cash_flow_per_share=starting_cash_flow,
+            breakeven_year=breakeven_year,
+            breakeven_cash_flow_per_share=breakeven_cash_flow,
+            post_breakeven_growth_pct=post_breakeven_growth,
+            terminal_growth_pct=terminal_growth_pct,
+            projection_years=horizon,
+        )
+        turnaround_assumptions = {
+            "active": True,
+            "breakevenYear": breakeven_year,
+            "breakevenCashFlowPerShare": breakeven_cash_flow,
+            "postBreakevenGrowthPct": post_breakeven_growth,
+            "startingCashFlowPerShare": starting_cash_flow,
+            "cashFlowsPerShare": [float(v) for v in turnaround_schedule],
+        }
+        # In turnaround mode, expose the year-1 projected FCF/share as the
+        # template's displayed base so the headline panel still has a value.
+        base_cash_flow_per_share = turnaround_schedule[0]
+        cashflow_source = "turnaround_schedule"
+        base_growth_pct = post_breakeven_growth
+        growth_source = "turnaround_schedule"
+
+    if not turnaround_active:
+        if derived_base_cash_flow_per_share is not None and derived_base_cash_flow_per_share <= 0:
+            warnings.append("Free cash flow per share is not positive; valuation marked as insufficient data.")
+        elif base_cash_flow_per_share is not None and base_cash_flow_per_share <= 0:
+            warnings.append("Free cash flow per share is not positive; valuation marked as insufficient data.")
+
     quality_mode = _classify_quality(
         fallback_used=curve.fallback_used or growth_source == "default",
         warning_count=len(warnings),
     )
-    status = (
-        "ready"
-        if current_price is not None and base_cash_flow_per_share is not None and base_cash_flow_per_share > 0
-        else "insufficient_data"
-    )
+    if turnaround_active:
+        last_projected = turnaround_schedule[-1] if turnaround_schedule else None
+        status = (
+            "ready"
+            if current_price is not None and last_projected is not None and last_projected > 0
+            else "insufficient_data"
+        )
+        if status != "ready" and current_price is not None:
+            warnings.append(
+                "Turnaround schedule does not end with a positive FCF/share at the projection horizon."
+            )
+    else:
+        status = (
+            "ready"
+            if current_price is not None and base_cash_flow_per_share is not None and base_cash_flow_per_share > 0
+            else "insufficient_data"
+        )
+
+    assumptions: dict[str, Any] = {
+        "baseCashFlowPerShare": base_cash_flow_per_share,
+        "baseGrowthPct": base_growth_pct,
+        "growthSource": growth_source,
+        "cashflowSource": cashflow_source,
+        "latestFcf": latest_fcf,
+        "sharesOutstanding": shares_outstanding,
+        "beta": beta,
+        "betaSource": beta_source,
+        "betaMethodId": beta_method_id,
+        "betaBenchmarkSymbol": beta_benchmark_symbol,
+        "equityRiskPremiumPct": equity_risk_premium_pct,
+        "discountSpreadPct": float(beta * equity_risk_premium_pct),
+        "trailingEps": trailing_eps,
+        "forwardEps": forward_eps,
+    }
+    if turnaround_assumptions is not None:
+        assumptions["turnaround"] = turnaround_assumptions
 
     return DCFInputTemplate(
         status=status,
@@ -438,26 +655,11 @@ def build_stock_template(
         base_cash_flow_per_share=base_cash_flow_per_share,
         base_growth_pct=base_growth_pct,
         terminal_growth_pct=terminal_growth_pct,
-        yearly_risk_free_rates_pct=[curve.yield_at(maturity) for maturity in (1, 2, 3, 4, 5)],
+        yearly_risk_free_rates_pct=[curve.yield_at(year) for year in range(1, horizon + 1)],
         terminal_risk_free_rate_pct=curve.yield_at(30),
         discount_spread_pct=float(beta * equity_risk_premium_pct),
         rate_curve=curve,
-        assumptions={
-            "baseCashFlowPerShare": base_cash_flow_per_share,
-            "baseGrowthPct": base_growth_pct,
-            "growthSource": growth_source,
-            "cashflowSource": cashflow_source,
-            "latestFcf": latest_fcf,
-            "sharesOutstanding": shares_outstanding,
-            "beta": beta,
-            "betaSource": beta_source,
-            "betaMethodId": beta_method_id,
-            "betaBenchmarkSymbol": beta_benchmark_symbol,
-            "equityRiskPremiumPct": equity_risk_premium_pct,
-            "discountSpreadPct": float(beta * equity_risk_premium_pct),
-            "trailingEps": trailing_eps,
-            "forwardEps": forward_eps,
-        },
+        assumptions=assumptions,
         data_quality={
             "mode": quality_mode,
             "sources": [f"market-info:{normalized}", f"market:{normalized}", "treasury.market-indicators", "yfinance_fundamentals"],

@@ -43,6 +43,14 @@ class StockDCFRequest(BaseModel):
     beta: float | None = None
     equityRiskPremiumPct: float | None = None
     currentPrice: float | None = None
+    projectionYears: int | None = Field(default=None)
+    fcfBaseSource: str | None = Field(
+        default=None,
+        pattern="^(auto|3yr_avg|ttm|latest_annual)$",
+    )
+    breakevenYear: int | None = Field(default=None, ge=1, le=15)
+    breakevenCashFlowPerShare: float | None = None
+    postBreakevenGrowthPct: float | None = None
 
 
 class ReverseDCFResponse(BaseModel):

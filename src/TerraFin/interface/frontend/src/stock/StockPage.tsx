@@ -12,8 +12,9 @@ import StockHeader from './components/StockHeader';
 import StockChart from './components/StockChart';
 import CompanyProfile from './components/CompanyProfile';
 import EarningsTable from './components/EarningsTable';
+import FcfHistoryChart from './components/FcfHistoryChart';
 import SecFilings from './components/SecFilings';
-import { useCompanyInfo, useEarnings } from './useStockData';
+import { useCompanyInfo, useEarnings, useFcfHistory } from './useStockData';
 
 const TICKER_GROUPS = [
   {
@@ -115,6 +116,7 @@ const StockPage: React.FC = () => {
   const isNarrowLayout = isTabletOrBelow;
   const { data: companyInfo, loading: infoLoading, error: infoError } = useCompanyInfo(ticker);
   const { data: earnings, loading: earningsLoading } = useEarnings(ticker);
+  const { data: fcfHistory, loading: fcfHistoryLoading, error: fcfHistoryError } = useFcfHistory(ticker, 10);
 
   React.useEffect(() => {
     setIsReverseDcfOpen(false);
@@ -187,20 +189,6 @@ const StockPage: React.FC = () => {
       .then((d) => { window.location.href = d.path; })
       .catch(() => { window.location.href = `/stock/${trimmed.toUpperCase()}`; });
   };
-  const dcfResultCard = stockDcfState.hasValuationState ? (
-    <InsightCard
-      title="DCF Valuation Result"
-      subtitle={`Equity valuation range for ${ticker}.`}
-      minHeight={isMobile ? 156 : 320}
-      allowOverflow
-    >
-      <DcfValuationPanel
-        payload={stockDcfState.payload}
-        loading={stockDcfState.loading}
-        error={stockDcfState.error}
-      />
-    </InsightCard>
-  ) : null;
 
   if (!ticker) {
     const [localTicker, setLocalTicker] = React.useState('');
@@ -347,12 +335,12 @@ const StockPage: React.FC = () => {
           </InsightCard>
         </section>
 
-        <section style={rowGridStyle(isNarrowLayout, 'minmax(0, 1.1fr) minmax(360px, 1fr)')}>
+        <section style={{ ...rowGridStyle(isNarrowLayout, 'minmax(0, 1.2fr) minmax(0, 1fr)'), height: isNarrowLayout ? undefined : 280 }}>
           <InsightCard
             title="Earnings History"
             subtitle="Recent EPS estimates, actuals, and surprises"
             fillContent
-            minHeight={320}
+            minHeight={240}
           >
             {earningsLoading ? (
               <div style={{ fontSize: 13, color: '#475569' }}>Loading earnings...</div>
@@ -362,10 +350,21 @@ const StockPage: React.FC = () => {
           </InsightCard>
 
           <InsightCard
+            title="FCF / Share History"
+            subtitle={`Annual free cash flow per share for ${ticker}, with TTM.`}
+            fillContent
+            minHeight={240}
+          >
+            <FcfHistoryChart payload={fcfHistory} loading={fcfHistoryLoading} error={fcfHistoryError} />
+          </InsightCard>
+        </section>
+
+        <section style={rowGridStyle(isNarrowLayout, 'minmax(420px, 1.08fr) minmax(0, 1fr)')}>
+          <InsightCard
             title="DCF Valuation"
             subtitle={`Model inputs for ${ticker}.`}
             fillContent
-            minHeight={320}
+            minHeight={420}
             allowOverflow
           >
             <DcfWorkbench
@@ -381,24 +380,24 @@ const StockPage: React.FC = () => {
                   : null
               }
               defaultBeta={companyInfo?.beta ?? null}
+              fcfCandidates={fcfHistory?.candidates ?? null}
+            />
+          </InsightCard>
+
+          <InsightCard
+            title="DCF Valuation Result"
+            subtitle={`Equity valuation range for ${ticker}.`}
+            fillContent
+            minHeight={420}
+            allowOverflow
+          >
+            <DcfValuationPanel
+              payload={stockDcfState.payload}
+              loading={stockDcfState.loading}
+              error={stockDcfState.error}
             />
           </InsightCard>
         </section>
-
-        {dcfResultCard}
-
-        {!hideSecFilings ? (
-          <section>
-            <InsightCard
-              title="SEC Filings"
-              subtitle={`10-K / 10-Q filings for ${ticker}. Open a filing to browse section-by-section.`}
-              fillContent
-              allowOverflow
-            >
-              <SecFilings ticker={ticker} onUnavailable={() => setHideSecFilings(true)} />
-            </InsightCard>
-          </section>
-        ) : null}
 
         <section style={reverseDcfToggleCardStyle}>
           <button
@@ -454,6 +453,19 @@ const StockPage: React.FC = () => {
                 loading={reverseDcfState.loading}
                 error={reverseDcfState.error}
               />
+            </InsightCard>
+          </section>
+        ) : null}
+
+        {!hideSecFilings ? (
+          <section>
+            <InsightCard
+              title="SEC Filings"
+              subtitle={`10-K / 10-Q filings for ${ticker}. Open a filing to browse section-by-section.`}
+              fillContent
+              allowOverflow
+            >
+              <SecFilings ticker={ticker} onUnavailable={() => setHideSecFilings(true)} />
             </InsightCard>
           </section>
         ) : null}

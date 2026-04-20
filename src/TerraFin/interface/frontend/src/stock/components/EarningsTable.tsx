@@ -8,10 +8,12 @@ const cellBase: React.CSSProperties = {
 };
 
 const SurpriseCell: React.FC<{ value: string }> = ({ value }) => {
-  if (!value || value === '-') return <td style={cellBase}>-</td>;
+  if (!value || value === '-') {
+    return <td style={{ ...cellBase, textAlign: 'right', color: '#94a3b8' }}>-</td>;
+  }
   const num = parseFloat(value.replace(/[+%]/g, ''));
   const color = isNaN(num) ? '#334155' : num >= 0 ? '#047857' : '#b91c1c';
-  return <td style={{ ...cellBase, color, fontWeight: 600, textAlign: 'right' }}>{value}</td>;
+  return <td style={{ ...cellBase, color, fontWeight: 600, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{value}</td>;
 };
 
 const EarningsTable: React.FC<{ earnings: EarningsRecord[] }> = ({ earnings }) => {
@@ -37,16 +39,16 @@ const EarningsTable: React.FC<{ earnings: EarningsRecord[] }> = ({ earnings }) =
   return (
     <div
       style={{
-        overflowX: 'auto',
         overflowY: 'auto',
-        maxHeight: 360,
+        flex: 1,
+        minHeight: 0,
         maxWidth: '100%',
         border: '1px solid #e2e8f0',
         borderRadius: 12,
         background: '#fff',
       }}
     >
-        <table style={{ width: '100%', minWidth: 520, borderCollapse: 'collapse', background: '#fff' }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse', background: '#fff' }}>
           <thead>
             <tr>
               <th style={thStyle}>Date</th>

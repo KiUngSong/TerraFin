@@ -1,11 +1,15 @@
 import React from 'react';
 import { clearAgentViewContextSource, publishAgentViewContext } from '../agent/viewContext';
+import ProjectedFcfChart from '../stock/components/ProjectedFcfChart';
 import DcfValuationPanel from './DcfValuationPanel';
-import InfoHint from './InfoHint';
+import InfoHint, { InfoHintVisibilityContext } from './InfoHint';
+import { useExplainInputs } from './useExplainInputs';
 import { SP500_DCF_FORM_PRESET, Sp500DcfFormPreset, Sp500YearAssumptionFormValue } from './presets';
 import { BetaEstimatePayload, DcfValuationPayload } from './types';
 import { useBetaEstimate } from './useBetaEstimate';
 import { DcfFetchRequest, useDcfValuation } from './useDcfValuation';
+
+type FcfBaseSource = 'auto' | '3yr_avg' | 'ttm' | 'latest_annual';
 
 interface StockFormState {
   baseCashFlowPerShare: string;
@@ -13,15 +17,43 @@ interface StockFormState {
   terminalGrowthPct: string;
   beta: string;
   equityRiskPremiumPct: string;
+  projectionYears: '5' | '10' | '15';
+  fcfBaseSource: FcfBaseSource;
+  turnaroundMode: boolean;
+  breakevenYear: string;
+  breakevenCashFlowPerShare: string;
+  postBreakevenGrowthPct: string;
 }
 
 const COMPUTE_BETA_INFO =
   'Computes TerraFin beta_5y_monthly from 5 years of monthly returns against the mapped benchmark and fills the Beta field. The adjusted beta is shown only as reference. This does not rerun DCF automatically.';
 
+const TURNAROUND_TOGGLE_INFO =
+  'For companies with negative current free cash flow but a thesis that FCF turns positive. Supply the year FCF turns positive, the FCF/share at that year, and the growth rate after breakeven. The model linearly interpolates losses before breakeven and fades post-breakeven growth toward terminal growth.';
+
+const PROJECTION_YEARS_INFO =
+  '5 is the standard horizon. 10 or 15 extends the explicit forecast — useful for turnaround stories where losses persist or for long-cycle businesses. Longer horizons reduce terminal-value sensitivity at the cost of more assumption error.';
+
+const FCF_BASE_SOURCE_OPTIONS: { key: FcfBaseSource; label: string }[] = [
+  { key: 'auto', label: 'Auto' },
+  { key: '3yr_avg', label: '3yr Avg' },
+  { key: 'ttm', label: 'TTM' },
+  { key: 'latest_annual', label: 'Latest Annual' },
+];
+
+const FCF_BASE_SOURCE_INFO =
+  'How the model picks the base FCF/share. Auto = 3yr Average → Latest Annual → TTM cascade (recommended). 3yr Avg normalizes working-capital and capex noise — best for stable businesses. TTM is the most recent reading but can mislead during cycle turns. Latest Annual is the most recent reported full-year figure. Filling in Base FCF/Share manually overrides this.';
+
 const DEFAULT_STOCK_FORM = {
   baseCashFlowPerShare: '',
   terminalGrowthPct: '3.00',
   equityRiskPremiumPct: '5.00',
+  projectionYears: '5' as const,
+  fcfBaseSource: 'auto' as const,
+  turnaroundMode: false,
+  breakevenYear: '3',
+  breakevenCashFlowPerShare: '',
+  postBreakevenGrowthPct: '15.00',
 };
 
 const DcfWorkbench: React.FC<{
@@ -34,6 +66,7 @@ const DcfWorkbench: React.FC<{
   indexPreset?: Sp500DcfFormPreset;
   defaultBaseGrowthPct?: number | null;
   defaultBeta?: number | null;
+  fcfCandidates?: { threeYearAvg: number | null; latestAnnual: number | null; ttm: number | null } | null;
   showInlineResults?: boolean;
   onValuationStateChange?: (state: {
     payload: DcfValuationPayload | null;
@@ -51,11 +84,19 @@ const DcfWorkbench: React.FC<{
   indexPreset = SP500_DCF_FORM_PRESET,
   defaultBaseGrowthPct = null,
   defaultBeta = null,
+  fcfCandidates = null,
   showInlineResults = true,
   onValuationStateChange,
 }) => {
   const [indexForm, setIndexForm] = React.useState(() => buildIndexFormState(indexPreset));
   const [stockForm, setStockForm] = React.useState(() => buildStockFormState(defaultBaseGrowthPct, defaultBeta));
+  const [explainInputs, toggleExplain] = useExplainInputs();
+  // Tracks the value the FCF Base Source segmented control last wrote into the
+  // Base FCF/Share input. If the user types over it, a revert chip surfaces.
+  const [lastAutoFilledBaseFcf, setLastAutoFilledBaseFcf] = React.useState<{
+    value: string;
+    sourceLabel: string;
+  } | null>(null);
   const [request, setRequest] = React.useState<DcfFetchRequest | null>(null);
   const [formError, setFormError] = React.useState<string | null>(null);
   const { data, loading, error } = useDcfValuation(endpoint, request, enabled);
@@ -219,17 +260,51 @@ const DcfWorkbench: React.FC<{
 
   const handleStockSubmit = (event: React.FormEvent) => {
     event.preventDefault();
+    const projectionYears = Number(stockForm.projectionYears);
+    const body: Record<string, number | string | null> = {
+      projectionYears,
+      terminalGrowthPct: parseOptionalNumber(stockForm.terminalGrowthPct),
+      beta: parseOptionalNumber(stockForm.beta),
+      equityRiskPremiumPct: parseOptionalNumber(stockForm.equityRiskPremiumPct),
+    };
+    if (stockForm.fcfBaseSource !== 'auto') {
+      body.fcfBaseSource = stockForm.fcfBaseSource;
+    }
+
+    if (stockForm.turnaroundMode) {
+      const breakevenYear = parseOptionalNumber(stockForm.breakevenYear);
+      const breakevenCashFlowPerShare = parseOptionalNumber(stockForm.breakevenCashFlowPerShare);
+      const postBreakevenGrowthPct = parseOptionalNumber(stockForm.postBreakevenGrowthPct);
+      if (
+        breakevenYear == null ||
+        breakevenCashFlowPerShare == null ||
+        postBreakevenGrowthPct == null
+      ) {
+        setFormError('Fill in Breakeven Year, Breakeven FCF/Share, and Post-Breakeven Growth % before running turnaround DCF.');
+        return;
+      }
+      if (breakevenYear < 1 || breakevenYear > projectionYears) {
+        setFormError(`Breakeven Year must be between 1 and ${projectionYears} (the projection horizon).`);
+        return;
+      }
+      if (breakevenCashFlowPerShare <= 0) {
+        setFormError('Breakeven FCF / Share must be positive — that is what "breakeven" means in this model.');
+        return;
+      }
+      body.breakevenYear = breakevenYear;
+      body.breakevenCashFlowPerShare = breakevenCashFlowPerShare;
+      body.postBreakevenGrowthPct = postBreakevenGrowthPct;
+      body.baseCashFlowPerShare = parseOptionalNumber(stockForm.baseCashFlowPerShare);
+    } else {
+      body.baseCashFlowPerShare = parseOptionalNumber(stockForm.baseCashFlowPerShare);
+      body.baseGrowthPct = parseOptionalNumber(stockForm.baseGrowthPct);
+    }
+
     setFormError(null);
     setRequest({
       method: 'POST',
       requestId: Date.now(),
-      body: compactRecord({
-        baseCashFlowPerShare: parseOptionalNumber(stockForm.baseCashFlowPerShare),
-        baseGrowthPct: parseOptionalNumber(stockForm.baseGrowthPct),
-        terminalGrowthPct: parseOptionalNumber(stockForm.terminalGrowthPct),
-        beta: parseOptionalNumber(stockForm.beta),
-        equityRiskPremiumPct: parseOptionalNumber(stockForm.equityRiskPremiumPct),
-      }),
+      body: compactRecord(body),
     });
   };
 
@@ -386,13 +461,96 @@ const DcfWorkbench: React.FC<{
           />
         </form>
       ) : (
+        <InfoHintVisibilityContext.Provider value={explainInputs}>
         <form onSubmit={handleStockSubmit} style={stockWorkbenchStyle}>
           <div style={headerRowStyle}>
             <div>
               <div style={eyebrowStyle}>Ticker</div>
               <div style={stockHeadlineStyle}>{symbolLabel || 'Stock'}</div>
             </div>
-            <div style={stockBadgeStyle}>{hasValuationState ? 'DCF Ready' : 'Equity DCF'}</div>
+            <div style={headerActionsStyle}>
+              <button
+                type="button"
+                onClick={toggleExplain}
+                aria-pressed={explainInputs}
+                title={explainInputs ? 'Hide all input hints' : 'Show all input hints'}
+                style={explainTogglePillStyle(explainInputs)}
+              >
+                {explainInputs ? '✓ Explain inputs' : 'Explain inputs'}
+              </button>
+              <div style={stockBadgeStyle}>{hasValuationState ? 'DCF Ready' : 'Equity DCF'}</div>
+            </div>
+          </div>
+
+          <div style={sectionStyle}>
+            <SectionTitle title="Forecast Horizon" />
+            <div style={horizonRowStyle}>
+              <label style={horizonLabelStyle}>
+                <span style={horizonLabelTextStyle}>
+                  <span>Projection Years</span>
+                  <InfoHint text={PROJECTION_YEARS_INFO} />
+                </span>
+                <div style={segmentedControlStyle}>
+                  {(['5', '10', '15'] as const).map((option) => (
+                    <button
+                      key={option}
+                      type="button"
+                      onClick={() => setStockForm((current) => ({ ...current, projectionYears: option }))}
+                      style={segmentedButtonStyle(stockForm.projectionYears === option)}
+                    >
+                      {option}
+                    </button>
+                  ))}
+                </div>
+              </label>
+              <label style={turnaroundToggleStyle}>
+                <input
+                  type="checkbox"
+                  checked={stockForm.turnaroundMode}
+                  onChange={(event) =>
+                    setStockForm((current) => ({ ...current, turnaroundMode: event.target.checked }))
+                  }
+                  style={checkboxStyle}
+                />
+                <span style={turnaroundToggleTextStyle}>
+                  <span style={turnaroundToggleTitleStyle}>Turnaround Mode</span>
+                  <InfoHint text={TURNAROUND_TOGGLE_INFO} />
+                </span>
+              </label>
+            </div>
+            <div style={horizonRowStyle}>
+              <label style={horizonLabelStyle}>
+                <span style={horizonLabelTextStyle}>
+                  <span>FCF Base Source</span>
+                  <InfoHint text={FCF_BASE_SOURCE_INFO} />
+                </span>
+                <div style={segmentedControlStyle}>
+                  {FCF_BASE_SOURCE_OPTIONS.map((option) => (
+                    <button
+                      key={option.key}
+                      type="button"
+                      onClick={() => {
+                        const candidateValue = candidateForSource(fcfCandidates, option.key);
+                        const filledValue =
+                          candidateValue !== null ? formatBaseFcfInput(candidateValue) : null;
+                        setStockForm((current) => ({
+                          ...current,
+                          fcfBaseSource: option.key,
+                          baseCashFlowPerShare:
+                            filledValue !== null ? filledValue : current.baseCashFlowPerShare,
+                        }));
+                        setLastAutoFilledBaseFcf(
+                          filledValue !== null ? { value: filledValue, sourceLabel: option.label } : null,
+                        );
+                      }}
+                      style={segmentedButtonStyle(stockForm.fcfBaseSource === option.key)}
+                    >
+                      {option.label}
+                    </button>
+                  ))}
+                </div>
+              </label>
+            </div>
           </div>
 
           <div style={sectionStyle}>
@@ -402,21 +560,70 @@ const DcfWorkbench: React.FC<{
             />
             <div style={fieldsGridStyle}>
               <NumericField
-                label="Base FCF / Share"
-                info="Starting free cash flow per share used in year one. Leave blank to use TerraFin's derived TTM or latest annual value."
+                label={stockForm.turnaroundMode ? 'Current FCF / Share' : 'Base FCF / Share'}
+                info={
+                  stockForm.turnaroundMode
+                    ? 'Current TTM free cash flow per share. In turnaround mode this is the starting value that the model linearly interpolates from (up to breakeven). Can be negative. Leave blank to use TerraFin\'s derived TTM or latest annual value.'
+                    : 'Starting free cash flow per share used in year one. Leave blank to use TerraFin\'s derived TTM or latest annual value.'
+                }
                 step="0.0001"
                 value={stockForm.baseCashFlowPerShare}
                 placeholder="Auto"
                 onChange={(value) => setStockForm((current) => ({ ...current, baseCashFlowPerShare: value }))}
+                footer={
+                  lastAutoFilledBaseFcf &&
+                  stockForm.baseCashFlowPerShare !== lastAutoFilledBaseFcf.value ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setStockForm((current) => ({
+                          ...current,
+                          baseCashFlowPerShare: lastAutoFilledBaseFcf.value,
+                        }));
+                      }}
+                      style={revertChipStyle}
+                      title={`Restore the value from the ${lastAutoFilledBaseFcf.sourceLabel} source`}
+                    >
+                      ↺ Revert to {lastAutoFilledBaseFcf.sourceLabel} ({lastAutoFilledBaseFcf.value})
+                    </button>
+                  ) : null
+                }
               />
-              <NumericField
-                label="Base Growth %"
-                info="Initial growth rate for free cash flow per share. Blank uses TerraFin's fallback order: user override, EPS growth from forward vs trailing EPS, annual revenue CAGR, annual FCF CAGR, then the 6% default. The model fades this toward terminal growth over the explicit forecast."
-                step="0.01"
-                value={stockForm.baseGrowthPct}
-                placeholder={formatPlaceholder(defaultBaseGrowthPct)}
-                onChange={(value) => setStockForm((current) => ({ ...current, baseGrowthPct: value }))}
-              />
+              {!stockForm.turnaroundMode ? (
+                <NumericField
+                  label="Base Growth %"
+                  info="Initial growth rate for free cash flow per share. Blank uses TerraFin's fallback order: user override, EPS growth from forward vs trailing EPS, annual revenue CAGR, annual FCF CAGR, then the 6% default. The model fades this toward terminal growth over the explicit forecast."
+                  step="0.01"
+                  value={stockForm.baseGrowthPct}
+                  placeholder={formatPlaceholder(defaultBaseGrowthPct)}
+                  onChange={(value) => setStockForm((current) => ({ ...current, baseGrowthPct: value }))}
+                />
+              ) : null}
+              {stockForm.turnaroundMode ? (
+                <>
+                  <NumericField
+                    label="Breakeven Year"
+                    info="The year FCF per share reaches the breakeven value. Must be between 1 and the projection horizon. 3 is a reasonable default — most operational turnarounds play out inside three years."
+                    step="1"
+                    value={stockForm.breakevenYear}
+                    onChange={(value) => setStockForm((current) => ({ ...current, breakevenYear: value }))}
+                  />
+                  <NumericField
+                    label="Breakeven FCF / Share"
+                    info="FCF per share at the breakeven year. Must be positive. This anchors the turnaround thesis — the year-5 or year-10 terminal launching pad depends on it."
+                    step="0.0001"
+                    value={stockForm.breakevenCashFlowPerShare}
+                    onChange={(value) => setStockForm((current) => ({ ...current, breakevenCashFlowPerShare: value }))}
+                  />
+                  <NumericField
+                    label="Post-Breakeven Growth %"
+                    info="FCF growth rate applied right after breakeven. Fades linearly toward terminal growth across the remaining horizon. 15% is a reasonable default for operational recoveries."
+                    step="0.01"
+                    value={stockForm.postBreakevenGrowthPct}
+                    onChange={(value) => setStockForm((current) => ({ ...current, postBreakevenGrowthPct: value }))}
+                  />
+                </>
+              ) : null}
               <NumericField
                 label="Terminal Growth %"
                 info="Perpetual growth rate used after the explicit forecast period."
@@ -462,10 +669,22 @@ const DcfWorkbench: React.FC<{
             onReset={resetStockForm}
           />
         </form>
+        </InfoHintVisibilityContext.Provider>
       )}
 
       {formError ? (
         <div style={formErrorStyle}>{formError}</div>
+      ) : null}
+
+      {mode === 'stock' && data?.scenarios?.base?.projectedCashFlows?.length ? (
+        <ProjectedFcfChart
+          scenarios={{
+            bear: data.scenarios.bear?.projectedCashFlows,
+            base: data.scenarios.base?.projectedCashFlows,
+            bull: data.scenarios.bull?.projectedCashFlows,
+          }}
+          title={`Projected FCF / Share — ${symbolLabel || 'Stock'} (bear · base · bull)`}
+        />
       ) : null}
 
       {showInlineResults && hasValuationState ? (
@@ -600,6 +819,32 @@ function parseOptionalNumber(value: string): number | null {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+function candidateForSource(
+  candidates: { threeYearAvg: number | null; latestAnnual: number | null; ttm: number | null } | null,
+  source: FcfBaseSource,
+): number | null {
+  if (!candidates) return null;
+  switch (source) {
+    case '3yr_avg':
+      return candidates.threeYearAvg;
+    case 'ttm':
+      return candidates.ttm;
+    case 'latest_annual':
+      return candidates.latestAnnual;
+    case 'auto':
+    default:
+      // Mirror the backend's auto cascade: 3yr_avg → annual → ttm.
+      return candidates.threeYearAvg ?? candidates.latestAnnual ?? candidates.ttm;
+  }
+}
+
+function formatBaseFcfInput(value: number): string {
+  const abs = Math.abs(value);
+  if (abs >= 100) return value.toFixed(0);
+  if (abs >= 1) return value.toFixed(2);
+  return value.toFixed(4);
+}
+
 function sanitizeStockFormState(form: StockFormState) {
   return {
     baseCashFlowPerShare: form.baseCashFlowPerShare,
@@ -607,6 +852,12 @@ function sanitizeStockFormState(form: StockFormState) {
     terminalGrowthPct: form.terminalGrowthPct,
     beta: form.beta,
     equityRiskPremiumPct: form.equityRiskPremiumPct,
+    projectionYears: form.projectionYears,
+    fcfBaseSource: form.fcfBaseSource,
+    turnaroundMode: form.turnaroundMode,
+    breakevenYear: form.breakevenYear,
+    breakevenCashFlowPerShare: form.breakevenCashFlowPerShare,
+    postBreakevenGrowthPct: form.postBreakevenGrowthPct,
   };
 }
 
@@ -653,7 +904,7 @@ function formatPlaceholder(value: number | null | undefined): string | undefined
   return typeof value === 'number' ? value.toFixed(2) : undefined;
 }
 
-function compactRecord<T extends Record<string, number | null>>(record: T): Partial<T> {
+function compactRecord<T extends Record<string, number | string | null>>(record: T): Partial<T> {
   const next: Partial<T> = {};
   for (const key of Object.keys(record) as Array<keyof T>) {
     if (record[key] != null) {
@@ -754,6 +1005,39 @@ const badgeStyle: React.CSSProperties = {
 const stockBadgeStyle: React.CSSProperties = {
   ...badgeStyle,
 };
+
+const headerActionsStyle: React.CSSProperties = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  gap: 8,
+};
+
+const revertChipStyle: React.CSSProperties = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  gap: 4,
+  padding: '3px 9px',
+  borderRadius: 999,
+  border: '1px solid #cbd5e1',
+  background: '#f1f5f9',
+  color: '#475569',
+  fontSize: 10,
+  fontWeight: 600,
+  cursor: 'pointer',
+  whiteSpace: 'nowrap',
+};
+
+const explainTogglePillStyle = (active: boolean): React.CSSProperties => ({
+  border: `1px solid ${active ? '#1d4ed8' : '#cbd5e1'}`,
+  background: active ? '#dbeafe' : '#ffffff',
+  color: active ? '#1d4ed8' : '#475569',
+  borderRadius: 999,
+  padding: '5px 11px',
+  fontSize: 11,
+  fontWeight: 700,
+  cursor: 'pointer',
+  letterSpacing: '0.02em',
+});
 
 const sectionStyle: React.CSSProperties = {
   display: 'grid',
@@ -965,6 +1249,78 @@ const formErrorStyle: React.CSSProperties = {
   padding: '10px 12px',
   fontSize: 12,
   fontWeight: 600,
+};
+
+const horizonRowStyle: React.CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'space-between',
+  gap: 12,
+  flexWrap: 'wrap',
+  border: '1px solid #dbe4ef',
+  borderRadius: 12,
+  padding: '10px 12px',
+  background: '#ffffff',
+};
+
+const horizonLabelStyle: React.CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: 10,
+  flexWrap: 'wrap',
+};
+
+const horizonLabelTextStyle: React.CSSProperties = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  gap: 6,
+  fontSize: 12,
+  fontWeight: 700,
+  color: '#334155',
+};
+
+const segmentedControlStyle: React.CSSProperties = {
+  display: 'inline-flex',
+  border: '1px solid #cbd5e1',
+  borderRadius: 10,
+  overflow: 'hidden',
+  background: '#f8fafc',
+};
+
+const segmentedButtonStyle = (selected: boolean): React.CSSProperties => ({
+  border: 'none',
+  padding: '6px 14px',
+  fontSize: 12,
+  fontWeight: 700,
+  cursor: 'pointer',
+  background: selected ? '#1d4ed8' : 'transparent',
+  color: selected ? '#ffffff' : '#334155',
+  transition: 'background 0.15s',
+});
+
+const turnaroundToggleStyle: React.CSSProperties = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  gap: 8,
+  cursor: 'pointer',
+};
+
+const checkboxStyle: React.CSSProperties = {
+  width: 16,
+  height: 16,
+  cursor: 'pointer',
+};
+
+const turnaroundToggleTextStyle: React.CSSProperties = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  gap: 6,
+};
+
+const turnaroundToggleTitleStyle: React.CSSProperties = {
+  fontSize: 12,
+  fontWeight: 700,
+  color: '#334155',
 };
 
 function valuationShellStyle(mode: 'index' | 'stock'): React.CSSProperties {

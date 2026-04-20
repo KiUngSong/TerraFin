@@ -248,7 +248,7 @@ const DcfValuationPanel: React.FC<{
                           background: cellColor(cell?.upsidePct),
                           textAlign: 'center',
                         }}
-                        title={typeof cell?.upsidePct === 'number' ? `${cell.upsidePct.toFixed(2)}%` : 'N/A'}
+                        aria-label={typeof cell?.upsidePct === 'number' ? `${cell.upsidePct.toFixed(2)}% upside` : 'No data'}
                       >
                         <div style={{ fontSize: 11, fontWeight: 700, color: '#0f172a' }}>
                           {fmtCurrency(cell?.intrinsicValue)}

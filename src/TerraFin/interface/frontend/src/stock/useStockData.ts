@@ -88,7 +88,36 @@ interface FilingDocument {
   documentUrl: string;
 }
 
-export type { ChartPoint, CompanyInfo, EarningsRecord, FilingDocument, FilingRow, FilingsListResponse, FinancialRow, FinancialStatement, TocEntry };
+interface FcfHistoryRow {
+  year: string | null;
+  fcf: number | null;
+  fcfPerShare: number | null;
+}
+
+interface FcfCandidates {
+  threeYearAvg: number | null;
+  latestAnnual: number | null;
+  ttm: number | null;
+}
+
+interface FcfRollingTtmPoint {
+  asOf: string | null;
+  fcfPerShare: number | null;
+}
+
+interface FcfHistoryResponse {
+  ticker: string;
+  sharesOutstanding: number | null;
+  ttmFcfPerShare: number | null;
+  ttmSource: string | null;
+  candidates: FcfCandidates;
+  autoSelectedSource: string | null;
+  rollingTtm: FcfRollingTtmPoint[];
+  sharesNote: string | null;
+  history: FcfHistoryRow[];
+}
+
+export type { ChartPoint, CompanyInfo, EarningsRecord, FcfCandidates, FcfHistoryResponse, FcfHistoryRow, FilingDocument, FilingRow, FilingsListResponse, FinancialRow, FinancialStatement, TocEntry };
 
 export function useCompanyInfo(ticker: string, enabled = true) {
   const [data, setData] = useState<CompanyInfo | null>(null);
@@ -134,6 +163,30 @@ export function useEarnings(ticker: string, enabled = true) {
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
   }, [enabled, ticker]);
+
+  return { data, loading, error };
+}
+
+export function useFcfHistory(ticker: string, years = 10, enabled = true) {
+  const [data, setData] = useState<FcfHistoryResponse | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!ticker || !enabled) {
+      setData(null);
+      setError(null);
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
+    setError(null);
+    fetch(`/stock/api/fcf-history?ticker=${encodeURIComponent(ticker)}&years=${years}`)
+      .then((res) => (res.ok ? res.json() : Promise.reject(new Error(`${res.status}`))))
+      .then((d: FcfHistoryResponse) => setData(d))
+      .catch((e) => setError(e.message))
+      .finally(() => setLoading(false));
+  }, [enabled, ticker, years]);
 
   return { data, loading, error };
 }

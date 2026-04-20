@@ -5,7 +5,12 @@ const VIEWPORT_MARGIN = 12;
 const PANEL_GAP = 8;
 const UI_FONT_STACK = 'Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif';
 
+// Visibility gate. When a parent provides `false`, the icon is hidden entirely.
+// Default `true` keeps existing usage outside the gated subtree unchanged.
+export const InfoHintVisibilityContext = React.createContext<boolean>(true);
+
 const InfoHint: React.FC<{ text: string; compact?: boolean }> = ({ text, compact = false }) => {
+  const visible = React.useContext(InfoHintVisibilityContext);
   const buttonRef = React.useRef<HTMLButtonElement | null>(null);
   const panelRef = React.useRef<HTMLDivElement | null>(null);
   const [open, setOpen] = React.useState(false);
@@ -47,6 +52,11 @@ const InfoHint: React.FC<{ text: string; compact?: boolean }> = ({ text, compact
       window.removeEventListener('scroll', handleViewportChange, true);
     };
   }, [open, updatePosition]);
+
+  // Early return AFTER all hooks so the hook-call order is stable across
+  // visibility toggles (Rules of Hooks). Hiding the icon entirely when the
+  // form-level "Explain inputs" toggle is off.
+  if (!visible) return null;
 
   return (
     <>

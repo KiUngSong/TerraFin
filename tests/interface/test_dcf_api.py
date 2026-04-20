@@ -237,9 +237,78 @@ def test_stock_dcf_post_accepts_overrides(monkeypatch) -> None:
             "terminalGrowthPct": 3.4,
             "beta": 1.3,
             "equityRiskPremiumPct": 4.9,
+            "fcfBaseSource": "ttm",
         },
     )
     assert response.status_code == 200
     assert captured["ticker"] == "nvda"
     assert captured["overrides"].base_cash_flow_per_share == 4.2
     assert captured["overrides"].beta == 1.3
+    assert captured["overrides"].fcf_base_source == "ttm"
+
+
+def test_fcf_history_endpoint_contract(monkeypatch) -> None:
+    monkeypatch.setattr(
+        stock_routes,
+        "build_fcf_history_payload",
+        lambda ticker, **kwargs: {
+            "ticker": ticker.upper(),
+            "sharesOutstanding": 100.0,
+            "ttmFcfPerShare": 0.85,
+            "ttmSource": "quarterly_ttm",
+            "candidates": {
+                "threeYearAvg": 0.43,
+                "latestAnnual": -0.50,
+                "ttm": 0.85,
+            },
+            "autoSelectedSource": "3yr_avg",
+            "sharesNote": "Per-year FCF/share is computed using current sharesOutstanding.",
+            "history": [
+                {"year": "2022", "fcf": 80.0, "fcfPerShare": 0.80},
+                {"year": "2023", "fcf": 100.0, "fcfPerShare": 1.00},
+                {"year": "2024", "fcf": -50.0, "fcfPerShare": -0.50},
+            ],
+        },
+    )
+    client = _client()
+    response = client.get("/stock/api/fcf-history?ticker=moh&years=5")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["ticker"] == "MOH"
+    assert body["ttmFcfPerShare"] == 0.85
+    assert body["candidates"]["threeYearAvg"] == 0.43
+    assert body["candidates"]["latestAnnual"] == -0.50
+    assert body["candidates"]["ttm"] == 0.85
+    assert body["autoSelectedSource"] == "3yr_avg"
+    assert len(body["history"]) == 3
+    assert body["history"][2]["year"] == "2024"
+    assert body["history"][2]["fcfPerShare"] == -0.50
+
+
+def test_stock_dcf_post_accepts_turnaround_and_horizon(monkeypatch) -> None:
+    captured = {}
+
+    def _build(ticker, *args, **kwargs):
+        captured["ticker"] = ticker
+        captured["overrides"] = kwargs.get("overrides")
+        captured["projection_years"] = kwargs.get("projection_years")
+        return _ready_payload(ticker.upper(), "stock")
+
+    monkeypatch.setattr(stock_routes, "build_stock_dcf_payload", _build)
+    client = _client()
+
+    response = client.post(
+        "/stock/api/dcf?ticker=moh",
+        json={
+            "projectionYears": 10,
+            "breakevenYear": 3,
+            "breakevenCashFlowPerShare": 2.5,
+            "postBreakevenGrowthPct": 12.0,
+        },
+    )
+    assert response.status_code == 200
+    assert captured["ticker"] == "moh"
+    assert captured["projection_years"] == 10
+    assert captured["overrides"].breakeven_year == 3
+    assert captured["overrides"].breakeven_cash_flow_per_share == 2.5
+    assert captured["overrides"].post_breakeven_growth_pct == 12.0

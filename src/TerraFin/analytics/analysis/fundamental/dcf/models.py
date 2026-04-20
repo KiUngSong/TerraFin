@@ -109,6 +109,9 @@ class SP500DCFOverrides:
     yearly_assumptions: tuple[SP500YearAssumption, ...] | None = None
 
 
+StockFcfBaseSource = Literal["auto", "3yr_avg", "ttm", "latest_annual"]
+
+
 @dataclass(frozen=True)
 class StockDCFOverrides:
     base_cash_flow_per_share: float | None = None
@@ -117,3 +120,14 @@ class StockDCFOverrides:
     beta: float | None = None
     equity_risk_premium_pct: float | None = None
     current_price: float | None = None
+    # Source picker for how the DCF base FCF/share is derived from company data.
+    # auto = 3yr_avg → annual → ttm cascade (normalized over recent, the professional
+    # default). An explicit `base_cash_flow_per_share` override still wins over this.
+    fcf_base_source: StockFcfBaseSource | None = None
+    # Turnaround-mode inputs. When breakeven_year, breakeven_cash_flow_per_share,
+    # and post_breakeven_growth_pct are all set, the template builds an explicit
+    # schedule instead of the single-base × linear-growth path — lets users
+    # value companies with negative current FCF whose thesis is a future turn.
+    breakeven_year: int | None = None
+    breakeven_cash_flow_per_share: float | None = None
+    post_breakeven_growth_pct: float | None = None

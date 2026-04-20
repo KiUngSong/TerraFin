@@ -11,6 +11,7 @@ from TerraFin.analytics.analysis.risk import estimate_beta_5y_monthly, estimate_
 from TerraFin.interface.stock.payloads import (
     build_company_info_payload,
     build_earnings_payload,
+    build_fcf_history_payload,
     build_filing_document_payload,
     build_filings_list_payload,
     build_financial_statement_payload,
@@ -65,6 +66,35 @@ class EarningsRecord(BaseModel):
 class EarningsHistoryResponse(BaseModel):
     ticker: str
     earnings: list[EarningsRecord]
+
+
+class FcfHistoryRow(BaseModel):
+    year: str | None = None
+    fcf: float | None = None
+    fcfPerShare: float | None = None
+
+
+class FcfCandidates(BaseModel):
+    threeYearAvg: float | None = None
+    latestAnnual: float | None = None
+    ttm: float | None = None
+
+
+class FcfRollingTtmPoint(BaseModel):
+    asOf: str | None = None
+    fcfPerShare: float | None = None
+
+
+class FcfHistoryResponse(BaseModel):
+    ticker: str
+    sharesOutstanding: float | None = None
+    ttmFcfPerShare: float | None = None
+    ttmSource: str | None = None
+    candidates: FcfCandidates = FcfCandidates()
+    autoSelectedSource: str | None = None
+    rollingTtm: list[FcfRollingTtmPoint] = []
+    sharesNote: str | None = None
+    history: list[FcfHistoryRow]
 
 
 class FinancialRow(BaseModel):
@@ -188,6 +218,13 @@ def create_stock_data_router() -> APIRouter:
     def api_earnings(ticker: str = Query(..., min_length=1)):
         return EarningsHistoryResponse(**build_earnings_payload(ticker))
 
+    @router.get(f"{STOCK_API_PREFIX}/fcf-history", response_model=FcfHistoryResponse)
+    def api_fcf_history(
+        ticker: str = Query(..., min_length=1),
+        years: int = Query(default=10, ge=1, le=20),
+    ):
+        return FcfHistoryResponse(**build_fcf_history_payload(ticker, years=years))
+
     @router.get(f"{STOCK_API_PREFIX}/beta-estimate", response_model=BetaEstimateResponse)
     def api_beta_estimate(ticker: str = Query(..., min_length=1)):
         return BetaEstimateResponse(**build_beta_estimate_payload(ticker))
@@ -203,8 +240,13 @@ def create_stock_data_router() -> APIRouter:
         )
 
     @router.get(f"{STOCK_API_PREFIX}/dcf", response_model=DCFValuationResponse)
-    def api_dcf(ticker: str = Query(..., min_length=1)):
-        return DCFValuationResponse.model_validate(build_stock_dcf_payload(ticker))
+    def api_dcf(
+        ticker: str = Query(..., min_length=1),
+        projectionYears: int | None = Query(default=None),
+    ):
+        return DCFValuationResponse.model_validate(
+            build_stock_dcf_payload(ticker, projection_years=projectionYears)
+        )
 
     @router.post(f"{STOCK_API_PREFIX}/dcf", response_model=DCFValuationResponse)
     def api_post_dcf(ticker: str = Query(..., min_length=1), request: StockDCFRequest | None = None):
@@ -215,8 +257,18 @@ def create_stock_data_router() -> APIRouter:
             beta=request.beta if request else None,
             equity_risk_premium_pct=request.equityRiskPremiumPct if request else None,
             current_price=request.currentPrice if request else None,
+            fcf_base_source=request.fcfBaseSource if request else None,  # type: ignore[arg-type]
+            breakeven_year=request.breakevenYear if request else None,
+            breakeven_cash_flow_per_share=request.breakevenCashFlowPerShare if request else None,
+            post_breakeven_growth_pct=request.postBreakevenGrowthPct if request else None,
         )
-        return DCFValuationResponse.model_validate(build_stock_dcf_payload(ticker, overrides=overrides))
+        return DCFValuationResponse.model_validate(
+            build_stock_dcf_payload(
+                ticker,
+                overrides=overrides,
+                projection_years=request.projectionYears if request else None,
+            )
+        )
 
     @router.get(f"{STOCK_API_PREFIX}/reverse-dcf", response_model=ReverseDCFResponse)
     def api_reverse_dcf(

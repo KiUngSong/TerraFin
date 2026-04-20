@@ -1,4 +1,5 @@
 import React from 'react';
+import ProjectedFcfChart from '../stock/components/ProjectedFcfChart';
 import { ReverseDcfPayload } from './types';
 
 const fmtCurrency = (value: number | null | undefined, digits = 2) =>
@@ -110,6 +111,13 @@ const ReverseDcfPanel: React.FC<{
             </tbody>
           </table>
         </div>
+      ) : null}
+
+      {payload.projectedCashFlows.length > 0 ? (
+        <ProjectedFcfChart
+          projections={payload.projectedCashFlows}
+          title={`Projected FCF / Share — ${payload.symbol} (implied schedule)`}
+        />
       ) : null}
     </div>
   );
