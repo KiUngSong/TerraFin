@@ -28,6 +28,11 @@ allowed_capabilities:
   - fundamental_screen
   - risk_profile
   - valuation
+  - fear_greed
+  - market_regime
+  - market_breadth
+  - trailing_forward_pe
+  - current_view_context
 
 principles:
   - "The most important thing is not what you buy but what you pay for it"

@@ -158,9 +158,19 @@ Every structured research response includes a top-level `processing` object.
 | Macro context | `macro_context(name, depth="auto", view="daily")` |
 | Portfolio context | `portfolio_context(guru)` |
 | Stock fundamentals | `stock_fundamentals(ticker, statement="income", period="annual")` |
+| Stock DCF | `valuation(ticker, projection_years=..., fcf_base_source=..., breakeven_year=..., breakeven_cash_flow_per_share=..., post_breakeven_growth_pct=...)` |
+| FCF history candidates | `fcf_history(ticker, years=10)` |
+| SEC filings | `sec_filings(ticker)` → `sec_filing_document(...)` → `sec_filing_section(...)` |
+| Sentiment / breadth | `fear_greed()`, `market_regime()`, `market_breadth()`, `trailing_forward_pe()` |
 | Calendar scan | `calendar_events(year=..., month=..., categories=..., limit=...)` |
 | Bubble analysis | `lppl_analysis(name, depth="auto", view="daily")` |
 | Open chart | `open_chart(...)` when the chart is explicitly useful |
+
+> The full per-capability call signature, parameter ranges, and worked
+> examples (including DCF turnaround mode) live in
+> [`skills/terrafin/SKILL.md`](https://github.com/KiUngSong/TerraFin/blob/main/skills/terrafin/SKILL.md) —
+> the skill is the authoritative capability reference for both this doc and
+> external agents.
 
 ## Minimal examples
 
@@ -210,20 +220,65 @@ Use the TerraFin Agent button in the lower-right corner.
 
 ## Route summary
 
-Stateless capability routes:
+Stateless capability routes (every hosted-runtime tool also has a parity HTTP
+route under `/agent/api/*` — see `skills/terrafin/SKILL.md` for the full
+27-capability table with Python / CLI signatures).
 
-- `GET /agent/api/resolve`
-- `GET /agent/api/market-data`
-- `GET /agent/api/indicators`
-- `GET /agent/api/market-snapshot`
-- `GET /agent/api/company`
-- `GET /agent/api/earnings`
-- `GET /agent/api/financials`
-- `GET /agent/api/portfolio`
-- `GET /agent/api/economic`
-- `GET /agent/api/macro-focus`
-- `GET /agent/api/lppl`
-- `GET /agent/api/calendar`
+<!-- The route table below is auto-generated from
+     src/TerraFin/agent/runtime.py by
+     `python scripts/generate-agent-artefacts.py`. Edit the registry, not
+     this section. Hand-edits will be overwritten. -->
+
+<!-- generated:route-summary:begin -->
+
+Data + chart:
+
+- `GET /agent/api/calendar` — TerraFin calendar events for a month.
+- `GET /agent/api/company` — Company profile and valuation fields for a ticker.
+- `GET /agent/api/earnings` — Earnings history (estimate / reported / surprise) for a ticker.
+- `GET /agent/api/economic` — Economic indicator series (FRED-backed).
+- `GET /agent/api/financials` — Financial statement table (income / balance / cashflow) for a ticker.
+- `GET /agent/api/indicators` — Chart-matching technical indicators for one asset.
+- `GET /agent/api/lppl` — LPPL bubble analysis (super-exponential growth + log-periodic oscillation detection).
+- `GET /agent/api/macro-focus` — Macro summary plus chart-ready series for one instrument.
+- `GET /agent/api/market-data` — Chart-ready OHLC time series for one asset.
+- `GET /agent/api/market-snapshot` — Compact market snapshot for one asset.
+- `GET /agent/api/portfolio` — Guru portfolio holdings and summary metadata.
+- `GET /agent/api/resolve` — Resolve a free-form query into a TerraFin route.
+
+Valuation + fundamentals:
+
+- `GET /agent/api/beta-estimate` — 5-year monthly beta with adjusted beta, R², benchmark.
+- `GET /agent/api/fundamental-screen` — Fundamental quality and moat screen for a ticker.
+- `GET /agent/api/risk-profile` — Statistical risk profile (tail risk, convexity, vol regime, drawdown).
+- `GET /agent/api/sp500-dcf` — Full S&P 500 DCF valuation (scenarios, sensitivity, methods).
+- `GET /agent/api/valuation` — DCF (incl. turnaround mode), reverse DCF, relative valuation, Graham number.
+
+SEC filings:
+
+- `GET /agent/api/sec-filing-document` — Filing table-of-contents (sections + char counts) without full body.
+- `GET /agent/api/sec-filing-section` — Verbatim markdown body of one filing section by slug.
+- `GET /agent/api/sec-filings` — List recent 10-K / 10-Q / 8-K filings for a ticker with EDGAR URLs.
+
+Sentiment / breadth / market state:
+
+- `GET /agent/api/fear-greed` — CNN Fear & Greed index — score, rating, history.
+- `GET /agent/api/market-breadth` — Standalone market-breadth metrics (% advancing, new highs, etc.).
+- `GET /agent/api/market-regime` — Market regime classification with confidence and signals.
+- `GET /agent/api/top-companies` — Top companies (market-cap-ranked equity list).
+- `GET /agent/api/trailing-forward-pe` — S&P 500 trailing vs forward P/E spread (history + summary).
+- `GET /agent/api/watchlist` — The user's current watchlist (read-only).
+
+<!-- generated:route-summary:end -->
+
+> **View context is read-only.** The hosted runtime exposes a
+> `current_view_context()` tool that returns the panel and form state the
+> user is currently looking at — including the DCF input form's
+> `projectionYears` / `fcfBaseSource` / `turnaroundMode` selections, the FCF
+> history candidates already loaded, and the auto-selected DCF base source.
+> The agent **cannot currently write back to the user's frontend form** (no
+> `apply_dcf_inputs` / `set_form_state` tool exists). If the agent suggests
+> input values, the user applies them manually. This gap is tracked.
 
 Hosted runtime routes:
 

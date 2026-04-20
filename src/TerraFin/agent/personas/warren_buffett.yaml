@@ -23,6 +23,10 @@ allowed_capabilities:
   - portfolio
   - fundamental_screen
   - valuation
+  - sec_filings
+  - sec_filing_document
+  - sec_filing_section
+  - current_view_context
 
 principles:
   - "Only invest within your circle of competence — know what you know and know what you don't"

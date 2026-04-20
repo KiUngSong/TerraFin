@@ -1,6 +1,6 @@
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 DepthMode = Literal["auto", "recent", "full"]
@@ -222,6 +222,58 @@ class ChartOpenResponse(BaseModel):
             view=None,
         )
     )
+
+
+# ---------------------------------------------------------------------------
+# Permissive stubs for capabilities whose response shape is currently
+# `dict[str, Any]`. Defined here so `tool_contracts.CAPABILITY_SCHEMAS` (which
+# references them by string name) can resolve, FastAPI can advertise them in
+# `/openapi.json`, and the upcoming generator can import them by name to
+# emit accurate SKILL.md / docs entries. `extra="allow"` keeps the contract
+# loose until each shape is tightened in a separate pass.
+# ---------------------------------------------------------------------------
+
+
+class _PermissiveResponse(BaseModel):
+    """Base class for stub responses that mirror raw `dict[str, Any]` payloads."""
+
+    model_config = ConfigDict(extra="allow")
+
+
+class FundamentalScreenResponse(_PermissiveResponse):
+    ticker: str | None = None
+
+
+class RiskProfileResponse(_PermissiveResponse):
+    name: str | None = None
+
+
+class ValuationResponse(_PermissiveResponse):
+    ticker: str | None = None
+
+
+class SecFilingsListResponse(_PermissiveResponse):
+    ticker: str | None = None
+
+
+class SecFilingDocumentResponse(_PermissiveResponse):
+    ticker: str | None = None
+    accession: str | None = None
+    primaryDocument: str | None = None
+
+
+class SecFilingSectionResponse(_PermissiveResponse):
+    ticker: str | None = None
+    accession: str | None = None
+    sectionSlug: str | None = None
+
+
+class MarketBreadthResponse(_PermissiveResponse):
+    pass
+
+
+class WatchlistResponse(_PermissiveResponse):
+    pass
 
 
 class HostedToolDefinitionResponse(BaseModel):

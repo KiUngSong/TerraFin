@@ -210,7 +210,17 @@ HOSTED_TOOL_CONTRACTS: dict[str, dict[str, Any]] = {
     },
     "valuation": {
         "input_schema": _object_schema(
-            properties={"ticker": {"type": "string", "minLength": 1}},
+            properties={
+                "ticker": {"type": "string", "minLength": 1},
+                "projection_years": {"type": "integer", "enum": [5, 10, 15]},
+                "fcf_base_source": {
+                    "type": "string",
+                    "enum": ["auto", "3yr_avg", "ttm", "latest_annual"],
+                },
+                "breakeven_year": {"type": "integer", "minimum": 1, "maximum": 15},
+                "breakeven_cash_flow_per_share": {"type": "number"},
+                "post_breakeven_growth_pct": {"type": "number"},
+            },
             required=["ticker"],
         ),
         "response_model": "ValuationResponse",

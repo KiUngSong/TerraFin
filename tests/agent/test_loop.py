@@ -960,7 +960,13 @@ def test_persona_fit_feedback_rejects_marks_fragment_open_questions() -> None:
     assert "open questions" in feedback.lower()
 
 
-def test_select_guru_worker_tools_uses_distinct_broad_market_allowlists() -> None:
+def test_select_guru_worker_tools_honors_yaml_allowlists_only() -> None:
+    """The legacy broad-market allowlist override in `_select_guru_worker_tools`
+    has been removed — persona toolsets are now driven solely by each
+    persona's YAML `allowed_capabilities` (single source of truth). This test
+    verifies the YAML allowlists are honored uniformly regardless of
+    broad_market context. Update each persona's YAML to gain or lose access.
+    """
     registry = build_default_persona_registry()
     loop = _loop_with_gurus(_DirectAnswerModel())
     buffett_session = loop.create_session("warren-buffett", session_id="loop:buffett-tools", allow_internal=True)
@@ -994,15 +1000,22 @@ def test_select_guru_worker_tools_uses_distinct_broad_market_allowlists() -> Non
     marks_names = {tool.capability_name for tool in marks_tools}
     druck_names = {tool.capability_name for tool in druck_tools}
 
-    assert "risk_profile" not in buffett_names
-    assert "economic" not in buffett_names
-    assert "risk_profile" not in marks_names
+    # Each persona's YAML drives their toolset; verify a few representative
+    # capabilities present/absent for each. The full allowlists live in
+    # `src/TerraFin/agent/personas/*.yaml`.
+    assert "valuation" in buffett_names
+    assert "sec_filings" in buffett_names  # added so Buffett can read 10-Ks
+    assert "current_view_context" in buffett_names
+
+    assert "valuation" in marks_names
     assert "economic" in marks_names
-    assert "macro_focus" not in marks_names
+    assert "fear_greed" in marks_names  # added for cycle/sentiment work
+    assert "market_breadth" in marks_names
+    assert "current_view_context" in marks_names
+
+    assert "valuation" in druck_names  # macro guy still needs DCF anchor
     assert "risk_profile" in druck_names
-    assert "market_data" not in druck_names
-    assert "valuation" not in druck_names
-    assert "macro_focus" not in druck_names
+    assert "current_view_context" in druck_names
 
 
 # ---------------------------------------------------------------------------

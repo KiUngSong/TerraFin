@@ -126,6 +126,27 @@ def _build_parser() -> argparse.ArgumentParser:
     open_chart_parser.add_argument("names", nargs="+")
     open_chart_parser.add_argument("--session-id", default=None)
 
+    capabilities_parser = subparsers.add_parser(
+        "capabilities",
+        help=(
+            "List agent capabilities and their metadata as JSON. "
+            "Pipe through `jq` to enumerate without booting the HTTP server."
+        ),
+    )
+    capabilities_parser.add_argument(
+        "--name",
+        default=None,
+        help="Filter to a single capability by name (e.g. valuation, sec_filings).",
+    )
+    capabilities_parser.add_argument(
+        "--with-schema",
+        action="store_true",
+        help=(
+            "Include the input JSON Schema for each capability (resolved from "
+            "the FastAPI app's OpenAPI; requires server import to succeed)."
+        ),
+    )
+
     models_parser = subparsers.add_parser("models")
     models_subparsers = models_parser.add_subparsers(dest="models_command", required=True)
 
@@ -466,6 +487,60 @@ def _models_auth_login_payload(
     }
 
 
+def _capabilities_payload(
+    *, name_filter: str | None = None, with_schema: bool = False
+) -> dict[str, Any]:
+    """Emit the agent capability registry as a JSON-serializable payload.
+
+    External agents (Claude Code, Codex, ad-hoc scripts) call this to enumerate
+    the 27 registered capabilities without needing the HTTP server running.
+    `--with-schema` additionally pulls the input JSON Schema for each capability
+    from the FastAPI app's OpenAPI document.
+    """
+    from .runtime import build_default_capability_registry
+
+    registry = build_default_capability_registry()
+    schemas: dict[str, Any] = {}
+    if with_schema:
+        try:
+            from TerraFin.interface.server import create_app
+
+            app = create_app()
+            openapi = app.openapi()
+            for path, methods in (openapi.get("paths") or {}).items():
+                if not path.startswith("/agent/api/"):
+                    continue
+                if "/runtime/" in path:
+                    continue
+                schemas[path] = methods
+        except Exception as exc:  # pragma: no cover - defensive
+            schemas["__error__"] = f"OpenAPI introspection failed: {exc}"
+
+    capabilities: list[dict[str, Any]] = []
+    for capability in registry.list():
+        if name_filter is not None and capability.name != name_filter:
+            continue
+        entry: dict[str, Any] = {
+            "name": capability.name,
+            "summary": capability.summary,
+            "description": capability.description,
+            "cli_subcommand_name": capability.cli_subcommand_name,
+            "http_route_path": capability.http_route_path,
+            "response_model_name": capability.response_model_name,
+            "transport": "hosted-only" if capability.http_route_path is None else "stateless+hosted",
+            "side_effecting": capability.side_effecting,
+            "backgroundable": capability.backgroundable,
+        }
+        if with_schema and capability.http_route_path:
+            entry["input_schema"] = schemas.get(capability.http_route_path)
+        capabilities.append(entry)
+
+    return {
+        "count": len(capabilities),
+        "capabilities": capabilities,
+    }
+
+
 def main(argv: list[str] | None = None) -> int:
     load_entrypoint_dotenv()
     parser = _build_parser()
@@ -505,6 +580,8 @@ def main(argv: list[str] | None = None) -> int:
                     raise RuntimeError(f"Unknown models auth command: {args.models_auth_command}")
             else:  # pragma: no cover - argparse keeps this unreachable
                 raise RuntimeError(f"Unknown models command: {args.models_command}")
+        elif args.command == "capabilities":
+            payload = _capabilities_payload(name_filter=args.name, with_schema=args.with_schema)
         else:
             client = _make_client(args)
             if args.command == "resolve":

@@ -186,6 +186,16 @@ class TerraFinCapability:
     artifact_builder: ArtifactBuilder | None = None
     side_effecting: bool = False
     backgroundable: bool = False
+    # Optional metadata consumed by the agent-artefacts generator (Part E of
+    # the single-source-of-truth refactor) and by `terrafin-agent
+    # capabilities`. All default-None / empty so existing registrations stay
+    # valid without changes; the generator validates that public capabilities
+    # populate `summary` + `http_route_path` + `response_model_name`.
+    summary: str | None = None
+    cli_subcommand_name: str | None = None
+    http_route_path: str | None = None
+    response_model_name: str | None = None
+    examples: tuple[str, ...] = ()
 
     def extract_focus(self, inputs: Mapping[str, Any], payload: Mapping[str, Any]) -> tuple[str, ...]:
         if self.focus_extractor is None:
@@ -526,6 +536,10 @@ def build_default_capability_registry(
                 description="Resolve a free-form market or macro query into TerraFin routing.",
                 handler=resolved_service.resolve,
                 focus_extractor=_resolve_focus,
+                summary="Resolve a free-form query into a TerraFin route.",
+                cli_subcommand_name="resolve",
+                http_route_path="/agent/api/resolve",
+                response_model_name="ResolveResponse",
             ),
             TerraFinCapability(
                 name="market_data",
@@ -533,6 +547,10 @@ def build_default_capability_registry(
                 handler=resolved_service.market_data,
                 focus_extractor=_focus_from_input_keys("name"),
                 backgroundable=True,
+                summary="Chart-ready OHLC time series for one asset.",
+                cli_subcommand_name="market-data",
+                http_route_path="/agent/api/market-data",
+                response_model_name="MarketDataResponse",
             ),
             TerraFinCapability(
                 name="indicators",
@@ -540,6 +558,10 @@ def build_default_capability_registry(
                 handler=resolved_service.indicators,
                 focus_extractor=_focus_from_input_keys("name"),
                 backgroundable=True,
+                summary="Chart-matching technical indicators for one asset.",
+                cli_subcommand_name="indicators",
+                http_route_path="/agent/api/indicators",
+                response_model_name="IndicatorsResponse",
             ),
             TerraFinCapability(
                 name="market_snapshot",
@@ -547,6 +569,10 @@ def build_default_capability_registry(
                 handler=resolved_service.market_snapshot,
                 focus_extractor=_focus_from_input_keys("name"),
                 backgroundable=True,
+                summary="Compact market snapshot for one asset.",
+                cli_subcommand_name="snapshot",
+                http_route_path="/agent/api/market-snapshot",
+                response_model_name="MarketSnapshotResponse",
             ),
             TerraFinCapability(
                 name="lppl_analysis",
@@ -554,18 +580,30 @@ def build_default_capability_registry(
                 handler=resolved_service.lppl_analysis,
                 focus_extractor=_focus_from_input_keys("name"),
                 backgroundable=True,
+                summary="LPPL bubble analysis (super-exponential growth + log-periodic oscillation detection).",
+                cli_subcommand_name="lppl",
+                http_route_path="/agent/api/lppl",
+                response_model_name="LPPLAnalysisResponse",
             ),
             TerraFinCapability(
                 name="company_info",
                 description="Fetch company profile and valuation fields for a ticker.",
                 handler=resolved_service.company_info,
                 focus_extractor=_focus_from_input_keys("ticker"),
+                summary="Company profile and valuation fields for a ticker.",
+                cli_subcommand_name="company",
+                http_route_path="/agent/api/company",
+                response_model_name="CompanyInfoResponse",
             ),
             TerraFinCapability(
                 name="earnings",
                 description="Fetch earnings history for a ticker.",
                 handler=resolved_service.earnings,
                 focus_extractor=_focus_from_input_keys("ticker"),
+                summary="Earnings history (estimate / reported / surprise) for a ticker.",
+                cli_subcommand_name="earnings",
+                http_route_path="/agent/api/earnings",
+                response_model_name="EarningsResponse",
             ),
             TerraFinCapability(
                 name="financials",
@@ -573,6 +611,10 @@ def build_default_capability_registry(
                 handler=resolved_service.financials,
                 focus_extractor=_focus_from_input_keys("ticker"),
                 backgroundable=True,
+                summary="Financial statement table (income / balance / cashflow) for a ticker.",
+                cli_subcommand_name="financials",
+                http_route_path="/agent/api/financials",
+                response_model_name="FinancialStatementResponse",
             ),
             TerraFinCapability(
                 name="portfolio",
@@ -580,6 +622,10 @@ def build_default_capability_registry(
                 handler=resolved_service.portfolio,
                 focus_extractor=_focus_from_input_keys("guru"),
                 backgroundable=True,
+                summary="Guru portfolio holdings and summary metadata.",
+                cli_subcommand_name="portfolio",
+                http_route_path="/agent/api/portfolio",
+                response_model_name="PortfolioResponse",
             ),
             TerraFinCapability(
                 name="economic",
@@ -587,6 +633,10 @@ def build_default_capability_registry(
                 handler=resolved_service.economic,
                 focus_extractor=_economic_focus,
                 backgroundable=True,
+                summary="Economic indicator series (FRED-backed).",
+                cli_subcommand_name="economic",
+                http_route_path="/agent/api/economic",
+                response_model_name="EconomicResponse",
             ),
             TerraFinCapability(
                 name="macro_focus",
@@ -594,12 +644,20 @@ def build_default_capability_registry(
                 handler=resolved_service.macro_focus,
                 focus_extractor=_focus_from_input_keys("name"),
                 backgroundable=True,
+                summary="Macro summary plus chart-ready series for one instrument.",
+                cli_subcommand_name="macro-focus",
+                http_route_path="/agent/api/macro-focus",
+                response_model_name="MacroFocusResponse",
             ),
             TerraFinCapability(
                 name="calendar_events",
                 description="Fetch TerraFin calendar events for a month.",
                 handler=resolved_service.calendar_events,
                 backgroundable=True,
+                summary="TerraFin calendar events for a month.",
+                cli_subcommand_name="calendar",
+                http_route_path="/agent/api/calendar",
+                response_model_name="CalendarResponse",
             ),
             # ----- Dashboard widget-parity capabilities -----
             # Each of these mirrors a standalone widget the user sees on the
@@ -616,6 +674,9 @@ def build_default_capability_registry(
                     "previous close, and 1W/1M history."
                 ),
                 handler=resolved_service.fear_greed,
+                summary="CNN Fear & Greed index — score, rating, history.",
+                http_route_path="/agent/api/fear-greed",
+                response_model_name="FearGreedResponse",
             ),
             TerraFinCapability(
                 name="sp500_dcf",
@@ -626,6 +687,9 @@ def build_default_capability_registry(
                 ),
                 handler=resolved_service.sp500_dcf,
                 backgroundable=True,
+                summary="Full S&P 500 DCF valuation (scenarios, sensitivity, methods).",
+                http_route_path="/agent/api/sp500-dcf",
+                response_model_name="DCFValuationResponse",
             ),
             TerraFinCapability(
                 name="beta_estimate",
@@ -638,6 +702,9 @@ def build_default_capability_registry(
                 handler=resolved_service.beta_estimate,
                 focus_extractor=_focus_from_input_keys("ticker"),
                 backgroundable=True,
+                summary="5-year monthly beta with adjusted beta, R², benchmark.",
+                http_route_path="/agent/api/beta-estimate",
+                response_model_name="BetaEstimateResponse",
             ),
             TerraFinCapability(
                 name="top_companies",
@@ -646,6 +713,9 @@ def build_default_capability_registry(
                     "`/market-insights/api/top-companies`."
                 ),
                 handler=resolved_service.top_companies,
+                summary="Top companies (market-cap-ranked equity list).",
+                http_route_path="/agent/api/top-companies",
+                response_model_name="TopCompaniesResponse",
             ),
             TerraFinCapability(
                 name="market_regime",
@@ -655,6 +725,9 @@ def build_default_capability_registry(
                     "confidence, and bulleted signals."
                 ),
                 handler=resolved_service.market_regime,
+                summary="Market regime classification with confidence and signals.",
+                http_route_path="/agent/api/market-regime",
+                response_model_name="MarketRegimeResponse",
             ),
             TerraFinCapability(
                 name="trailing_forward_pe",
@@ -664,6 +737,9 @@ def build_default_capability_registry(
                 ),
                 handler=resolved_service.trailing_forward_pe,
                 backgroundable=True,
+                summary="S&P 500 trailing vs forward P/E spread (history + summary).",
+                http_route_path="/agent/api/trailing-forward-pe",
+                response_model_name="TrailingForwardPeSpreadResponse",
             ),
             TerraFinCapability(
                 name="market_breadth",
@@ -674,6 +750,9 @@ def build_default_capability_registry(
                     "about whole-market state rather than a single ticker."
                 ),
                 handler=resolved_service.market_breadth,
+                summary="Standalone market-breadth metrics (% advancing, new highs, etc.).",
+                http_route_path="/agent/api/market-breadth",
+                response_model_name="MarketBreadthResponse",
             ),
             TerraFinCapability(
                 name="watchlist",
@@ -683,6 +762,9 @@ def build_default_capability_registry(
                     "bundled inside `market_snapshot`."
                 ),
                 handler=resolved_service.watchlist,
+                summary="The user's current watchlist (read-only).",
+                http_route_path="/agent/api/watchlist",
+                response_model_name="WatchlistResponse",
             ),
             TerraFinCapability(
                 name="open_chart",
@@ -691,6 +773,12 @@ def build_default_capability_registry(
                 focus_extractor=_chart_focus,
                 artifact_builder=_chart_artifact,
                 side_effecting=True,
+                summary="Create or update a chart session bound to the conversation.",
+                cli_subcommand_name="open-chart",
+                # Hosted-only: no parity HTTP route. Chart artifacts are bound
+                # to the active session.
+                http_route_path=None,
+                response_model_name="ChartOpenResponse",
             ),
             TerraFinCapability(
                 name="fundamental_screen",
@@ -698,6 +786,9 @@ def build_default_capability_registry(
                 handler=resolved_service.fundamental_screen,
                 focus_extractor=_focus_from_input_keys("ticker"),
                 backgroundable=True,
+                summary="Fundamental quality and moat screen for a ticker.",
+                http_route_path="/agent/api/fundamental-screen",
+                response_model_name="FundamentalScreenResponse",
             ),
             TerraFinCapability(
                 name="risk_profile",
@@ -705,13 +796,31 @@ def build_default_capability_registry(
                 handler=resolved_service.risk_profile,
                 focus_extractor=_focus_from_input_keys("name"),
                 backgroundable=True,
+                summary="Statistical risk profile (tail risk, convexity, vol regime, drawdown).",
+                http_route_path="/agent/api/risk-profile",
+                response_model_name="RiskProfileResponse",
             ),
             TerraFinCapability(
                 name="valuation",
-                description="Run DCF, reverse DCF, relative valuation, and Graham Number for a ticker.",
+                description=(
+                    "Run DCF, reverse DCF, relative valuation, and Graham Number for a ticker. "
+                    "Optional inputs let the agent mirror the frontend's DCF input form: "
+                    "`projection_years` (5/10/15) sets the explicit forecast horizon; "
+                    "`fcf_base_source` (`auto`/`3yr_avg`/`ttm`/`latest_annual`) picks the base "
+                    "FCF/share — `auto` cascades 3yr_avg → annual → ttm and is the default. "
+                    "Supplying ALL three of `breakeven_year`, `breakeven_cash_flow_per_share`, "
+                    "and `post_breakeven_growth_pct` switches to turnaround mode: pre-breakeven "
+                    "years interpolate linearly from the (possibly negative) current FCF to the "
+                    "breakeven value; post-breakeven years compound at the given rate fading "
+                    "toward terminal growth. Use turnaround mode when the user is valuing a "
+                    "company with current negative FCF whose thesis is a future turn."
+                ),
                 handler=resolved_service.valuation,
                 focus_extractor=_focus_from_input_keys("ticker"),
                 backgroundable=True,
+                summary="DCF (incl. turnaround mode), reverse DCF, relative valuation, Graham number.",
+                http_route_path="/agent/api/valuation",
+                response_model_name="ValuationResponse",
             ),
             TerraFinCapability(
                 name="sec_filings",
@@ -757,6 +866,9 @@ def build_default_capability_registry(
                 ),
                 handler=resolved_service.sec_filings,
                 focus_extractor=_focus_from_input_keys("ticker"),
+                summary="List recent 10-K / 10-Q / 8-K filings for a ticker with EDGAR URLs.",
+                http_route_path="/agent/api/sec-filings",
+                response_model_name="SecFilingsListResponse",
             ),
             TerraFinCapability(
                 name="sec_filing_document",
@@ -776,6 +888,9 @@ def build_default_capability_registry(
                 handler=resolved_service.sec_filing_document,
                 focus_extractor=_focus_from_input_keys("ticker"),
                 backgroundable=True,
+                summary="Filing table-of-contents (sections + char counts) without full body.",
+                http_route_path="/agent/api/sec-filing-document",
+                response_model_name="SecFilingDocumentResponse",
             ),
             TerraFinCapability(
                 name="sec_filing_section",
@@ -822,6 +937,9 @@ def build_default_capability_registry(
                 handler=resolved_service.sec_filing_section,
                 focus_extractor=_focus_from_input_keys("ticker"),
                 backgroundable=True,
+                summary="Verbatim markdown body of one filing section by slug.",
+                http_route_path="/agent/api/sec-filing-section",
+                response_model_name="SecFilingSectionResponse",
             ),
         ]
     )

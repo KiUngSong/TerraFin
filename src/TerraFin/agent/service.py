@@ -859,9 +859,40 @@ class TerraFinAgentService:
             "processing": payload["processing"],
         }
 
-    def valuation(self, ticker: str) -> dict[str, Any]:
+    def valuation(
+        self,
+        ticker: str,
+        *,
+        projection_years: int | None = None,
+        fcf_base_source: str | None = None,
+        breakeven_year: int | None = None,
+        breakeven_cash_flow_per_share: float | None = None,
+        post_breakeven_growth_pct: float | None = None,
+    ) -> dict[str, Any]:
         normalized = ticker.upper()
-        dcf = build_stock_dcf_payload(normalized)
+        # Build the DCF with optional overrides so the agent can mirror the
+        # frontend's DCF input form (Forecast Horizon, FCF Base Source picker,
+        # Turnaround Mode). When all three turnaround fields are supplied the
+        # template switches to the explicit per-year schedule path; otherwise
+        # the standard single-base × growth-curve model runs.
+        from TerraFin.analytics.analysis.fundamental.dcf.models import StockDCFOverrides
+
+        overrides_kwargs: dict[str, Any] = {}
+        if fcf_base_source is not None:
+            overrides_kwargs["fcf_base_source"] = fcf_base_source  # type: ignore[arg-type]
+        if breakeven_year is not None:
+            overrides_kwargs["breakeven_year"] = int(breakeven_year)
+        if breakeven_cash_flow_per_share is not None:
+            overrides_kwargs["breakeven_cash_flow_per_share"] = float(breakeven_cash_flow_per_share)
+        if post_breakeven_growth_pct is not None:
+            overrides_kwargs["post_breakeven_growth_pct"] = float(post_breakeven_growth_pct)
+        overrides = StockDCFOverrides(**overrides_kwargs) if overrides_kwargs else None
+
+        dcf = build_stock_dcf_payload(
+            normalized,
+            overrides=overrides,
+            projection_years=projection_years,
+        )
         reverse_dcf = build_stock_reverse_dcf_payload(normalized)
 
         info = build_company_info_payload(normalized)

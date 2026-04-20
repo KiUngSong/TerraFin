@@ -30,6 +30,9 @@ allowed_capabilities:
   - risk_profile
   - valuation
   - calendar_events
+  - market_breadth
+  - market_regime
+  - current_view_context
 
 principles:
   - "Seek asymmetric risk-reward — large upside with limited, defined downside"

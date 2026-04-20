@@ -1,13 +1,27 @@
 [project]
 name = "TerraFin"
 version = "0.0.1"
-description = "Agent-ready Python toolkit and FastAPI interface for financial data, lightweight analytics, charting, and research workflows."
+description = "Agent-friendly financial-research toolkit and FastAPI dashboard with DCF (incl. turnaround mode), reverse DCF, FCF history, SEC filings, sentiment widgets, hosted TerraFin Agent runtime, and a drop-in skill for Claude Code / external LLM agents."
 requires-python = ">=3.11"
 authors = [
     {name = "Ki-Ung Song", email = "sk851@snu.ac.kr"}
 ]
 readme = "README.md"
 license = { text = "MIT" }
+keywords = [
+    "finance",
+    "agent",
+    "llm",
+    "claude",
+    "skill",
+    "dcf",
+    "valuation",
+    "sec-edgar",
+    "yfinance",
+    "fred",
+    "fastapi",
+    "dashboard",
+]
 classifiers = [
     "Programming Language :: Python :: 3.11",
     "License :: OSI Approved :: MIT License",

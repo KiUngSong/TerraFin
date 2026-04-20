@@ -276,12 +276,16 @@ When a feature becomes public, check each box deliberately.
 - `client.py` updated if there is a new stable method or parameter
 - `tasks.py` updated if the feature becomes part of a standard task recipe
 - `cli.py` updated if the feature deserves first-class shell access
-- `interface/agent/data_routes.py` updated if HTTP exposure is required
+- `tool_contracts.py` schema updated for any new params (input enums, ranges, required fields)
+- `runtime.py` capability registration with a description that names the new behaviour (the LLM reads this)
+- `interface/agent/data_routes.py` updated if HTTP exposure is required (every internal capability should have a parity `/agent/api/*` route — external HTTP-only agents depend on it)
+- `src/TerraFin/agent/personas/*.yaml` updated if the capability should be persona-callable (Buffett / Marks / Druckenmiller). YAML allowlists are the **single source of truth** — no hidden override layer.
 
 ### Skill and docs
 
-- `docs/agent/usage.md` updated if agent usage changed
-- `skills/terrafin/SKILL.md` updated if the skill should teach the new feature
+- `docs/agent/usage.md` updated if agent usage changed (recipe / disclosure prose only — the route summary table is auto-generated; see below)
+- `skills/terrafin/SKILL.md` recipe added / updated for the new feature (recipe prose only — the "Key client methods" list is auto-generated)
+- `python scripts/generate-agent-artefacts.py` run to refresh the sentinel-bounded sections in SKILL.md and `usage.md`. CI guard: `pytest tests/agent/test_generated_artefacts_match.py` fails if you forget
 - `docs/interface.md`, `docs/data-layer.md`, `docs/chart-architecture.md`, or `docs/analytics.md` updated where appropriate
 - `README.md` updated if the feature changes the public product story
 
@@ -345,6 +349,43 @@ first-class chart series:
 - once they need optimized chart serving, they should be treated as
   `PrivateSeries`
 - until then, they can stay widget-oriented payloads
+
+## Example: DCF turnaround mode (worked end-to-end)
+
+A real recent feature that touched every layer. Use this as a template when
+adding similar valuation/fundamental capabilities.
+
+The goal: let users value companies whose current FCF is negative but whose
+thesis is a future turn (MOH, SK Hynix during cycle bottoms, biotech,
+restructuring stories). The single-base × growth-curve DCF model gates these
+out at the `base_cash_flow_per_share <= 0 → insufficient_data` check, so the
+existing DCF cannot answer the user's question.
+
+Layer-by-layer landing zone:
+
+| Layer | What changed | File(s) |
+|---|---|---|
+| Analytics | Added `_build_turnaround_schedule` (linear interp pre-breakeven; compounded post-breakeven fading to terminal). Added `_select_stock_fcf_base` selector (auto / 3yr_avg / ttm / latest_annual cascade). Added `_three_year_avg_fcf`, `_latest_annual_fcf`, `_quarterly_ttm_fcf` helpers. | `src/TerraFin/analytics/analysis/fundamental/dcf/inputs.py` |
+| Analytics | New override fields (`fcf_base_source`, `breakeven_year`, `breakeven_cash_flow_per_share`, `post_breakeven_growth_pct`) on the model. | `src/TerraFin/analytics/analysis/fundamental/dcf/models.py` |
+| Analytics | Presenter switches to the explicit-schedule path when turnaround fields are set; bear/base/bull scenarios apply YoY shifts to the schedule. | `src/TerraFin/analytics/analysis/fundamental/dcf/presenters.py` |
+| Interface | `POST /stock/api/dcf` accepts the new fields via `StockDCFRequest`. | `src/TerraFin/interface/valuation_models.py`, `src/TerraFin/interface/stock/data_routes.py` |
+| Interface | New `/stock/api/fcf-history` endpoint for the FCF Base Source picker (returns 3yr-avg / latest-annual / TTM candidates + which one `auto` picks). | `src/TerraFin/interface/stock/data_routes.py`, `src/TerraFin/interface/stock/payloads.py` |
+| Frontend | DCF Workbench: Forecast Horizon segmented control, Turnaround Mode toggle, FCF Base Source segmented control with auto-fill + revert chip, Explain inputs toggle. | `src/TerraFin/interface/frontend/src/dcf/DcfWorkbench.tsx` |
+| Frontend | New `FcfHistoryChart` (right-gutter TTM callout, 3yr Avg dashed line) and `ProjectedFcfChart` (bar / line+band based on horizon, bear/bull whiskers, hover tooltips). | `src/TerraFin/interface/frontend/src/stock/components/{FcfHistoryChart,ProjectedFcfChart}.tsx` |
+| Agent service | `valuation()` accepts `projection_years`, `fcf_base_source`, and the three turnaround fields as keyword args. | `src/TerraFin/agent/service.py` |
+| Agent runtime | `valuation` capability description rewritten to teach the LLM when to use turnaround mode. Schema for new params in `tool_contracts.py`. | `src/TerraFin/agent/runtime.py`, `src/TerraFin/agent/tool_contracts.py` |
+| Agent HTTP | `GET /agent/api/valuation` and `/agent/api/fcf-history` HTTP routes (parity with internal tool). | `src/TerraFin/interface/agent/data_routes.py` |
+| Persona | Druckenmiller / Marks / Buffett persona YAML allowlists keep `valuation` accessible (the hidden broad-market override layer was deleted in this batch — YAML is now the single source of truth). | `src/TerraFin/agent/personas/*.yaml` |
+| Skill | New "DCF turnaround mode" recipe in SKILL.md with a copy-paste MOH example. | `skills/terrafin/SKILL.md` |
+| Docs | Turnaround math + base FCF source cascade in Analytics Notes. New POST fields documented in API Reference. New stock page layout + DCF Workbench controls in Interface Overview. | `docs/analytics-notes.md`, `docs/api-reference.md`, `docs/interface.md` |
+| View context | Frontend publishes `turnaroundMode`, `breakevenYear`, etc. through the existing `publishAgentViewContext` so `current_view_context()` already exposes them — no separate work. | `src/TerraFin/interface/frontend/src/dcf/DcfWorkbench.tsx` (sanitizeStockFormState) |
+| Tests | Backend: `_build_turnaround_schedule` unit tests, `_select_stock_fcf_base` cascade tests, API route accepts override tests. Agent service test stub updated to pass kwargs through. Frontend: typecheck + build. | `tests/analytics/test_dcf_inputs.py`, `tests/interface/test_dcf_api.py`, `tests/agent/test_service.py` |
+
+The single most important discipline: when you add a backend capability,
+always land the parity `/agent/api/*` route in the same PR. External agents
+that only use the HTTP transport otherwise can't see the feature, and the
+SKILL.md instruction "every capability has a parity HTTP route" stops being
+true.
 
 ## Practical shortcut
 

@@ -1,0 +1,102 @@
+#!/usr/bin/env bash
+# TerraFin skill installer — symlink skills/terrafin into the skill dirs of
+# every AI coding host you have installed (or a specific one via --host).
+#
+# Usage:
+#   ./setup                         # auto: install to every detected host
+#   ./setup --host claude           # just Claude Code
+#   ./setup --host codex            # just Codex CLI
+#   ./setup --host opencode         # just opencode
+#   ./setup -q                      # quiet (errors only)
+#
+# Idempotent: re-running overwrites the symlink. `git pull` propagates
+# upgrades to every host because the target is a live symlink to the repo
+# checkout — no re-copy needed.
+#
+# Install pattern (single-file ./setup at repo root, --host auto mode,
+# inclusive detection via `command -v`, idempotent symlinks) is adapted
+# from gstack's installer — https://github.com/garrytan/gstack — which
+# pioneered the multi-host skill-drop-in shape for Anthropic Skills.
+
+set -euo pipefail
+
+HOST="auto"
+QUIET=0
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --host) HOST="$2" ; shift 2 ;;
+    --host=*) HOST="${1#*=}" ; shift ;;
+    -q|--quiet) QUIET=1 ; shift ;;
+    -h|--help)
+      sed -n '2,14p' "$0" | sed 's/^# \{0,1\}//' ; exit 0 ;;
+    *)
+      echo "unknown flag: $1" >&2 ; exit 2 ;;
+  esac
+done
+
+case "$HOST" in
+  auto|claude|codex|opencode) ;;
+  *) echo "--host must be one of: auto, claude, codex, opencode (got: $HOST)" >&2 ; exit 2 ;;
+esac
+
+REPO_ROOT="$(cd "$(dirname "$0")" && pwd)"
+SKILL_SRC="$REPO_ROOT/skills/terrafin"
+
+if [ ! -f "$SKILL_SRC/SKILL.md" ]; then
+  echo "missing $SKILL_SRC/SKILL.md — run ./setup from the TerraFin repo root" >&2
+  exit 1
+fi
+
+log() { [ "$QUIET" -eq 1 ] || echo "$@" ; }
+
+install_one() {
+  local host="$1" detect_cmd="$2" target_dir="$3"
+  if [ "$HOST" != "auto" ] && [ "$HOST" != "$host" ]; then
+    return 0
+  fi
+  if [ "$HOST" = "auto" ] && ! command -v "$detect_cmd" >/dev/null 2>&1; then
+    return 0
+  fi
+  mkdir -p "$target_dir"
+  local link="$target_dir/terrafin"
+  # `ln -snf` replaces an existing symlink atomically; if a real directory
+  # already exists at the target (e.g. a previous `cp -r`), bail loudly so
+  # we don't clobber it.
+  if [ -e "$link" ] && [ ! -L "$link" ]; then
+    echo "refusing to overwrite existing directory: $link" >&2
+    echo "  (likely a leftover from 'cp -r skills/terrafin'; remove it and re-run ./setup)" >&2
+    return 1
+  fi
+  ln -snf "$SKILL_SRC" "$link"
+  log "installed: $host → $link"
+  INSTALLED=$((INSTALLED + 1))
+}
+
+INSTALLED=0
+
+install_one claude   claude   "$HOME/.claude/skills"
+install_one codex    codex    "$HOME/.codex/skills"
+install_one opencode opencode "$HOME/.config/opencode/skills"
+
+if [ "$INSTALLED" -eq 0 ]; then
+  if [ "$HOST" = "auto" ]; then
+    # No host detected on PATH — fall back to Claude (the canonical target)
+    # so `./setup` is never a no-op. Matches gstack's default.
+    log "no AI host detected on PATH — defaulting to Claude Code"
+    mkdir -p "$HOME/.claude/skills"
+    link="$HOME/.claude/skills/terrafin"
+    if [ -e "$link" ] && [ ! -L "$link" ]; then
+      echo "refusing to overwrite existing directory: $link" >&2
+      exit 1
+    fi
+    ln -snf "$SKILL_SRC" "$link"
+    log "installed: claude → $link"
+  else
+    echo "host '$HOST' not installed on PATH" >&2
+    exit 1
+  fi
+fi
+
+log ""
+log "Done. Open a new session in your AI host and type 'terrafin' to invoke."

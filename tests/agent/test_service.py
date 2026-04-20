@@ -366,8 +366,8 @@ def test_valuation_passes_through_full_dcf_and_reverse_dcf_payloads(monkeypatch)
         "dataQuality": {"grade": "A"},
         "warnings": [],
     }
-    monkeypatch.setattr(agent_service, "build_stock_dcf_payload", lambda _t: dcf_full)
-    monkeypatch.setattr(agent_service, "build_stock_reverse_dcf_payload", lambda _t: reverse_full)
+    monkeypatch.setattr(agent_service, "build_stock_dcf_payload", lambda _t, **_kw: dcf_full)
+    monkeypatch.setattr(agent_service, "build_stock_reverse_dcf_payload", lambda _t, **_kw: reverse_full)
     monkeypatch.setattr(
         agent_service,
         "build_company_info_payload",

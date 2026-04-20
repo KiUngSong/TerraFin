@@ -543,20 +543,12 @@ def _select_guru_worker_tools(
         for tool in loop.tool_adapter.list_tools_for_session(session_id)
         if tool.execution_mode == "invoke" and not (broad_market and tool.name == "resolve")
     ]
-    if broad_market:
-        allowed_by_persona: dict[str, set[str]] = {
-            WARREN_BUFFETT: {"market_snapshot", "valuation", "current_view_context"},
-            HOWARD_MARKS: {"market_snapshot", "valuation", "economic", "current_view_context"},
-            STANLEY_DRUCKENMILLER: {
-                "market_snapshot",
-                "economic",
-                "risk_profile",
-                "current_view_context",
-            },
-        }
-        allowed = allowed_by_persona.get(persona.name)
-        if allowed is not None:
-            tools = [tool for tool in tools if tool.capability_name in allowed]
+    # Persona tool allowlists are defined in the YAML files under
+    # `src/TerraFin/agent/personas/`. The runtime tool adapter already filters
+    # by `allowed_capabilities`, so this function intentionally does not impose
+    # a second hidden allowlist for the broad-market path — broad-market and
+    # ticker-specific guru sessions get the same toolset. To gain or lose
+    # access to a capability, edit the persona's YAML.
     return tuple(tools) + (memo_tool,)
 
 

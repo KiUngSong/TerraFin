@@ -847,4 +847,157 @@ def create_agent_data_router() -> APIRouter:
         except Exception as exc:
             _raise_http_error(exc)
 
+    # ------------------------------------------------------------------
+    # Stateless capability routes for the rest of the agent surface.
+    # These mirror the hosted-runtime tool registry one-to-one so external
+    # HTTP-only agents (Claude Code consuming SKILL.md, n8n flows, etc.) have
+    # parity with internally-hosted agents. Response payloads are returned as
+    # raw dicts pending the dedicated Pydantic response models tracked
+    # separately. Each route is a thin pass-through to TerraFinAgentService.
+    # ------------------------------------------------------------------
+
+    @router.get(f"{AGENT_API_PREFIX}/valuation")
+    def api_agent_valuation(
+        ticker: str = Query(..., min_length=1),
+        projection_years: int | None = Query(default=None, ge=1, le=20),
+        fcf_base_source: str | None = Query(
+            default=None, pattern="^(auto|3yr_avg|ttm|latest_annual)$"
+        ),
+        breakeven_year: int | None = Query(default=None, ge=1, le=15),
+        breakeven_cash_flow_per_share: float | None = Query(default=None),
+        post_breakeven_growth_pct: float | None = Query(default=None),
+    ) -> dict:
+        try:
+            return service.valuation(
+                ticker,
+                projection_years=projection_years,
+                fcf_base_source=fcf_base_source,
+                breakeven_year=breakeven_year,
+                breakeven_cash_flow_per_share=breakeven_cash_flow_per_share,
+                post_breakeven_growth_pct=post_breakeven_growth_pct,
+            )
+        except Exception as exc:
+            _raise_http_error(exc)
+
+    @router.get(f"{AGENT_API_PREFIX}/fcf-history")
+    def api_agent_fcf_history(
+        ticker: str = Query(..., min_length=1),
+        years: int = Query(default=10, ge=1, le=20),
+    ) -> dict:
+        from TerraFin.interface.stock.payloads import build_fcf_history_payload
+
+        try:
+            return build_fcf_history_payload(ticker, years=years)
+        except Exception as exc:
+            _raise_http_error(exc)
+
+    @router.get(f"{AGENT_API_PREFIX}/sp500-dcf")
+    def api_agent_sp500_dcf() -> dict:
+        try:
+            return service.sp500_dcf()
+        except Exception as exc:
+            _raise_http_error(exc)
+
+    @router.get(f"{AGENT_API_PREFIX}/fundamental-screen")
+    def api_agent_fundamental_screen(ticker: str = Query(..., min_length=1)) -> dict:
+        try:
+            return service.fundamental_screen(ticker)
+        except Exception as exc:
+            _raise_http_error(exc)
+
+    @router.get(f"{AGENT_API_PREFIX}/risk-profile")
+    def api_agent_risk_profile(
+        name: str = Query(..., min_length=1),
+        depth: str = Query(default="auto", pattern="^(auto|recent|full)$"),
+    ) -> dict:
+        try:
+            return service.risk_profile(name, depth=depth)
+        except Exception as exc:
+            _raise_http_error(exc)
+
+    @router.get(f"{AGENT_API_PREFIX}/beta-estimate")
+    def api_agent_beta_estimate(ticker: str = Query(..., min_length=1)) -> dict:
+        try:
+            return service.beta_estimate(ticker)
+        except Exception as exc:
+            _raise_http_error(exc)
+
+    @router.get(f"{AGENT_API_PREFIX}/sec-filings")
+    def api_agent_sec_filings(ticker: str = Query(..., min_length=1)) -> dict:
+        try:
+            return service.sec_filings(ticker)
+        except Exception as exc:
+            _raise_http_error(exc)
+
+    @router.get(f"{AGENT_API_PREFIX}/sec-filing-document")
+    def api_agent_sec_filing_document(
+        ticker: str = Query(..., min_length=1),
+        accession: str = Query(..., min_length=1),
+        primaryDocument: str = Query(..., min_length=1),
+        form: str = Query(default="10-Q", min_length=1),
+    ) -> dict:
+        try:
+            return service.sec_filing_document(
+                ticker, accession, primaryDocument, form=form
+            )
+        except Exception as exc:
+            _raise_http_error(exc)
+
+    @router.get(f"{AGENT_API_PREFIX}/sec-filing-section")
+    def api_agent_sec_filing_section(
+        ticker: str = Query(..., min_length=1),
+        accession: str = Query(..., min_length=1),
+        primaryDocument: str = Query(..., min_length=1),
+        sectionSlug: str = Query(..., min_length=1),
+        form: str = Query(default="10-Q", min_length=1),
+    ) -> dict:
+        try:
+            return service.sec_filing_section(
+                ticker, accession, primaryDocument, sectionSlug, form=form
+            )
+        except Exception as exc:
+            _raise_http_error(exc)
+
+    @router.get(f"{AGENT_API_PREFIX}/fear-greed")
+    def api_agent_fear_greed() -> dict:
+        try:
+            return service.fear_greed()
+        except Exception as exc:
+            _raise_http_error(exc)
+
+    @router.get(f"{AGENT_API_PREFIX}/top-companies")
+    def api_agent_top_companies() -> dict:
+        try:
+            return service.top_companies()
+        except Exception as exc:
+            _raise_http_error(exc)
+
+    @router.get(f"{AGENT_API_PREFIX}/market-regime")
+    def api_agent_market_regime() -> dict:
+        try:
+            return service.market_regime()
+        except Exception as exc:
+            _raise_http_error(exc)
+
+    @router.get(f"{AGENT_API_PREFIX}/trailing-forward-pe")
+    def api_agent_trailing_forward_pe() -> dict:
+        try:
+            return service.trailing_forward_pe()
+        except Exception as exc:
+            _raise_http_error(exc)
+
+    @router.get(f"{AGENT_API_PREFIX}/market-breadth")
+    def api_agent_market_breadth() -> dict:
+        try:
+            return service.market_breadth()
+        except Exception as exc:
+            _raise_http_error(exc)
+
+    @router.get(f"{AGENT_API_PREFIX}/watchlist")
+    def api_agent_watchlist() -> dict:
+        try:
+            return service.watchlist()
+        except Exception as exc:
+            _raise_http_error(exc)
+
     return router
