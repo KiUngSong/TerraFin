@@ -84,16 +84,16 @@ nav:
       - Overview: getting-started.md
       - Configuration: configuration.md
       - Deployment & Operations: deployment.md
-  - Product Guides:
-      - Interface Overview: interface.md
-      - API Reference: api-reference.md
-      - Examples & Workflows: examples.md
   - Agent Docs:
       - Overview: agent/index.md
       - Usage: agent/usage.md
       - Model Management: agent/models.md
       - Architecture: agent/architecture.md
       - Hosted Runtime: agent/hosted-runtime.md
+  - Product Guides:
+      - Interface Overview: interface.md
+      - API Reference: api-reference.md
+      - Examples & Workflows: examples.md
   - Reference:
       - Data Layer: data-layer.md
       - Analytics: analytics.md

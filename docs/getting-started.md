@@ -142,4 +142,7 @@ Notebook rules and layout guidance live in [Notebooks](notebooks.md).
 - [Configuration](configuration.md)
 - [Deployment & Operations](deployment.md)
 - [Examples & Workflows](examples.md)
-- [Agent Docs](agent/index.md)
+- [Agent Docs](agent/index.md) — both Hosted TerraFin Agent (Mode A) and the
+  external-agent skill / HTTP surface (Mode B).
+- [TerraFin skill on GitHub](https://github.com/KiUngSong/TerraFin/blob/main/skills/terrafin/SKILL.md) —
+  drop-in for Claude Code / Codex (`cp -r skills/terrafin ~/.claude/skills/`).

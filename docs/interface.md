@@ -312,9 +312,67 @@ The page itself uses the shared TerraFin chart session and progressive
 | `GET` | `/stock/api/company-info` | Company profile and price summary (`?ticker=`) |
 | `GET` | `/stock/api/earnings` | Earnings history (`?ticker=`) |
 | `GET` | `/stock/api/financials` | Financial statements (`?ticker=`, `statement=`, `period=`) |
+| `GET` | `/stock/api/fcf-history` | Annual FCF/share history + 3yr-avg/latest-annual/TTM candidates and the source the `auto` cascade would pick (`?ticker=`, `years=10`). See [api-reference.md](./api-reference.md#stock-analysis). |
+| `GET` / `POST` | `/stock/api/dcf` | Forward DCF. POST body accepts `projectionYears` (5/10/15), `fcfBaseSource` (`auto`/`3yr_avg`/`ttm`/`latest_annual`), and turnaround inputs (`breakevenYear`, `breakevenCashFlowPerShare`, `postBreakevenGrowthPct`) on top of the base overrides. |
+| `GET` / `POST` | `/stock/api/reverse-dcf` | Reverse DCF (market-implied growth). POST accepts `projectionYears`, `growthProfile`, base overrides. |
+| `GET` | `/stock/api/beta-estimate` | TerraFin's `beta_5y_monthly` estimate against the mapped benchmark. |
 | `GET` | `/stock/api/filings` | Recent 10-K / 10-Q / 8-K list with EDGAR URLs (`?ticker=`, `limit=`) |
 | `GET` | `/stock/api/filing-document` | Parsed markdown + TOC for one filing (`?ticker=`, `accession=`, `primaryDocument=`, `form=`, `includeImages=`) |
 | `GET` | `/resolve-ticker` | Resolve free-form search into `/stock/...` or `/market-insights?...` |
+
+### Page layout (`/stock/{ticker}`)
+
+The stock-detail page is a vertical stack of sections. Row 2 (Earnings + FCF
+history) is height-capped on desktop so the page stays scannable; longer
+content scrolls inside the cards rather than expanding them.
+
+| Row | Left card | Right card |
+|---|---|---|
+| 1 | **Market Chart** (price history + indicators) | **Overview & Valuation** (company profile, price context, key metrics) |
+| 2 *(capped at 280px desktop)* | **Earnings History** (EPS estimate / reported / surprise table, vertical scroll) | **FCF / Share History** (annual FCF/share bars, latest-TTM right-gutter callout, 3yr-Avg dashed reference line) |
+| 3 | **DCF Valuation** (input form + Projected FCF chart at the bottom) | **DCF Valuation Result** (intrinsic value tiles, sensitivity heatmap, projection table) |
+| 4 | **Reverse DCF** *(toggled, collapsed by default)* — when expanded, shows input + result side-by-side mirroring Row 3. The Reverse DCF Result card carries its own Projected FCF chart at the bottom. |
+| 5 | **SEC Filings** (US-listed issuers only; auto-hidden otherwise). |
+
+### DCF Valuation card
+
+The forward-DCF input card hosts:
+
+- **Forecast Horizon** — segmented control (`5` / `10` / `15` years) and a
+  **Turnaround Mode** checkbox. Turnaround mode swaps `Base Growth %` for
+  `Breakeven Year` / `Breakeven FCF / Share` / `Post-Breakeven Growth %`
+  inputs.
+- **FCF Base Source** — segmented control (`Auto` / `3yr Avg` / `TTM` /
+  `Latest Annual`). Selecting a source auto-fills the *Base FCF / Share*
+  field with the corresponding candidate value (read from
+  `/stock/api/fcf-history`'s `candidates`). If the user types over the
+  auto-filled value, a `↺ Revert to {source} ($X)` chip surfaces under the
+  field; clicking it restores the source's value.
+- **Model Inputs grid** — Base FCF / Share, Base Growth %, Terminal Growth %,
+  Beta (with a `Compute Beta` button that runs `beta_5y_monthly`), Equity
+  Risk Premium %.
+- **Explain inputs** toggle (top-right of the card header). OFF by default;
+  hides every "i" icon for clean entry by power users. ON reveals all input
+  hints. State is persisted in `localStorage` (`terrafin.dcf.explainInputs`)
+  via the `useExplainInputs` hook. Implemented through an
+  `InfoHintVisibilityContext` provider — the `InfoHint` component reads the
+  context and returns `null` when hidden.
+- **Projected FCF / Share chart** — appears at the bottom after running DCF.
+  Bars for ≤15-year horizons; line + shaded band (bear/bull envelope, base
+  line) for longer horizons. In bar mode with multi-scenario data, each base
+  bar carries a vertical whisker from bear to bull with colored end-caps so
+  the scenario spread is visible. The Reverse DCF Result card uses the same
+  component (single-scenario, implied-schedule label).
+
+### FCF / Share History chart
+
+`FcfHistoryChart` renders historical annual FCF/share as filled bars
+(green/red), the latest TTM as a small blue pill in the right gutter
+connected by a dashed leader line to the last annual bar's top, and the 3yr
+Avg as a teal dashed horizontal line with a halo'd inline label at the
+left-inside of the plot. Y-axis uses nice-number ticks tightly clipped to the
+data range (no forced 0 inclusion when all values share a sign). Hover on any
+bar / TTM marker / 3yr Avg line shows a small white tooltip with the value.
 
 ### SEC Filings panel
 

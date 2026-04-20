@@ -64,9 +64,37 @@ Prefix: `/stock/api/*`
 Representative routes include:
 
 - `GET /stock/api/overview?ticker=...`
-- `GET /stock/api/dcf?ticker=...`
+- `GET /stock/api/dcf?ticker=...&projectionYears=5|10|15`
+- `POST /stock/api/dcf?ticker=...` — accepts a `StockDCFRequest` body to override
+  derived inputs. Beyond the existing `baseCashFlowPerShare`, `baseGrowthPct`,
+  `terminalGrowthPct`, `beta`, `equityRiskPremiumPct`, `currentPrice` fields, the
+  body now supports:
+  - `projectionYears` (5 | 10 | 15) — explicit DCF horizon. Treasury rate curve
+    is sized to match.
+  - `fcfBaseSource` (`auto` | `3yr_avg` | `ttm` | `latest_annual`) — picks the
+    base FCF/share. `auto` cascades 3yr_avg → annual → ttm. Default is `auto`.
+  - `breakevenYear`, `breakevenCashFlowPerShare`, `postBreakevenGrowthPct` —
+    when all three are supplied, the model switches to **turnaround mode**: the
+    base FCF/share input becomes the *current* (possibly negative) FCF; the
+    schedule linearly interpolates from current FCF to the breakeven value
+    across `breakevenYear` years, then compounds at the post-breakeven rate
+    fading toward terminal growth.
 - `GET /stock/api/reverse-dcf?ticker=...`
 - `GET /stock/api/beta-estimate?ticker=...`
+- `GET /stock/api/fcf-history?ticker=...&years=10` — returns annual FCF/share
+  history plus the base candidates the DCF would use:
+  - `history`: chronological list of `{year, fcf, fcfPerShare}` (NaN years
+    dropped, oldest→newest).
+  - `ttmFcfPerShare`, `ttmSource` — most recent trailing-12-month value from
+    quarterly cashflow when ≥4 quarters available, else latest annual.
+  - `candidates`: `{threeYearAvg, latestAnnual, ttm}` per-share values, each
+    nullable when the underlying data is absent.
+  - `autoSelectedSource` — which candidate the backend's `auto` cascade would
+    pick under the current data (one of `3yr_avg`, `annual`, `quarterly_ttm`,
+    `missing`).
+  - `sharesOutstanding`, `sharesNote` — caveat that per-year FCF/share is
+    computed using *current* sharesOutstanding (no per-year dilution
+    adjustment).
 
 ## Calendar
 

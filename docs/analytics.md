@@ -94,14 +94,20 @@ DCF now lives in the dedicated package `src/TerraFin/analytics/analysis/fundamen
 | Entry point | Purpose |
 |-------------|---------|
 | `build_sp500_dcf_payload()` | Build the S&P 500 valuation payload used by Market Insights |
-| `build_stock_dcf_payload(ticker)` | Build the stock valuation payload used by the Stock Analysis page |
-| `build_stock_reverse_dcf_payload(ticker)` | Build the reverse DCF payload used by the Stock Analysis page |
-| `build_sp500_template()` / `build_stock_template(ticker)` | Build the underlying valuation templates before presentation |
+| `build_stock_dcf_payload(ticker, overrides=None, projection_years=None)` | Build the stock valuation payload used by the Stock Analysis page. `overrides` (`StockDCFOverrides`) carries the FCF-base-source picker, turnaround inputs, and base value/growth/beta overrides. |
+| `build_stock_reverse_dcf_payload(ticker, overrides=None, projection_years=5, growth_profile="early_maturity")` | Build the reverse DCF payload used by the Stock Analysis page |
+| `build_sp500_template()` / `build_stock_template(ticker, overrides=None, projection_years=None)` | Build the underlying valuation templates before presentation |
+| `_select_stock_fcf_base(quarter, annual, source="auto")` | Pick the base FCF/share by source. `source` ∈ `auto` / `3yr_avg` / `ttm` / `latest_annual`. `auto` cascade is `3yr_avg → annual → ttm` (the professional default; see [Analytics Notes](./analytics-notes.md#base-fcf-source-cascade)). |
+| `_build_turnaround_schedule(...)` | Construct the explicit per-year FCF schedule for turnaround mode (linear interp from current FCF to breakeven; post-breakeven compound fading to terminal). |
 
 DCF is exposed through the product and API endpoints:
 - `GET /market-insights/api/dcf/sp500`
-- `GET /stock/api/dcf?ticker=...`
+- `GET /stock/api/dcf?ticker=...&projectionYears=5|10|15` and `POST` for full overrides
 - `GET /stock/api/reverse-dcf?ticker=...`
+- `GET /stock/api/fcf-history?ticker=...&years=10` — annual FCF/share series + the
+  3yr-avg / latest-annual / TTM candidates the DCF would use, plus the source
+  the `auto` cascade currently picks. Drives the FCF / Share History card and
+  the FCF Base Source segmented control on the DCF input form.
 
 Current DCF assumption notes now live in
 [Analytics Notes](./analytics-notes.md).
