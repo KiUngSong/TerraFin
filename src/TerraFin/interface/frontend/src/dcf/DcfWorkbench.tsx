@@ -134,16 +134,21 @@ const DcfWorkbench: React.FC<{
     const pageType = inferViewContextPageType(window.location.pathname);
     const contextSource = buildDcfContextSource(mode, window.location.pathname);
     const label = symbolLabel || (mode === 'index' ? 'S&P 500' : 'Stock');
+    const stockSummary =
+      mode === 'stock'
+        ? `Viewing the equity DCF workbench for ${label}. ` +
+          `Horizon: ${stockForm.projectionYears}yr. ` +
+          `Mode: ${stockForm.turnaroundMode ? 'turnaround' : 'standard'}. ` +
+          `FCF base source: ${stockForm.fcfBaseSource}. ` +
+          `Hints visible: ${explainInputs ? 'yes' : 'no'}.`
+        : `Viewing the ${label} DCF workbench.`;
     void publishAgentViewContext({
       source: contextSource,
       scope: 'panel',
       route,
       pageType,
       title: `${label} DCF`,
-      summary:
-        mode === 'index'
-          ? `Viewing the ${label} DCF workbench.`
-          : `Viewing the equity DCF workbench for ${label}.`,
+      summary: stockSummary,
       selection: {
         dcfWorkbench: {
           mode,
@@ -158,6 +163,7 @@ const DcfWorkbench: React.FC<{
           requestMethod: request?.method || null,
           stockForm: mode === 'stock' ? sanitizeStockFormState(stockForm) : null,
           indexForm: mode === 'index' ? sanitizeIndexFormState(indexForm) : null,
+          explainInputsVisible: mode === 'stock' ? explainInputs : null,
         },
       },
       entities: data
@@ -174,6 +180,10 @@ const DcfWorkbench: React.FC<{
                 upsidePct: data.upsidePct,
                 warnings: data.warnings,
                 scenarios: summarizeDcfScenarios(data),
+                projectionYearsRequested:
+                  mode === 'stock' ? Number(stockForm.projectionYears) : null,
+                fcfBaseSourceRequested: mode === 'stock' ? stockForm.fcfBaseSource : null,
+                turnaroundModeRequested: mode === 'stock' ? stockForm.turnaroundMode : null,
               },
             },
           ]
@@ -182,6 +192,9 @@ const DcfWorkbench: React.FC<{
         source: contextSource,
         showInlineResults,
         scenarioCount: data ? Object.keys(data.scenarios || {}).length : 0,
+        projectionChartVisible:
+          mode === 'stock' && Boolean(data?.scenarios?.base?.projectedCashFlows?.length),
+        explainInputs: mode === 'stock' ? explainInputs : null,
       },
     });
   }, [
@@ -190,6 +203,7 @@ const DcfWorkbench: React.FC<{
     enabled,
     endpoint,
     error,
+    explainInputs,
     formError,
     hasValuationState,
     indexForm,

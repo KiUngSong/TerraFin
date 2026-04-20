@@ -324,8 +324,8 @@
 
 .tf-dashboard-header__main {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(260px, 420px);
-  grid-template-areas: "brand search";
+  grid-template-columns: minmax(0, 1fr) minmax(260px, 420px) auto;
+  grid-template-areas: "brand search external";
   gap: 16px;
   align-items: center;
 }
@@ -368,6 +368,23 @@
 .tf-dashboard-header__right {
   grid-area: right;
   justify-self: end;
+}
+
+.tf-dashboard-header__external {
+  grid-area: external;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
+.tf-dashboard-header__external > a {
+  transition: background 0.15s, color 0.15s;
+}
+
+.tf-dashboard-header__external > a:hover {
+  background: #f1f5f9;
+  color: #0f172a;
 }
 
 .tf-agent-pill {
@@ -1683,16 +1700,18 @@
   .tf-dashboard-header__main {
     grid-template-columns: minmax(0, 1fr) auto;
     grid-template-areas:
-      "brand right"
-      "search search";
+      "brand external"
+      "search search"
+      "right right";
     align-items: start;
   }
 
   .tf-dashboard-header__brand-nav {
     flex-direction: column;
-    align-items: stretch;
+    align-items: flex-start;
     gap: 12px;
   }
+
 
   .tf-upcoming-catalysts-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1746,12 +1765,17 @@
   }
 
   .tf-dashboard-header__main {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr) auto;
     grid-template-areas:
-      "brand"
-      "search"
-      "right";
+      "brand external"
+      "search search"
+      "right right";
     gap: 12px;
+  }
+
+  .tf-dashboard-header__external {
+    justify-self: end;
+    align-self: start;
   }
 
   .tf-dashboard-header__nav {

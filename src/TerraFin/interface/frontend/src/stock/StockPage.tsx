@@ -146,14 +146,29 @@ const StockPage: React.FC = () => {
         void clearAgentViewContextSource('stock-page');
       };
     }
+    const fcfCandidates = fcfHistory?.candidates ?? null;
+    const fcfHistoryRowCount = fcfHistory?.history.length ?? 0;
+    const ttmFcfPerShare = fcfHistory?.ttmFcfPerShare ?? null;
+    const autoSelectedFcfSource = fcfHistory?.autoSelectedSource ?? null;
     void publishAgentViewContext({
       source: 'stock-page',
       scope: 'page',
       route,
       pageType: 'stock',
       title: `${ticker} Stock Analysis`,
-      summary: `Viewing stock analysis for ${ticker}.`,
-      selection: { ticker, panelsEnabled, reverseDcfOpen: isReverseDcfOpen },
+      summary:
+        `Viewing stock analysis for ${ticker}. ` +
+        `FCF history: ${fcfHistoryRowCount} annual rows; ` +
+        `TTM FCF/share: ${ttmFcfPerShare ?? 'n/a'}; ` +
+        `Auto-selected DCF base: ${autoSelectedFcfSource ?? 'n/a'}.`,
+      selection: {
+        ticker,
+        panelsEnabled,
+        reverseDcfOpen: isReverseDcfOpen,
+        fcfCandidates,
+        autoSelectedFcfSource,
+        ttmFcfPerShare,
+      },
       entities: [
         {
           kind: 'ticker',
@@ -174,12 +189,14 @@ const StockPage: React.FC = () => {
         earningsLoaded: !earningsLoading,
         hasInfoError: Boolean(infoError),
         earningsCount: earnings.length,
+        fcfHistoryLoaded: !fcfHistoryLoading,
+        fcfHistoryError: fcfHistoryError ?? null,
       },
     });
     return () => {
       void clearAgentViewContextSource('stock-page');
     };
-  }, [companyInfo, earnings.length, earningsLoading, infoError, infoLoading, isReverseDcfOpen, panelsEnabled, ticker]);
+  }, [companyInfo, earnings.length, earningsLoading, fcfHistory, fcfHistoryError, fcfHistoryLoading, infoError, infoLoading, isReverseDcfOpen, panelsEnabled, ticker]);
 
   const handleSearchSubmit = (query: string) => {
     const trimmed = query.trim();
