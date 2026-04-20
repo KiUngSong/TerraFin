@@ -1,16 +1,59 @@
 # TerraFin
 
-**TerraFin** — *terraform finance*.
+**TerraFin** — *terraform finance*. An **agent-friendly** financial-research
+toolkit: 27 capabilities (DCF with turnaround mode, reverse DCF, FCF history,
+SEC filings TOC + section bodies, sentiment widgets, market breadth, guru
+portfolios, view-context reader) callable from Claude Code, Codex, opencode,
+or TerraFin's own hosted agent.
 
-TerraFin is an agent-ready Python toolkit and FastAPI interface for
-financial research workflows.
+```bash
+git clone https://github.com/KiUngSong/TerraFin
+cd TerraFin
+./setup   # auto-detects Claude Code / Codex / opencode on PATH
+```
 
-It combines:
+Install pattern adapted from [gstack](https://github.com/garrytan/gstack).
+`./setup` symlinks the skill into every AI host's skill dir, so `git pull`
+upgrades all of them at once.
+
+External agents can also hit `http://127.0.0.1:8001/agent/api/*` over HTTP —
+every capability has parity Python / CLI / HTTP surfaces (see
+[docs/agent/usage.md](docs/agent/usage.md)).
+
+## Two ways to use TerraFin
+
+**Mode A — Hosted TerraFin Agent.** Run TerraFin's own agent runtime locally
+or as a public deployment. A floating chat panel on every page consumes the
+user's view context, runs DCF / reverse DCF / SEC-filing analysis / sentiment
+checks, and synthesizes guru-style memos (Buffett, Marks, Druckenmiller).
+See [docs/agent/hosted-runtime.md](docs/agent/hosted-runtime.md) and the
+[live demo](https://huggingface.co/spaces/sk851/TerraFin).
+
+**Mode B — TerraFin as a skill for Claude Code / external agents.** Drop
+[`skills/terrafin/SKILL.md`](skills/terrafin/SKILL.md) into your agent's
+skill folder (or let `./setup` above do it) and TerraFin's full capability
+surface becomes callable from any agent that consumes Anthropic Skills.
+
+## Why agent-friendly
+
+- **Parity surfaces.** Every capability is exposed identically through
+  `TerraFinAgentClient` (Python), `terrafin-agent` (CLI), and `/agent/api/*`
+  (HTTP). Agents don't have to learn a second API to do the same thing.
+- **`processing` metadata on every response.** `requestedDepth`,
+  `resolvedDepth`, `loadedStart/End`, `isComplete`, `hasOlder`,
+  `sourceVersion`. Agents decide whether to deepen the request without
+  guessing.
+- **`current_view_context()` tool.** The agent reads which panel and form
+  state the user is currently looking at — including DCF input form values,
+  FCF history candidates, the auto-selected DCF base source — without
+  re-fetching data.
+
+## Other features
 
 - market, macro, and filings data access
 - chart-first browser pages
-- DCF and research tooling
-- a hosted TerraFin Agent runtime for local personal use
+- DCF / reverse DCF / S&P 500 DCF — including turnaround mode for
+  negative-FCF companies whose thesis is a future turn
 
 > [!IMPORTANT]
 > **TerraFin is MIT-licensed open-source software, and the MIT license applies to the software only.**
