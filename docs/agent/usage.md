@@ -62,7 +62,7 @@ Important product rules:
   reached by its own LLM via `consult_warren_buffett`,
   `consult_howard_marks`, and `consult_stanley_druckenmiller` tool
   calls (no pre-intercept router — see the architecture diagrams in
-  [architecture.md](./architecture.md#orchestrator--persona-subagents))
+  [architecture.md](./architecture.md#orchestrator-persona-subagents))
 - the hidden guru path is research-only in v1
 - hidden guru sessions are not shown in normal session history
 - hidden guru roles cannot be created through the normal public runtime API
@@ -83,7 +83,7 @@ called out to downstream product surfaces, integrators, and end users:
 - a `confidence` score ≥ 80 returned by a persona consult carries at least one
   citation — the `GuruResearchMemo` validator clamps unsupported high-confidence
   memos to 60 before returning them to the orchestrator (see
-  [guru.py](../../src/TerraFin/agent/guru.py))
+  [guru.py](https://github.com/KiUngSong/TerraFin/blob/main/src/TerraFin/agent/guru.py))
 
 The orchestrator's system prompt carries a matching `DISCLOSURE` paragraph so the
 model stays inside this framing. Product surfaces that embed the widget or call

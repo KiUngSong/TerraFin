@@ -21,7 +21,7 @@ TerraFin's agent surface has three separate jobs:
     borrows the high-level idea of explicit analyst-role separation from
     `ai-hedge-fund`, while keeping TerraFin's shared capability kernel
     instead of per-guru Python modules. See the architecture diagrams in
-    [architecture.md § Orchestrator + persona subagents](./architecture.md#orchestrator--persona-subagents)
+    [architecture.md § Orchestrator + persona subagents](./architecture.md#orchestrator-persona-subagents)
     for the authoritative shape.
 
 ## Start Here

@@ -410,12 +410,13 @@ hosted agent's `current_view_context` tool reads this payload, and the agent
 can call `sec_filings`, `sec_filing_document`, or `sec_filing_section` to
 fetch the full body when the excerpt is not enough (e.g. "summarize their
 business" on a 10-Q will trigger a cross-filing pivot to the most recent
-10-K's Item 1. Business). See [agent/usage.md](./agent/usage.md#10-k--10-q-research).
+10-K's Item 1. Business). See the `sec_filings` row in the common-tasks
+table at [agent/usage.md](./agent/usage.md#common-tasks).
 
-For the full end-to-end view-context pipeline (how `publishAgentViewContext`
-reaches the agent, how sessionStorage routes identity, why the session link
-sometimes goes stale, and how to debug when the agent "doesn't know what I'm
-looking at"), see [agent/view-context.md](./agent/view-context.md).
+For the view-context pipeline (how `publishAgentViewContext` reaches the
+agent, session/context identity, and how `current_view_context()` reads
+the current panel), see [agent/architecture.md](./agent/architecture.md)
+and [agent/hosted-runtime.md](./agent/hosted-runtime.md).
 
 ---
 

@@ -140,7 +140,7 @@ Current product rule:
   subagents as tool-calls (`consult_warren_buffett`, `consult_howard_marks`,
   `consult_stanley_druckenmiller`) when its own LLM decides, per-turn,
   that an investor lens would help. See the diagrams in
-  [Orchestrator + persona subagents](#orchestrator--persona-subagents).
+  [Orchestrator + persona subagents](#orchestrator-persona-subagents).
 - guru roles are not shown in the default catalog or session history
 - guru roles are not creatable through the public runtime session API
 - hidden guru session ids are not valid public session/task/approval handles
@@ -401,7 +401,7 @@ Shape:
 | `src/TerraFin/agent/runtime.py` | shared kernel primitives |
 | `src/TerraFin/agent/service.py` | capability implementation layer |
 | `src/TerraFin/agent/definitions.py` | hosted agent definition registry |
-| `src/TerraFin/agent/guru.py` | hidden persona subagent runner and structured research-memo schema (see [Orchestrator + persona subagents](#orchestrator--persona-subagents)) |
+| `src/TerraFin/agent/guru.py` | hidden persona subagent runner and structured research-memo schema (see [Orchestrator + persona subagents](#orchestrator-persona-subagents)) |
 | `src/TerraFin/agent/hosted_runtime.py` | hosted runtime controller and policy layer |
 | `src/TerraFin/agent/transcript_store.py` | append-only transcript store and session index |
 | `src/TerraFin/agent/session_store.py` | non-transcript hosted state, approvals, tasks, audit, and view context |

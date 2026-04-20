@@ -26,7 +26,7 @@ It answers a narrower question:
     subagents pattern also takes inspiration from the role-separation style in
     `ai-hedge-fund`, but TerraFin keeps shared capabilities and prompt-level
     persona policy instead of hardcoded per-guru analysis modules — see the
-    diagrams in [architecture.md](./architecture.md#orchestrator--persona-subagents)
+    diagrams in [architecture.md](./architecture.md#orchestrator-persona-subagents)
     for the authoritative shape.
 
 ## Current runtime shape
@@ -44,7 +44,7 @@ Today the hosted runtime has:
 - hidden persona subagents (Buffett / Marks / Druckenmiller) reached by
   the main orchestrator agent via `consult_<persona>` tool-calls (see
   the architecture diagrams in
-  [architecture.md](./architecture.md#orchestrator--persona-subagents))
+  [architecture.md](./architecture.md#orchestrator-persona-subagents))
 - a structured internal tool-result/error protocol
 - transcript normalization and repair before model calls
 - a proactive context-budget manager with reactive fallback retries
@@ -191,7 +191,7 @@ What is already there:
 - archived session delete behavior
 - hidden persona subagents reached by the main orchestrator agent via
   `consult_<persona>` tool-calls (authoritative shape: [architecture.md
-  § Orchestrator + persona subagents](./architecture.md#orchestrator--persona-subagents))
+  § Orchestrator + persona subagents](./architecture.md#orchestrator-persona-subagents))
 - structured internal guru memos returned to the orchestrator through a
   dedicated memo tool-call contract, not JSON scraped from prose
 - notebook helper surface
