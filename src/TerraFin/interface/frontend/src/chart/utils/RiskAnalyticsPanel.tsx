@@ -35,19 +35,25 @@ const METRIC_ORDER = [
   'CVaR 99%',
 ];
 
-const RiskAnalyticsPanel: React.FC<RiskAnalyticsPanelProps> = ({ visible, onClose, closes, mobile = false, anchorRef }) => {
+const VIEWPORT_BOTTOM_SHEET_MAX = 640;
+
+const RiskAnalyticsPanel: React.FC<RiskAnalyticsPanelProps> = ({ visible, onClose, closes, mobile: _mobile = false, anchorRef }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const [anchorRect, setAnchorRect] = useState<DOMRect | null>(null);
+  // Layout mode is decided by viewport width, not chart container width —
+  // on /market-insights the chart panel is narrow but the viewport is wide,
+  // and we want the anchored dropdown there rather than a bottom-sheet.
+  const bottomSheet = typeof window !== 'undefined' && window.innerWidth < VIEWPORT_BOTTOM_SHEET_MAX;
 
   const metrics = useMemo(() => (visible ? computeRiskMetrics(closes) : null), [visible, closes]);
 
   useEffect(() => {
-    if (!visible || mobile || !anchorRef?.current) {
+    if (!visible || bottomSheet || !anchorRef?.current) {
       setAnchorRect(null);
       return;
     }
     setAnchorRect(anchorRef.current.getBoundingClientRect());
-  }, [visible, mobile, anchorRef]);
+  }, [visible, bottomSheet, anchorRef]);
 
   // Close on click outside
   useEffect(() => {
@@ -81,16 +87,16 @@ const RiskAnalyticsPanel: React.FC<RiskAnalyticsPanelProps> = ({ visible, onClos
 
   const sorted = METRIC_ORDER.filter((k) => metrics && k in metrics);
 
-  const desktopAnchored = !mobile && anchorRect != null;
-  const positionStyle: React.CSSProperties = mobile
-    ? { position: 'absolute', top: 'auto', right: 8, left: 8, bottom: 8 }
+  const desktopAnchored = !bottomSheet && anchorRect != null;
+  const positionStyle: React.CSSProperties = bottomSheet
+    ? { position: 'fixed', top: 'auto', right: 8, left: 8, bottom: 8 }
     : desktopAnchored
       ? {
           position: 'fixed',
           top: Math.round(anchorRect!.bottom) + 4,
           right: Math.max(8, Math.round(window.innerWidth - anchorRect!.right)),
         }
-      : { position: 'absolute', top: 8, right: 8 };
+      : { position: 'fixed', top: 48, right: 8 };
 
   return (
     <div
@@ -99,13 +105,13 @@ const RiskAnalyticsPanel: React.FC<RiskAnalyticsPanelProps> = ({ visible, onClos
         ...positionStyle,
         background: 'rgba(255,255,255,0.95)',
         border: '1px solid #e0e0e0',
-        borderRadius: mobile ? 12 : 8,
+        borderRadius: bottomSheet ? 12 : 8,
         boxShadow: '0 4px 16px rgba(0,0,0,0.1)',
         zIndex: 100,
         fontFamily: FONT_FAMILY,
         fontSize: 12,
-        minWidth: mobile ? 'auto' : 220,
-        maxHeight: mobile ? 'min(60%, 320px)' : 'min(60vh, 440px)',
+        minWidth: bottomSheet ? 'auto' : 220,
+        maxHeight: bottomSheet ? 'min(60vh, 320px)' : 'min(60vh, 440px)',
         padding: 0,
         overflow: 'hidden',
         display: 'flex',
