@@ -14,9 +14,6 @@ from sec_parser.semantic_elements import (
     TopSectionTitle,
 )
 
-from TerraFin.data.utils.md_to_df import from_md_to_df
-
-
 log = logging.getLogger(__name__)
 
 _ALT_MAX = 120
@@ -75,19 +72,68 @@ _BROKEN_TITLE_TERMINATOR_RE = re.compile(
 # (ITEM 1A, ITEM 7, etc.) as TitleElement (###) instead of TopSectionTitle (##).
 # These patterns heal the hierarchy by merging the Item label and its title
 # into a single level 2 heading.
+#
+# The first line can be either ``## ITEM 9B.`` (correctly classified as
+# TopSectionTitle) or ``### ITEM 9B.`` (mis-classified as TitleElement) —
+# both observed across GOOGL / MSFT / JPM 10-K filings where the bare
+# Item label is rendered in its own element separate from the descriptive
+# title. The continuation must be ``### TITLE`` and the title must NOT
+# itself start with another ITEM/PART marker (guards against merging
+# `## ITEM 9.\n### ITEM 10.` on adjacent items).
+#
 # Require the Item token to be `\d+[A-Z]?` (a digit + optional single
 # letter suffix like 7A) and the trailing `.` optional. Bare `\w+` from
 # the previous version matched ambiguous body text like `"item 1 was"`
 # — legitimate `### item foo` H3 sub-sections would be promoted to a
 # bogus `## ITEM foo` top-level entry.
 _MERGE_ITEM_HEADING_RE = re.compile(
-    r"^###\s+(ITEM\s+\d+[A-Z]?\.?)\s*\n+###\s+([A-Z][^\n]+)$",
+    r"^##+\s+(ITEM\s+\d+[A-Z]?\.?)\s*\n+###\s+(?!ITEM\b|PART\b)([A-Z][^\n]+)$",
     re.MULTILINE | re.IGNORECASE,
 )
 _PROMOTE_ITEM_HEADING_RE = re.compile(
     r"^###\s+(ITEM\s+\d+[A-Z]?\.?)\s*$",
     re.MULTILINE | re.IGNORECASE,
 )
+
+# A second flavour of title fragmentation: the Item label + part of the
+# title sit on the same line, but the rest of the title spills into a
+# following `###` element. MSFT 10-K shows
+#   `## ITEM 9B. OTHER` + `### INFORMATION`            (phrase split)
+#   `## ITEM 9C. DISCLOSURE REGARDING FOREIGN J` + `### URISDICTIONS …`
+#                                                       (mid-word split)
+# Both heal to a single `## ITEM XX. <full title>` line. The continuation
+# must NOT itself look like a new Item/Part marker, otherwise we'd glue
+# adjacent items together.
+# Both parent and continuation must be UPPERCASE-only (apart from
+# punctuation / digits / brackets / smart-quotes) — sub-sections like
+# ``### Insider Trading Arrangements`` (mixed case) must not be sucked
+# into the title. Char class covers MSFT 10-K's ``[Reserved]`` brackets
+# and Microsoft / Google's ``MANAGEMENT'S`` U+2019 right single quote.
+_UPPER_TITLE_BODY = r"[A-Z0-9 ,&'‘’“”\-\/\(\)\.\[\]]"
+_UPPER_TITLE_START = r"[\[A-Z]"
+_UPPER_TITLE_TOKEN = rf"{_UPPER_TITLE_START}{_UPPER_TITLE_BODY}+"
+_BROKEN_ITEM_TITLE_SPLIT_RE = re.compile(
+    rf"^(##\s+ITEM\s+\d+[A-Z]?\.\s+{_UPPER_TITLE_TOKEN})\n+###\s+(?!ITEM\b|PART\b)({_UPPER_TITLE_TOKEN})\n",
+    re.MULTILINE,
+)
+
+
+def _heal_item_title_split(match: "re.Match[str]") -> str:
+    parent = match.group(1).rstrip()
+    cont = match.group(2).rstrip()
+    # Narrow mid-word join: only when parent ends with a single trailing
+    # uppercase letter preceded by something that is NOT another letter
+    # (space, ``[``, ``(``, etc). That is an unambiguous fragment marker
+    # — a single isolated capital letter that nearly always means
+    # sec_parser broke a word at an HTML span boundary. Examples healed:
+    #   ``… FOREIGN J`` + ``URISDICTIONS …`` -> ``… FOREIGN JURISDICTIONS …``
+    #   ``… [R``         + ``ESERVED]``        -> ``… [RESERVED]``
+    # Multi-letter trailing fragments (OFF, EXECUTI, OWN) can't be told
+    # from real-word endings, so default to a space join — the title
+    # remains readable even if not perfect.
+    if re.search(r"(?<![A-Za-z])[A-Z]$", parent):
+        return parent + cont + "\n"
+    return parent + " " + cont + "\n"
 
 
 
@@ -265,9 +311,10 @@ def _heal_broken_titles(markdown: str) -> str:
         previous = current
         current, word_hits = _BROKEN_TITLE_WORD_RE.subn(r"\1\2\n", current)
         current, term_hits = _BROKEN_TITLE_TERMINATOR_RE.subn(r"\1\2\n", current)
+        current, item_split_hits = _BROKEN_ITEM_TITLE_SPLIT_RE.subn(_heal_item_title_split, current)
         current, merge_hits = _MERGE_ITEM_HEADING_RE.subn(r"## \1 \2\n", current)
         current, promote_hits = _PROMOTE_ITEM_HEADING_RE.subn(r"## \1\n", current)
-        total = word_hits + term_hits + merge_hits + promote_hits
+        total = word_hits + term_hits + item_split_hits + merge_hits + promote_hits
         if total:
             log.info("Merged/Promoted %d broken or misclassified SEC heading(s) on pass %d", total, passes + 1)
         passes += 1
@@ -303,13 +350,629 @@ def _image_to_md(element: ImageElement) -> str:
 
 
 def _table_to_md(element: TableElement) -> str:
-    """Convert a TableElement to markdown.
+    """Rule-based `<table>` HTML → GFM conversion with a sec_parser fallback.
 
-    Returns the raw markdown from sec_parser. We avoid aggressive post-processing
-    (like md->df conversion) to ensure the agent sees the same verbatim rows
-    and columns as the user, avoiding accidental data loss in sparse tables.
+    `sec_parser`'s built-in `TableElement.table_to_markdown()` preserves cells
+    verbatim but keeps all of SEC's alignment-spacer `<td>`s and splits every
+    currency amount into multiple cells (a bare `$` cell followed by the
+    number), so the output is typically unreadable for an LLM: long rows of
+    ``| | | $ | 135.0 | | | | $ | 671.0 |`` etc.
+
+    This implementation walks `element.get_source_code()` directly with
+    BeautifulSoup and reconstructs a clean GFM table. Fixtures for every
+    rule live in ``tests/data/fixtures/sec_edgar_tables/``; the iteration
+    loop in ``tests/data/test_sec_edgar_table_rules.py`` is the spec.
+
+    Rules applied in order:
+        R1  row = one <tr>; cells = <th> + <td> in document order
+        R2  colspan → repeat cell text N times
+        R3  rowspan → propagate cell down N rows
+        R4  cell-text normalize (<br> → space, &nbsp; / zero-width → space,
+            collapse whitespace, strip)
+        R5  escape bare ``|`` in cell text
+        R6  merge bare-symbol cells forward (``$`` + ``135.0`` → ``$ 135.0``)
+        R7  (neg-paren tag only — text unchanged)
+        R8  drop columns whose body rows are all whitespace
+        R9  collapse multi-row header into a single row joined with newlines
+        R10 (units-row tag only — text unchanged; R9 will absorb it)
+        R11 footnote markers (1), (2) left attached to preceding token
+        R12 nested <table>: flattened to inline text, no recursion
+        R13 emit header + GFM separator + body
+        R14 on any failure or degenerate shape (<2 columns, 0 body rows)
+            fall back to ``element.table_to_markdown()``
     """
+    html = getattr(element, "get_source_code", lambda: "")() or ""
+    try:
+        rebuilt = _rebuild_table_markdown(html)
+    except Exception:  # pragma: no cover - safety net keeps the agent working
+        log.exception("rule-based table rebuild failed; falling back to sec_parser output")
+        rebuilt = None
+    if rebuilt is not None:
+        return rebuilt
     return element.table_to_markdown()
+
+
+# ---------------------------------------------------------------------------
+# Rule-based table reconstruction
+# ---------------------------------------------------------------------------
+
+_TABLE_NBSP_CHARS = "\u00a0\u200b\u200c\u200d\ufeff"
+_TABLE_WS_RE = re.compile(r"\s+")
+_TABLE_BARE_SYMBOL_RE = re.compile(r"^[\$\(\)%]+$")
+_TABLE_UNITS_RE = re.compile(r"^\(in (millions|thousands|billions|ones|\$ millions)[^)]*\)$", re.IGNORECASE)
+
+
+def _clean_table_cell(cell) -> str:
+    for br in cell.find_all("br"):
+        br.replace_with(" ")
+    # Flatten any nested tables to a single text blob (R12).
+    for nested in cell.find_all("table"):
+        nested.replace_with(nested.get_text(" ", strip=True))
+    text = cell.get_text(" ", strip=True)
+    for ch in _TABLE_NBSP_CHARS:
+        text = text.replace(ch, " ")
+    text = _TABLE_WS_RE.sub(" ", text).strip()
+    return text.replace("|", "\\|")
+
+
+def _extract_rows(table) -> list[list[dict]]:
+    """Return a list of rows, each a list of cell dicts: text, colspan, rowspan, tag.
+
+    Empty cells are kept (spacer columns are dropped later by R8).
+    """
+    rows: list[list[dict]] = []
+    for tr in table.find_all("tr"):
+        row: list[dict] = []
+        for cell in tr.find_all(["th", "td"], recursive=False):
+            try:
+                colspan = max(1, int(cell.get("colspan") or 1))
+            except (TypeError, ValueError):
+                colspan = 1
+            try:
+                rowspan = max(1, int(cell.get("rowspan") or 1))
+            except (TypeError, ValueError):
+                rowspan = 1
+            row.append(
+                {
+                    "text": _clean_table_cell(cell),
+                    "colspan": colspan,
+                    "rowspan": rowspan,
+                    "tag": cell.name,
+                }
+            )
+        if row:
+            rows.append(row)
+    return rows
+
+
+def _expand_to_grid(rows: list[list[dict]]) -> list[list[str]]:
+    """Expand rows into a dense text grid, honoring colspan and rowspan (R2, R3)."""
+    max_cols = 0
+    for row in rows:
+        max_cols = max(max_cols, sum(c["colspan"] for c in row))
+    if max_cols == 0:
+        return []
+    grid: list[list[str]] = []
+    # `carry[j] = (text, rows_left)` for cells propagated from an earlier row.
+    carry: list[tuple[str, int] | None] = [None] * max_cols
+    for row in rows:
+        line: list[str] = [""] * max_cols
+        # Apply rowspan carry first.
+        for j in range(max_cols):
+            if carry[j] is not None:
+                line[j] = carry[j][0]
+                carry[j] = (carry[j][0], carry[j][1] - 1) if carry[j][1] > 1 else None
+        # Fill remaining columns left-to-right.
+        j = 0
+        for cell in row:
+            # Skip over already-filled (carried) slots.
+            while j < max_cols and carry[j] is not None:
+                j += 1
+            span = min(cell["colspan"], max_cols - j)
+            for k in range(span):
+                line[j + k] = cell["text"]
+            if cell["rowspan"] > 1 and span > 0:
+                for k in range(span):
+                    carry[j + k] = (cell["text"], cell["rowspan"] - 1)
+            j += span
+        grid.append(line)
+    return grid
+
+
+def _merge_bare_symbols(row: list[str]) -> list[str]:
+    """R6: fuse bare `$` / `(` / `)` / `%` cells with the next non-empty cell."""
+    out: list[str] = []
+    i = 0
+    n = len(row)
+    while i < n:
+        cell = row[i]
+        if _TABLE_BARE_SYMBOL_RE.fullmatch(cell):
+            j = i + 1
+            while j < n and not row[j].strip():
+                j += 1
+            if j < n:
+                out.append((cell + " " + row[j]).strip())
+                # Mark consumed cells empty so column-dropper still sees their slot.
+                for _ in range(i + 1, j + 1):
+                    out.append("")
+                i = j + 1
+                continue
+        out.append(cell)
+        i += 1
+    return out
+
+
+def _drop_empty_columns(rows: list[list[str]], *, preserve_first: bool = True) -> list[list[str]]:
+    """R8: drop columns that are empty across every row. Keep first column if asked."""
+    if not rows:
+        return rows
+    width = len(rows[0])
+    keep = []
+    for c in range(width):
+        if preserve_first and c == 0:
+            keep.append(c)
+            continue
+        if any(row[c].strip() for row in rows):
+            keep.append(c)
+    if len(keep) == width:
+        return rows
+    return [[row[c] for c in keep] for row in rows]
+
+
+def _is_width_setter_row(row: list[dict]) -> bool:
+    """SEC filings lead with a row of empty ``<td>`` cells whose sole purpose
+    is to set column widths via inline ``width:%`` styles. A row is a width-
+    setter if every cell is empty — colspan/rowspan vary (some SEC writers
+    collapse trailing empties into one colspan=N cell)."""
+    if not row:
+        return True
+    return all(not c["text"] for c in row)
+
+
+def _is_title_row(row: list[dict]) -> bool:
+    """Some SEC tables lead with a one-cell caption row (colspan spans the
+    entire table width) — e.g. ``"Selected Consolidated Financial Data"``
+    or ``"Equity Compensation Plan Information"``. Using such a row as the
+    column ruler collapses everything into one group. Skip it.
+    """
+    if not row:
+        return False
+    non_empty = [c for c in row if c["text"]]
+    return len(non_empty) == 1 and len(row) == 1
+
+
+_HEADER_LABEL_RE = re.compile(
+    r"^("
+    r"\d{4}"                                # 2024, 2025
+    r"|\d{1,2}/\d{1,2}/\d{2,4}"             # 6/30/2025
+    r"|\w+ \d{1,2},? ?\d{0,4}"              # June 29, 2025
+    r"|Level [123]"                          # fair-value hierarchy
+    r"|Change"
+    r"|Total"
+    r"|\$"
+    r"|\(in [^)]+\)"                         # (in millions)
+    r"|Year ended \w+"
+    r"|Q[1-4]"
+    r"|[A-Z]{2,5}"                           # OI&E, AOCI, GAAP
+    r")$"
+)
+
+
+def _looks_like_body_value(text: str) -> bool:
+    """True when a cell *looks like body data*: a dollar amount, percent,
+    paren-negative, decimal, comma-thousands magnitude, OR a plain integer
+    that is not a 4-digit year. Years stay on the header side.
+
+    Used by ``_row_looks_like_body`` to catch TOC-shaped tables where the
+    data column is just page numbers like ``"45"``, ``"53"`` — bare
+    integers that ``_looks_numeric`` deliberately rejects because ``"45"``
+    could also be a header label in other contexts.
+    """
+    stripped = text.strip()
+    if not stripped:
+        return False
+    if re.fullmatch(r"(19|20)\d{2}", stripped):
+        return False
+    if _looks_numeric(stripped):
+        return True
+    if re.fullmatch(r"\d+", stripped):
+        return True
+    return False
+
+
+def _looks_numeric(text: str) -> bool:
+    """Rough detector — used to decide whether a row is body-shaped.
+
+    Intentionally conservative: bare 4-digit years (``19xx`` / ``20xx``) are
+    excluded because they appear as header labels in SEC period tables, and
+    plain integers without punctuation are ambiguous (year, item count,
+    page number) so we require a currency / decimal / comma / paren /
+    percent marker before calling something numeric.
+    """
+    stripped = text.strip()
+    if not stripped:
+        return False
+    # Bare year → treated as a label, not a data value.
+    if re.fullmatch(r"(19|20)\d{2}", stripped):
+        return False
+    # Comma-separated magnitude (most SEC dollar amounts).
+    if re.search(r"\d{1,3}(?:,\d{3})+", stripped):
+        return True
+    # Negative in parentheses.
+    if re.fullmatch(r"\(\s*\d[\d,\.]*\s*\)", stripped):
+        return True
+    # Currency, percent, decimal, signed.
+    if re.fullmatch(r"[\$\-\+]?\s*\d[\d,\.]*\s*%?", stripped) and (
+        "$" in stripped or "%" in stripped or "." in stripped or "," in stripped
+    ):
+        return True
+    return False
+
+
+def _row_looks_like_body(row: list[str]) -> bool:
+    """True for any non-header row: a body data row, a sub-section separator
+    row (label-only in column 0), or a totals row.
+
+    Rules (first match wins):
+      - col 0 has text AND every later column is empty → body (sub-section).
+      - col 0 has text AND ≥ 1 later column is numeric → body (data row).
+      - col 0 empty AND ≥ 2 later columns are numeric → body (headerless
+        continuation, rare).
+      - col 0 is ``Total ``, ``Less:``, ``Plus:`` prefix → body (totals).
+    """
+    if not row:
+        return False
+    col0 = row[0].strip()
+    others = [c.strip() for c in row[1:]]
+    other_with_content = sum(1 for c in others if c)
+    other_numeric = sum(1 for c in others if _looks_numeric(c))
+
+    if col0:
+        # Descriptive text + any body-value payload = body. Checked FIRST so
+        # that a short acronym like "TAC" / "AMD" in col 0 is treated as a
+        # row label, not a header token, when the row clearly has data —
+        # and so page-number style tables (TOC: "...Balance Sheets | 48")
+        # get classified correctly even though plain integers miss the
+        # stricter ``_looks_numeric`` check.
+        other_body_values = sum(1 for c in others if _looks_like_body_value(c))
+        if re.search(r"[A-Za-z]{3,}", col0) and other_body_values >= 1:
+            return True
+        if other_with_content == 0:
+            return True  # sub-section label / date row
+        if col0.startswith(("Total ", "Less:", "Plus:")):
+            return True
+        # Header labels like "2025" / "Change" — no numeric payload anywhere.
+        if _HEADER_LABEL_RE.fullmatch(col0):
+            return False
+    else:
+        if other_numeric >= 2:
+            return True
+    return False
+
+
+def _classify_header_count(collapsed_rows: list[list[str]]) -> int:
+    """Return how many leading rows are still header rows after group-collapse.
+
+    Walk from the top and extend the header block as long as the next row
+    does not look like a body row (``_row_looks_like_body``). Minimum 1.
+    """
+    if not collapsed_rows:
+        return 0
+    n = 1
+    for row in collapsed_rows[1:]:
+        if _row_looks_like_body(row):
+            break
+        n += 1
+    # Safety: don't classify everything as header.
+    if n == len(collapsed_rows):
+        return 1
+    return n
+
+
+def _merge_header_grid(header_lines: list[list[str]]) -> list[str]:
+    """R9: collapse multi-row header text column-wise, joined with '\\n'."""
+    if not header_lines:
+        return []
+    width = len(header_lines[0])
+    out: list[str] = []
+    for c in range(width):
+        parts: list[str] = []
+        for row in header_lines:
+            text = row[c].strip()
+            if text and (not parts or parts[-1] != text):
+                parts.append(text)
+        out.append("\n".join(parts))
+    return out
+
+
+def _build_column_groups(header_rows: list[list[dict]], *, total_width: int | None = None) -> list[dict] | None:
+    """Given the detected header rows, return a list of column groups as
+    ``{"start": int, "width": int}`` intervals.
+
+    Uses the **union** of every header row's cell-boundaries plus the overall
+    grid ``total_width`` (so body cells past the last header boundary still
+    land inside a group). Different header levels often disagree on
+    granularity — a top-level year row has one colspan-covering cell while
+    the sub-header row below it partitions that span into individual
+    metrics. The union gives the finest-grained split that still respects
+    every header row's cell structure.
+    """
+    if not header_rows:
+        return None
+    boundaries: set[int] = {0}
+    max_header_width = 0
+    for row in header_rows:
+        col = 0
+        for cell in row:
+            col += max(1, cell["colspan"])
+            boundaries.add(col)
+        max_header_width = max(max_header_width, col)
+    width = max(max_header_width, total_width or 0)
+    if width == 0:
+        return None
+    boundaries.add(width)
+    sorted_b = sorted(b for b in boundaries if b <= width)
+    groups: list[dict] = []
+    for start, end in zip(sorted_b, sorted_b[1:]):
+        groups.append({"start": start, "width": end - start})
+    return groups
+
+
+def _collapse_row_into_groups(row: list[str], groups: list[dict], *, is_header: bool) -> list[str]:
+    """Collapse a dense-grid row into one cell per header group.
+
+    - For headers: take the first non-empty text (colspan-expanded duplicates
+      collapse to one).
+    - For body: apply bare-symbol merge (R6) within the slab, then de-dup
+      adjacent identical texts before joining — colspan-expansion copies
+      like ``"111,032 111,032"`` reduce to ``"111,032"``.
+    """
+    out: list[str] = []
+    for g in groups:
+        slab = row[g["start"] : g["start"] + g["width"]]
+        merged = _merge_bare_symbols(slab) if not is_header else slab
+        meaningful = [c for c in merged if c.strip()]
+        if not meaningful:
+            out.append("")
+            continue
+        if is_header:
+            out.append(meaningful[0])
+            continue
+        # De-dup adjacent duplicates (colspan-expansion artefact).
+        deduped: list[str] = []
+        for cell in meaningful:
+            if not deduped or deduped[-1] != cell:
+                deduped.append(cell)
+        if len(deduped) == 1:
+            out.append(deduped[0])
+        else:
+            out.append(" ".join(deduped))
+    return out
+
+
+def _merge_header_lines(header_rows: list[list[str]]) -> list[str]:
+    """R9: stack multi-row headers column-wise, joined by '\\n' and deduped."""
+    if not header_rows:
+        return []
+    width = len(header_rows[0])
+    stacked: list[str] = []
+    for c in range(width):
+        parts: list[str] = []
+        for row in header_rows:
+            text = row[c].strip() if c < len(row) else ""
+            if text and text not in parts:
+                parts.append(text)
+        stacked.append("\n".join(parts))
+    return stacked
+
+
+def _column_has_distinguishing_header(col: int, header_rows: list[list[str]]) -> bool:
+    """True if some header row assigns this column text that is not
+    identical to *both* of its immediate neighbours (or: not identical to
+    its only neighbour, at the edges).
+
+    Uniform-across-every-column content (year labels with wide colspan,
+    ``(In millions)`` units rows, etc.) collapses into "not
+    distinguishing" — a column that only has such content is effectively a
+    spacer. Columns whose sub-header text differs between neighbours
+    (Level 1 / Level 2 / Level 3, 2024 / 2025) stay distinguishing and
+    are preserved.
+    """
+    if not header_rows:
+        return False
+    for row in header_rows:
+        if col >= len(row):
+            continue
+        text = row[col].strip()
+        if not text:
+            continue
+        left = row[col - 1].strip() if col - 1 >= 0 else None
+        right = row[col + 1].strip() if col + 1 < len(row) else None
+        differs_left = left is not None and text != left
+        differs_right = right is not None and text != right
+        if left is None:
+            # leftmost column: distinguishing if it differs from its right
+            # neighbour (or has text where the neighbour is empty)
+            if differs_right:
+                return True
+        elif right is None:
+            if differs_left:
+                return True
+        else:
+            if differs_left and differs_right:
+                return True
+    return False
+
+
+def _merge_adjacent_duplicate_columns(
+    header: list[str], body_rows: list[list[str]]
+) -> tuple[list[str], list[list[str]]]:
+    """Fuse adjacent columns when every row agrees (identical text or one
+    side empty) for both the header and all body rows.
+
+    Triggered when a body cell's ``colspan`` exceeds a header group width —
+    the colspan expansion then duplicates the value across two or more
+    adjacent groups. Merging folds them back to one column.
+    """
+    def _compatible(a: str, b: str) -> bool:
+        if not a or not b:
+            return True
+        return a == b
+
+    def _pick(a: str, b: str) -> str:
+        # Prefer non-empty; when both set and equal, either works.
+        return a if a else b
+
+    changed = True
+    while changed and len(header) > 1:
+        changed = False
+        c = 0
+        while c < len(header) - 1:
+            if not _compatible(header[c], header[c + 1]):
+                c += 1
+                continue
+            if not all(
+                _compatible(
+                    row[c] if c < len(row) else "",
+                    row[c + 1] if c + 1 < len(row) else "",
+                )
+                for row in body_rows
+            ):
+                c += 1
+                continue
+            # Merge c and c+1.
+            header = header[:c] + [_pick(header[c], header[c + 1])] + header[c + 2 :]
+            body_rows = [
+                (
+                    row[:c]
+                    + [_pick(row[c] if c < len(row) else "", row[c + 1] if c + 1 < len(row) else "")]
+                    + row[c + 2 :]
+                )
+                for row in body_rows
+            ]
+            changed = True
+            # Don't advance c — re-check after merge.
+    return header, body_rows
+
+
+def _rebuild_table_markdown(html: str) -> str | None:
+    if not html or "<table" not in html.lower():
+        return None
+    soup = BeautifulSoup(html, "html.parser")
+    table = soup.find("table")
+    if table is None:
+        return None
+    rows = _extract_rows(table)
+    # Drop SEC-style width-setter rows (leading rows of empty cells used only
+    # to seed column widths via inline CSS) and any truly empty rows.
+    rows = [r for r in rows if r and not _is_width_setter_row(r)]
+    # Single-cell caption row at the top (e.g. "Selected Consolidated
+    # Financial Data") collapses segmentation to one group when used as
+    # the column ruler — strip it ONLY if there are wider rows below to
+    # take over segmentation. Otherwise (a signature block where every
+    # row is one-cell text) leave the rows alone so they emit as a
+    # plain-text list later.
+    while (
+        len(rows) >= 2
+        and _is_title_row(rows[0])
+        and any(len(r) >= 2 for r in rows[1:])
+    ):
+        rows = rows[1:]
+    if not rows:
+        return None
+
+    grid = _expand_to_grid(rows)
+    if not grid:
+        return None
+    total_width = len(grid[0]) if grid else 0
+
+    # First pass: provisional groups from row 0 (padded to grid width),
+    # collapse every row, classify header vs body.
+    provisional = _build_column_groups(rows[:1], total_width=total_width)
+    if not provisional:
+        return None
+    provisional_collapsed = [
+        _collapse_row_into_groups(r, provisional, is_header=False) for r in grid
+    ]
+    header_count = _classify_header_count(provisional_collapsed)
+
+    # Second pass: rebuild groups as the union of every header row's cell
+    # boundaries (extended to full grid width so body-only columns survive).
+    groups = _build_column_groups(rows[:header_count], total_width=total_width)
+    if not groups:
+        return None
+    header_rows_collapsed = [
+        _collapse_row_into_groups(grid[i], groups, is_header=True)
+        for i in range(header_count)
+    ]
+    body_rows_collapsed = [
+        _collapse_row_into_groups(grid[i], groups, is_header=False)
+        for i in range(header_count, len(grid))
+    ]
+
+    header = _merge_header_lines(header_rows_collapsed)
+    if not header:
+        return None
+
+    # R8: drop spacer columns. A column is a spacer when every body row is
+    # empty AND no header row gives it *distinguishing* text (text different
+    # from at least one neighbour). The distinguishing check defeats the
+    # trap where a units row like ``(In millions, except per-share amounts)``
+    # spans every column via colspan — it looks non-empty on every column
+    # but tells us nothing about the column identity. Level 1/2/3 fair-value
+    # columns keep passing this check because their sub-header text
+    # ("Level 1" / "Level 2" / "Level 3") genuinely differs per column.
+    keep: list[int] = []
+    for c in range(len(header)):
+        body_has = any(row[c].strip() for row in body_rows_collapsed if c < len(row))
+        distinguishing = _column_has_distinguishing_header(c, header_rows_collapsed)
+        # Keep column 0 always (row labels live there).
+        if c == 0 or body_has or distinguishing:
+            keep.append(c)
+    if not keep:
+        return None
+    header = [header[c] for c in keep]
+    body_rows_collapsed = [
+        [row[c] if c < len(row) else "" for c in keep]
+        for row in body_rows_collapsed
+    ]
+
+    # Drop body rows that are entirely empty post-collapse.
+    body_rows_collapsed = [row for row in body_rows_collapsed if any(c.strip() for c in row)]
+    if not body_rows_collapsed:
+        return None
+
+    # Single-column "table" — almost always an auditor signature block,
+    # firm address, or a stack of single-line statements wrapped in a
+    # <table> for layout. Emitting it as a 1-column markdown table looks
+    # ugly; emit each row as a plain paragraph instead.
+    if len(header) < 2:
+        lines = [row[0].strip() for row in body_rows_collapsed if row and row[0].strip()]
+        if header[0].strip():
+            lines.insert(0, header[0].strip())
+        return "\n\n".join(lines) if lines else None
+
+    # Post-pass: merge adjacent duplicate columns. When a body cell's
+    # colspan crosses a header group boundary, the collapse step produces
+    # identical text in adjacent columns — fuse them if no row disagrees.
+    header, body_rows_collapsed = _merge_adjacent_duplicate_columns(
+        header, body_rows_collapsed
+    )
+    if len(header) < 2:
+        # After post-pass merge we collapsed to a single column — emit as
+        # plain lines for the same reason as above.
+        lines = [row[0].strip() for row in body_rows_collapsed if row and row[0].strip()]
+        if header[0].strip():
+            lines.insert(0, header[0].strip())
+        return "\n\n".join(lines) if lines else None
+
+    width = len(header)
+
+    def _emit(row: list[str]) -> str:
+        return "| " + " | ".join(c.replace("\n", "<br>") for c in row) + " |"
+
+    sep = "| " + " | ".join(["---"] * width) + " |"
+    return "\n".join([_emit(header), sep, *(_emit(r) for r in body_rows_collapsed)])
 
 
 def _slugify(text: str, *, max_len: int = _SLUG_MAX_LEN) -> str:
@@ -398,23 +1061,3 @@ def build_toc(markdown: str, *, max_level: int | None = 2) -> list[dict]:
     return entries
 
 
-def _modify_to_valid_md_table(text):
-    """Normalize an SEC-extracted markdown table: inject a separator, drop empty columns."""
-    rows = text.split("\n")
-    if len(rows) < 2:
-        return text
-
-    num_columns = rows[0].count("|")
-    if num_columns < 2:
-        # Not enough `|` separators to be a real table; leave as-is.
-        return text
-
-    separator = "|" + " --- |" * (num_columns - 1)
-    markdown_txt = "\n".join([rows[0], separator, *rows[1:]])
-
-    table_df = from_md_to_df(markdown_txt)
-    # Coerce to string before using the `.str` accessor — empty/NaN-bearing
-    # columns can otherwise raise AttributeError.
-    table_df = table_df.astype(str)
-    table_df = table_df.loc[:, ~table_df.apply(lambda col: col.str.strip().eq("")).all()]
-    return table_df.to_markdown(index=False)

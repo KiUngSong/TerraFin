@@ -108,22 +108,6 @@ def test_parse_sec_filing_handles_none_filing_form() -> None:
         parser.parse_sec_filing(_FILING_HTML, None)
 
 
-def test_modify_to_valid_md_table_returns_short_input_unchanged() -> None:
-    assert parser._modify_to_valid_md_table("") == ""
-    assert parser._modify_to_valid_md_table("only one row") == "only one row"
-    assert parser._modify_to_valid_md_table("no-pipe row 1\nno-pipe row 2") == "no-pipe row 1\nno-pipe row 2"
-
-
-def test_modify_to_valid_md_table_injects_separator_and_drops_empty_columns() -> None:
-    raw = "| Metric | Q1 | Empty |\n| Rev | 100 | |\n| Cost | 80 | |"
-    result = parser._modify_to_valid_md_table(raw)
-
-    # Separator row was inserted between header and data.
-    assert "| --- |" in result or "---" in result
-    # Empty column was dropped; real columns survive.
-    assert "Rev" in result and "100" in result
-
-
 _SAMPLE_MD = (
     "## PART I - FINANCIAL INFORMATION\n"
     "\n"

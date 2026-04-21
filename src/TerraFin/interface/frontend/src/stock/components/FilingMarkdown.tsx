@@ -49,10 +49,73 @@ function splitTableCells(line: string): string[] {
 }
 
 function cleanCell(text: string): string {
-  // `_modify_to_valid_md_table` uses `astype(str)` which emits literal "nan"
-  // for missing values. Scrub these to empty so tables don't look broken.
+  // Historical SEC-parser paths emit literal "nan" / "None" for missing
+  // values. Scrub them so rebuilt tables don't surface those tokens.
   if (text === 'nan' || text === 'NaN' || text === 'None') return '';
   return text;
+}
+
+// The rule-based SEC table rebuild emits stacked multi-row header text as
+// `A<br>B<br>C` inside a single GFM cell — markdown renderers don't
+// preserve raw `\n` inside table cells. Split the `<br>` token back into
+// real `<br />` React nodes here so the header renders on multiple lines.
+function renderTableCell(text: string): React.ReactNode {
+  const cleaned = cleanCell(text);
+  if (!cleaned.includes('<br>')) return cleaned;
+  const parts = cleaned.split('<br>');
+  return parts.flatMap((part, i) => (i === 0 ? [part] : [<br key={`br-${i}`} />, part]));
+}
+
+// SEC tables often use nested multi-level headers (year-label spanning
+// year sub-columns, then a `(In millions)` units row spanning every
+// column). GFM stores this as `<br>`-stacked text inside a single header
+// row. For display we reconstruct the nested look by splitting each
+// header cell on `<br>`, aligning levels at the bottom, and merging
+// identical adjacent cells per row into a single `<th colspan>`. If no
+// header cell contains `<br>`, the table renders as a plain single-row
+// header (no regression).
+function renderTableHeader(headerCells: string[]): React.ReactNode {
+  const splits = headerCells.map((h) => cleanCell(h).split('<br>').map((s) => s.trim()));
+  const maxLevels = Math.max(1, ...splits.map((s) => s.length));
+  if (maxLevels === 1) {
+    return (
+      <tr>
+        {headerCells.map((h, hi) => (
+          <th key={hi} style={TH_STYLE}>{renderTableCell(h)}</th>
+        ))}
+      </tr>
+    );
+  }
+  // Bottom-align: shorter columns (e.g. the row-label column with one
+  // empty segment) get empty padding at the top so their real text
+  // sits on the same visual baseline as the deepest level.
+  const aligned = splits.map((col) => {
+    const pad = new Array(Math.max(0, maxLevels - col.length)).fill('');
+    return [...pad, ...col];
+  });
+  const rows: React.ReactNode[] = [];
+  for (let level = 0; level < maxLevels; level += 1) {
+    type Span = { text: string; span: number };
+    const spans: Span[] = [];
+    aligned.forEach((col) => {
+      const text = col[level] ?? '';
+      const last = spans[spans.length - 1];
+      // Only merge identical non-empty adjacent cells into a colspan run.
+      if (last && last.text === text && text !== '') {
+        last.span += 1;
+      } else {
+        spans.push({ text, span: 1 });
+      }
+    });
+    rows.push(
+      <tr key={level}>
+        {spans.map((s, si) => (
+          <th key={si} colSpan={s.span} style={TH_STYLE}>{s.text}</th>
+        ))}
+      </tr>
+    );
+  }
+  return <>{rows}</>;
 }
 
 interface Block {
@@ -162,12 +225,12 @@ const FilingMarkdown: React.FC<Props> = ({ markdown }) => {
               <div key={idx} style={{ overflowX: 'auto' }}>
                 <table style={TABLE_STYLE}>
                   <thead>
-                    <tr>{header.map((h, hi) => (<th key={hi} style={TH_STYLE}>{cleanCell(h)}</th>))}</tr>
+                    {renderTableHeader(header)}
                   </thead>
                   <tbody>
                     {rows.map((row, ri) => (
                       <tr key={ri}>
-                        {row.map((cell, ci) => (<td key={ci} style={TD_STYLE}>{cleanCell(cell)}</td>))}
+                        {row.map((cell, ci) => (<td key={ci} style={TD_STYLE}>{renderTableCell(cell)}</td>))}
                       </tr>
                     ))}
                   </tbody>
