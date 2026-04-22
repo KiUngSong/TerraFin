@@ -1698,11 +1698,11 @@
   }
 
   .tf-dashboard-header__main {
-    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-columns: 1fr;
     grid-template-areas:
-      "brand external"
-      "search search"
-      "right right";
+      "brand"
+      "search"
+      "right";
     align-items: start;
   }
 
@@ -1710,8 +1710,27 @@
     flex-direction: column;
     align-items: flex-start;
     gap: 12px;
+    min-width: 0;
+    max-width: 100%;
   }
 
+  /* Content-sized when all links fit; clamped to parent (with internal
+     overflow-x scroll) only when content exceeds available width. */
+  .tf-dashboard-header__nav {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  /* Float external icons over the top-right of the header so brand + nav +
+     search all get the full viewport width. Without this the nav column
+     loses ~64px to the icons and ends up visibly narrower than the search
+     bar below it. */
+  .tf-dashboard-header__external {
+    position: absolute;
+    top: var(--tf-header-padding-y);
+    right: var(--tf-header-padding-x);
+    justify-self: auto;
+  }
 
   .tf-upcoming-catalysts-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1765,20 +1784,17 @@
   }
 
   .tf-dashboard-header__main {
-    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-columns: 1fr;
     grid-template-areas:
-      "brand external"
-      "search search"
-      "right right";
+      "brand"
+      "search"
+      "right";
     gap: 12px;
   }
 
-  .tf-dashboard-header__external {
-    justify-self: end;
-    align-self: start;
-  }
-
   .tf-dashboard-header__nav {
+    min-width: 0;
+    max-width: 100%;
     overflow: hidden;
   }
 
