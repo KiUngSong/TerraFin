@@ -56,6 +56,10 @@ def _ensure_earnings_source(ticker: str) -> str:
                 key=ticker,
                 ttl_seconds=ttl_for("market.earnings"),
                 fetch_fn=lambda t=ticker: _fetch_earnings(t),
+                # When fetch raises (transient upstream block), serve [] so
+                # the dashboard still renders. The fallback path is NOT
+                # cached, so the next request retries the real fetch.
+                fallback_fn=lambda: [],
             )
         )
     return source
@@ -260,14 +264,31 @@ def get_ticker_earnings(ticker: str) -> list[dict]:
 
 
 def _fetch_earnings(ticker: str) -> list[dict]:
-    """Fetch and normalize earnings_dates from yfinance."""
+    """Fetch and normalize earnings_dates from yfinance.
+
+    Raises on suspected upstream failure so the cache layer falls back to
+    stale data instead of writing an empty list for the full TTL window.
+    yfinance silently returns None when Yahoo rate-limits a shared cloud
+    IP (HF Spaces, AWS) — distinguishing that from a legitimately empty
+    history requires treating None as a signal for re-fetch.
+    """
     try:
         t = yf.Ticker(ticker)
+    except Exception as exc:
+        raise RuntimeError(f"yfinance Ticker init failed for {ticker}: {exc}") from exc
+    try:
         df = t.earnings_dates
-        if df is None or df.empty:
-            return []
-    except Exception:
-        return []
+    except Exception as exc:
+        # Covers YFRateLimitError plus assorted upstream HTTP errors.
+        raise RuntimeError(f"earnings_dates fetch failed for {ticker}: {exc}") from exc
+    if df is None:
+        # Suspected upstream block — re-raise so the cache layer keeps any
+        # prior good payload instead of pinning an empty list.
+        raise RuntimeError(
+            f"earnings_dates returned None for {ticker} (suspected upstream block)"
+        )
+    if df.empty:
+        return []  # Legitimately no earnings on file
 
     records: list[dict] = []
     for idx, row in df.iterrows():
