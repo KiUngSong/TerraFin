@@ -1761,6 +1761,12 @@
 }
 
 @media (max-width: 767px) {
+  /* Bigger tap targets + 16px search font (prevents iOS focus-zoom). */
+  .tf-dashboard-header {
+    --tf-icon-btn-size: 40px;
+    --tf-header-search-font: 16px;
+  }
+
   .tf-dashboard-layout__rail--grid {
     grid-template-columns: 1fr;
   }

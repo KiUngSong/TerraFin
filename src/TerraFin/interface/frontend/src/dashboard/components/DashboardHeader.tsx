@@ -101,7 +101,8 @@ const DashboardHeader: React.FC<DashboardHeaderProps> = ({
               borderRadius: 999,
               padding: '0 16px',
               outline: 'none',
-              fontSize: 14,
+              // 16px on mobile to prevent iOS Safari focus-zoom; 14px elsewhere.
+              fontSize: 'var(--tf-header-search-font, 14px)',
               color: '#1e293b',
               background: '#fff',
               boxSizing: 'border-box',
@@ -137,12 +138,13 @@ const DashboardHeader: React.FC<DashboardHeaderProps> = ({
   );
 };
 
+// 32×32 on desktop; 40×40 on mobile to meet ≥44 tap target with icon padding.
 const externalLinkStyle: React.CSSProperties = {
   display: 'inline-flex',
   alignItems: 'center',
   justifyContent: 'center',
-  width: 32,
-  height: 32,
+  width: 'var(--tf-icon-btn-size, 32px)',
+  height: 'var(--tf-icon-btn-size, 32px)',
   borderRadius: 8,
   color: '#475569',
   textDecoration: 'none',
@@ -194,11 +196,13 @@ const ReportBell: React.FC = () => {
 
   useEffect(() => {
     if (!open) return;
-    const handler = (e: MouseEvent) => {
+    // pointerdown covers mouse + touch + pen; mousedown alone misses iOS taps
+    // outside the wrapper on some elements.
+    const handler = (e: PointerEvent) => {
       if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
     };
-    document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
+    document.addEventListener('pointerdown', handler);
+    return () => document.removeEventListener('pointerdown', handler);
   }, [open]);
 
   const handleOpen = async () => {

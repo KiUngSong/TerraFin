@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 
 interface ReportSummary {
@@ -19,10 +19,50 @@ interface Props {
 
 const API = '/dashboard/api/reports/weekly';
 
+const MOBILE_BREAKPOINT = 640;
+
 const WeeklyReportPanel: React.FC<Props> = ({ onClose }) => {
   const [summaries, setSummaries] = useState<ReportSummary[]>([]);
   const [selected, setSelected] = useState<ReportDetail | null>(null);
   const [loading, setLoading] = useState(true);
+  const [isMobile, setIsMobile] = useState(
+    typeof window !== 'undefined' && window.innerWidth < MOBILE_BREAKPOINT,
+  );
+  // Anchor the mobile sheet just below the actual header bottom — at narrow
+  // widths the header stacks brand/nav/search vertically and grows past 56px.
+  // Hardcoding `top: 56` would cover the search bar.
+  const [headerBottom, setHeaderBottom] = useState(56);
+  const activeChipRef = useRef<HTMLLIElement | null>(null);
+
+  useEffect(() => {
+    const onResize = () => setIsMobile(window.innerWidth < MOBILE_BREAKPOINT);
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
+
+  useLayoutEffect(() => {
+    const measure = () => {
+      const header = document.querySelector('.tf-dashboard-header') as HTMLElement | null;
+      if (header) {
+        const rect = header.getBoundingClientRect();
+        setHeaderBottom(Math.max(0, Math.round(rect.bottom)) + 4);
+      }
+    };
+    measure();
+    window.addEventListener('resize', measure);
+    window.addEventListener('orientationchange', measure);
+    return () => {
+      window.removeEventListener('resize', measure);
+      window.removeEventListener('orientationchange', measure);
+    };
+  }, []);
+
+  // Scroll the active chip into view on mobile after a selection so it doesn't
+  // sit off-screen in the horizontal scroller.
+  useEffect(() => {
+    if (!isMobile || !activeChipRef.current) return;
+    activeChipRef.current.scrollIntoView({ block: 'nearest', inline: 'center', behavior: 'smooth' });
+  }, [isMobile, selected?.asOf]);
 
   const fetchList = async () => {
     setLoading(true);
@@ -54,12 +94,16 @@ const WeeklyReportPanel: React.FC<Props> = ({ onClose }) => {
   }, []);
 
   return (
-    <div style={panelStyle} role="dialog" aria-label="Weekly reports">
+    <div
+      style={isMobile ? mobilePanelStyle(headerBottom) : panelStyle}
+      role="dialog"
+      aria-label="Weekly reports"
+    >
       <div style={headerStyle}>
         <span style={{ fontSize: 13, fontWeight: 700, color: '#0f172a' }}>Weekly Reports</span>
         <button type="button" onClick={onClose} style={closeBtnStyle}>×</button>
       </div>
-      <div style={bodyStyle}>
+      <div style={isMobile ? mobileBodyStyle : bodyStyle}>
         {loading ? (
           <div style={{ padding: 12, fontSize: 12, color: '#64748b' }}>Loading…</div>
         ) : summaries.length === 0 ? (
@@ -68,13 +112,16 @@ const WeeklyReportPanel: React.FC<Props> = ({ onClose }) => {
           </div>
         ) : (
           <>
-            <ul style={listStyle}>
+            <ul style={isMobile ? mobileListStyle : listStyle}>
               {summaries.map((s) => (
-                <li key={s.asOf}>
+                <li
+                  key={s.asOf}
+                  ref={selected?.asOf === s.asOf ? activeChipRef : undefined}
+                >
                   <button
                     type="button"
                     onClick={() => openReport(s.asOf)}
-                    style={listItemStyle(selected?.asOf === s.asOf)}
+                    style={listItemStyle(selected?.asOf === s.asOf, isMobile)}
                   >
                     <span style={{ fontWeight: 600 }}>{s.asOf}</span>
                     <span style={{ fontSize: 10, color: '#94a3b8', marginLeft: 6 }}>
@@ -131,6 +178,54 @@ const panelStyle: React.CSSProperties = {
   overflow: 'hidden',
 };
 
+// On narrow viewports the bell-anchored dropdown either overflows the
+// viewport edge or squeezes the 160px sidebar against the markdown body.
+// Switch to a fixed sheet that spans the screen below the header. `top` is
+// the measured header bottom (the header stacks vertically <=767px and
+// would otherwise hide behind a hardcoded value). dvh accounts for the
+// iOS Safari URL-bar collapse so the sheet doesn't extend past the visible
+// area on first load.
+const mobilePanelStyle = (top: number): React.CSSProperties => ({
+  position: 'fixed',
+  top,
+  left: 8,
+  right: 8,
+  maxHeight: `calc(100dvh - ${top + 16}px)`,
+  background: '#ffffff',
+  border: '1px solid #cbd5e1',
+  borderRadius: 12,
+  boxShadow: '0 12px 32px rgba(15, 23, 42, 0.14)',
+  zIndex: 60,
+  display: 'flex',
+  flexDirection: 'column',
+  overflow: 'hidden',
+});
+
+const mobileBodyStyle: React.CSSProperties = {
+  display: 'flex',
+  flexDirection: 'column',
+  flex: 1,
+  minHeight: 0,
+};
+
+const mobileListStyle: React.CSSProperties = {
+  listStyle: 'none',
+  margin: 0,
+  padding: '6px 6px 4px',
+  borderBottom: '1px solid #e2e8f0',
+  background: '#fafafa',
+  display: 'flex',
+  gap: 4,
+  overflowX: 'auto',
+  flexShrink: 0,
+  // Right-edge fade as a swipe affordance — without this users don't realize
+  // the scroller has more items past the visible edge.
+  WebkitMaskImage:
+    'linear-gradient(to right, #000 0, #000 calc(100% - 24px), transparent 100%)',
+  maskImage:
+    'linear-gradient(to right, #000 0, #000 calc(100% - 24px), transparent 100%)',
+};
+
 const headerStyle: React.CSSProperties = {
   display: 'flex',
   alignItems: 'center',
@@ -156,13 +251,13 @@ const listStyle: React.CSSProperties = {
   background: '#fafafa',
 };
 
-const listItemStyle = (active: boolean): React.CSSProperties => ({
-  width: '100%',
+const listItemStyle = (active: boolean, mobile = false): React.CSSProperties => ({
+  width: mobile ? 'auto' : '100%',
   textAlign: 'left',
   padding: '7px 9px',
-  border: 'none',
+  border: mobile ? '1px solid #e2e8f0' : 'none',
   borderRadius: 6,
-  background: active ? '#eff6ff' : 'transparent',
+  background: active ? '#eff6ff' : mobile ? '#ffffff' : 'transparent',
   fontSize: 12,
   color: '#0f172a',
   cursor: 'pointer',
@@ -170,6 +265,8 @@ const listItemStyle = (active: boolean): React.CSSProperties => ({
   display: 'flex',
   alignItems: 'center',
   gap: 4,
+  whiteSpace: 'nowrap',
+  flexShrink: 0,
 });
 
 const sampleBadgeStyle: React.CSSProperties = {
