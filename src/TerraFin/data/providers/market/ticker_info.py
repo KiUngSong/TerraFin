@@ -173,6 +173,46 @@ def _fast_info_fallback(ticker_obj) -> dict:
     return fallback
 
 
+def _search_quote_metadata(ticker: str) -> dict:
+    """Yahoo Search fallback for fields missing from yf.Ticker.info.
+
+    Yahoo's quoteSummary endpoint (which `.info` hits) returns 401/429 on
+    many shared cloud IPs (HuggingFace Spaces, AWS, Cloudflare workers, etc.).
+    The public `/v1/finance/search` endpoint is on a different rate budget
+    and reliably returns `quoteType`, `shortname`, `longname`, `exchange`
+    even when `.info` is empty. Used to recover ETF detection in particular.
+    """
+    try:
+        import requests
+    except ImportError:
+        return {}
+    try:
+        resp = requests.get(
+            "https://query2.finance.yahoo.com/v1/finance/search",
+            params={"q": ticker, "quotesCount": 5, "newsCount": 0, "lang": "en-US"},
+            headers={"User-Agent": "Mozilla/5.0"},
+            timeout=4,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+    except Exception:
+        return {}
+    target = ticker.upper()
+    for q_item in data.get("quotes", []) or []:
+        sym = (q_item.get("symbol") or "").upper()
+        if sym != target:
+            continue
+        out: dict = {}
+        if q_item.get("quoteType"):
+            out["quoteType"] = q_item["quoteType"]
+        if q_item.get("shortname") or q_item.get("longname"):
+            out["shortName"] = q_item.get("shortname") or q_item.get("longname")
+        if q_item.get("exchange"):
+            out["exchange"] = q_item["exchange"]
+        return out
+    return {}
+
+
 def _fetch_info(ticker: str) -> dict:
     info: dict = {}
     ticker_obj = None
@@ -189,6 +229,11 @@ def _fetch_info(ticker: str) -> dict:
         if not isinstance(info, dict):
             info = _mapping_from_object(info)
         info = _merge_missing(info, _fast_info_fallback(ticker_obj))
+
+    # Cloud-IP fallback: graft quoteType/shortName/exchange from Yahoo Search
+    # when the heavier quoteSummary endpoint returned nothing useful for them.
+    if not info.get("quoteType") or not info.get("shortName"):
+        info = _merge_missing(info, _search_quote_metadata(ticker))
 
     return info
 
