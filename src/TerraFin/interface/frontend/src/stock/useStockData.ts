@@ -31,19 +31,6 @@ interface EarningsRecord {
   surprisePercent: string;
 }
 
-interface FinancialRow {
-  label: string;
-  values: Record<string, string | number | null>;
-}
-
-interface FinancialStatement {
-  ticker: string;
-  statement: string;
-  period: string;
-  columns: string[];
-  rows: FinancialRow[];
-}
-
 interface ChartPoint {
   time: string;
   open: number;
@@ -118,7 +105,7 @@ interface FcfHistoryResponse {
   history: FcfHistoryRow[];
 }
 
-export type { ChartPoint, CompanyInfo, EarningsRecord, FcfCandidates, FcfHistoryResponse, FcfHistoryRow, FilingDocument, FilingRow, FilingsListResponse, FinancialRow, FinancialStatement, TocEntry };
+export type { ChartPoint, CompanyInfo, EarningsRecord, FcfCandidates, FcfHistoryResponse, FcfHistoryRow, FilingDocument, FilingRow, FilingsListResponse, TocEntry };
 
 export function useCompanyInfo(ticker: string, enabled = true) {
   const [data, setData] = useState<CompanyInfo | null>(null);
@@ -188,32 +175,6 @@ export function useFcfHistory(ticker: string, years = 10, enabled = true) {
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
   }, [enabled, ticker, years]);
-
-  return { data, loading, error };
-}
-
-export function useFinancials(ticker: string, statement: string, period: string, enabled = true) {
-  const [data, setData] = useState<FinancialStatement | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (!ticker || !enabled) {
-      setData(null);
-      setError(null);
-      setLoading(false);
-      return;
-    }
-    setLoading(true);
-    setError(null);
-    fetch(
-      `/stock/api/financials?ticker=${encodeURIComponent(ticker)}&statement=${statement}&period=${period}`,
-    )
-      .then((res) => (res.ok ? res.json() : Promise.reject(new Error(`${res.status}`))))
-      .then((d) => setData(d))
-      .catch((e) => setError(e.message))
-      .finally(() => setLoading(false));
-  }, [enabled, period, statement, ticker]);
 
   return { data, loading, error };
 }

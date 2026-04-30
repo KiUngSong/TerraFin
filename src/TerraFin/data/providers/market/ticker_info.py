@@ -38,6 +38,9 @@ def _ensure_info_source(ticker: str) -> str:
                 key=ticker,
                 ttl_seconds=ttl_for("market.ticker_info"),
                 fetch_fn=lambda t=ticker: _fetch_info(t),
+                # See _fetch_earnings: serve {} on transient block so the
+                # dashboard renders, but don't cache the failure.
+                fallback_fn=lambda: {},
             )
         )
     return source
@@ -218,26 +221,53 @@ def _search_quote_metadata(ticker: str) -> dict:
 
 
 def _fetch_info(ticker: str) -> dict:
-    info: dict = {}
-    ticker_obj = None
+    """Fetch yfinance .info with cloud-IP fallbacks.
+
+    `.info` hits Yahoo's quoteSummary endpoint — frequently 401/429 on
+    shared cloud IPs (HF Spaces, AWS). When that happens, `fast_info` +
+    history give us price/range, and the search endpoint gives quoteType
+    + identity. If even those fallbacks can't recover price-and-identity,
+    raise so the cache layer doesn't pin a near-empty dict for the full
+    24h TTL — the next request retries.
+    """
     try:
         ticker_obj = yf.Ticker(ticker)
-    except Exception:
-        ticker_obj = None
+    except Exception as exc:
+        raise RuntimeError(f"yfinance Ticker init failed for {ticker}: {exc}") from exc
 
-    if ticker_obj is not None:
-        try:
-            info = ticker_obj.info or {}
-        except Exception:
-            info = {}
-        if not isinstance(info, dict):
-            info = _mapping_from_object(info)
-        info = _merge_missing(info, _fast_info_fallback(ticker_obj))
+    info: dict = {}
+    info_call_failed = False
+    try:
+        raw = ticker_obj.info
+    except Exception:
+        info_call_failed = True
+        raw = None
+    if raw is None:
+        info_call_failed = info_call_failed or True
+        info = {}
+    elif isinstance(raw, dict):
+        info = dict(raw)
+    else:
+        info = _mapping_from_object(raw)
+
+    info = _merge_missing(info, _fast_info_fallback(ticker_obj))
 
     # Cloud-IP fallback: graft quoteType/shortName/exchange from Yahoo Search
     # when the heavier quoteSummary endpoint returned nothing useful for them.
     if not info.get("quoteType") or not info.get("shortName"):
         info = _merge_missing(info, _search_quote_metadata(ticker))
+
+    # If .info itself failed AND fallbacks didn't recover the minimum
+    # signals (price + identity), this is a suspected upstream block.
+    # Raise so the cache layer falls through to the fallback_fn instead
+    # of pinning the degraded payload for 24h.
+    if info_call_failed:
+        has_price = info.get("currentPrice") is not None or info.get("regularMarketPrice") is not None
+        has_identity = bool(info.get("quoteType")) or bool(info.get("shortName"))
+        if not (has_price and has_identity):
+            raise RuntimeError(
+                f"yfinance .info blocked for {ticker} and fallbacks insufficient"
+            )
 
     return info
 

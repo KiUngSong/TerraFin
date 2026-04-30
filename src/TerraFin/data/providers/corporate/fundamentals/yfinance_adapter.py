@@ -1,3 +1,4 @@
+import logging
 from typing import Any
 
 import pandas as pd
@@ -6,6 +7,8 @@ import yfinance as yf
 from TerraFin.data.cache.manager import CacheManager
 from TerraFin.data.cache.policy import ttl_for
 from TerraFin.data.contracts import FinancialStatementFrame
+
+log = logging.getLogger(__name__)
 
 
 _CACHE_NAMESPACE = "yfinance_fundamentals"
@@ -68,10 +71,27 @@ def _write_cached_statement(ticker: str, statement_type: str, period: str, frame
     CacheManager.file_cache_write(_CACHE_NAMESPACE, _cache_key(ticker, statement_type, period), payload)
 
 
-def _fetch_statement_frame(ticker: str, statement_type: str, period: str) -> pd.DataFrame | None:
-    ticker_obj = yf.Ticker(ticker.upper())
+def _fetch_statement_frame(ticker: str, statement_type: str, period: str) -> tuple[pd.DataFrame | None, bool]:
+    """Return (frame, upstream_failed).
+
+    `upstream_failed=True` when any yfinance attribute access raised — caller
+    should NOT cache the result for the full TTL since this is the typical
+    cloud-IP rate-limit signature (HF Spaces, AWS hitting Yahoo's
+    quoteSummary endpoint).
+    """
+    upstream_failed = False
+    try:
+        ticker_obj = yf.Ticker(ticker.upper())
+    except Exception as exc:
+        log.debug("yfinance Ticker init failed for %s: %s", ticker, exc)
+        return None, True
     for attr_name in _STATEMENT_ATTRS.get(statement_type, {}).get(period, []):
-        candidate = getattr(ticker_obj, attr_name, None)
+        try:
+            candidate = getattr(ticker_obj, attr_name, None)
+        except Exception as exc:
+            log.debug("fundamentals %s.%s raised: %s", ticker, attr_name, exc)
+            upstream_failed = True
+            continue
         if candidate is None:
             continue
         if callable(candidate):
@@ -79,10 +99,14 @@ def _fetch_statement_frame(ticker: str, statement_type: str, period: str) -> pd.
                 candidate = candidate()
             except TypeError:
                 continue
+            except Exception as exc:
+                log.debug("fundamentals %s.%s() raised: %s", ticker, attr_name, exc)
+                upstream_failed = True
+                continue
         frame = _coerce_statement_frame(candidate)
         if frame is not None:
-            return frame
-    return None
+            return frame, False
+    return None, upstream_failed
 
 
 def _to_canonical(
@@ -124,8 +148,18 @@ def get_corporate_data(
     if cached is not None:
         return _to_canonical(cached, statement_type=statement_type, period=period, ticker=ticker)
 
-    frame = _fetch_statement_frame(ticker, statement_type, period)
-    _write_cached_statement(ticker, statement_type, period, frame)
+    frame, upstream_failed = _fetch_statement_frame(ticker, statement_type, period)
+    # Only persist successful fetches to the 24h cache. When yfinance raises
+    # (cloud-IP rate limit) or the result is empty/None, skip the write so
+    # the next request retries the real upstream instead of replaying a
+    # cached empty payload for a full day. Same pattern as ticker_info.
+    if frame is not None:
+        _write_cached_statement(ticker, statement_type, period, frame)
+    elif upstream_failed:
+        log.info(
+            "Fundamentals fetch for %s/%s/%s failed upstream — not caching",
+            ticker, statement_type, period,
+        )
     return _to_canonical(frame, statement_type=statement_type, period=period, ticker=ticker)
 
 

@@ -14,7 +14,6 @@ from TerraFin.interface.stock.payloads import (
     build_fcf_history_payload,
     build_filing_document_payload,
     build_filings_list_payload,
-    build_financial_statement_payload,
     resolve_ticker_query,
 )
 from TerraFin.interface.valuation_models import (
@@ -229,16 +228,6 @@ def create_stock_data_router() -> APIRouter:
     @router.get(f"{STOCK_API_PREFIX}/beta-estimate", response_model=BetaEstimateResponse)
     def api_beta_estimate(ticker: str = Query(..., min_length=1)):
         return BetaEstimateResponse(**build_beta_estimate_payload(ticker))
-
-    @router.get(f"{STOCK_API_PREFIX}/financials", response_model=FinancialStatementResponse)
-    def api_financials(
-        ticker: str = Query(..., min_length=1),
-        statement: str = Query(default="income", pattern="^(income|balance|cashflow)$"),
-        period: str = Query(default="annual", pattern="^(annual|quarter)$"),
-    ):
-        return FinancialStatementResponse(
-            **build_financial_statement_payload(ticker, statement=statement, period=period)
-        )
 
     @router.get(f"{STOCK_API_PREFIX}/dcf", response_model=DCFValuationResponse)
     def api_dcf(
