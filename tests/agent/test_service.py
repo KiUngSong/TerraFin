@@ -68,36 +68,33 @@ class _FakeDataFactory:
         frame.name = name
         return frame
 
-
-class _FakePrivateDataService:
-    def get_market_breadth(self):
-        return [{"label": "Advancers", "value": "320", "tone": "#047857"}]
-
-    def get_fear_greed_current(self):
-        return {
-            "score": 42,
-            "rating": "Fear",
-            "previousClose": 45,
-            "oneWeekAgo": 50,
-            "oneMonthAgo": 38,
-        }
-
-    def get_top_companies(self):
-        return [
-            {"symbol": "AAPL", "name": "Apple", "marketCap": 3_200_000_000_000},
-            {"symbol": "MSFT", "name": "Microsoft", "marketCap": 3_100_000_000_000},
-        ]
-
-    def get_trailing_forward_pe(self):
-        return {
-            "date": "2026-04-15",
-            "summary": {"trailing_forward_pe_spread": 2.1},
-            "coverage": {"usable": 480, "requested": 500},
-            "history": [
-                {"date": "2026-04-14", "spread": 2.0},
-                {"date": "2026-04-15", "spread": 2.1},
-            ],
-        }
+    def get_panel_data(self, name: str):
+        if name == "market_breadth":
+            return [{"label": "Advancers", "value": "320", "tone": "#047857"}]
+        if name == "fear_greed":
+            return {
+                "score": 42,
+                "rating": "Fear",
+                "previousClose": 45,
+                "oneWeekAgo": 50,
+                "oneMonthAgo": 38,
+            }
+        if name == "top_companies":
+            return [
+                {"symbol": "AAPL", "name": "Apple", "marketCap": 3_200_000_000_000},
+                {"symbol": "MSFT", "name": "Microsoft", "marketCap": 3_100_000_000_000},
+            ]
+        if name == "trailing_forward_pe":
+            return {
+                "date": "2026-04-15",
+                "summary": {"trailing_forward_pe_spread": 2.1},
+                "coverage": {"usable": 480, "requested": 500},
+                "history": [
+                    {"date": "2026-04-14", "spread": 2.0},
+                    {"date": "2026-04-15", "spread": 2.1},
+                ],
+            }
+        raise ValueError(f"Unknown panel: {name}")
 
     def get_calendar_events(self, *, year: int, month: int, categories=None, limit=None):
         _ = categories, limit
@@ -121,7 +118,7 @@ class _FakeWatchlistService:
 
 
 def test_market_data_uses_recent_pipeline_and_processing(monkeypatch) -> None:
-    monkeypatch.setattr(agent_service, "DataFactory", _FakeDataFactory)
+    monkeypatch.setattr(agent_service, "get_data_factory", lambda: _FakeDataFactory())
     service = agent_service.TerraFinAgentService()
 
     payload = service.market_data("TEST", depth="auto", view="monthly")
@@ -136,7 +133,7 @@ def test_market_data_uses_recent_pipeline_and_processing(monkeypatch) -> None:
 
 
 def test_market_data_can_force_full_history(monkeypatch) -> None:
-    monkeypatch.setattr(agent_service, "DataFactory", _FakeDataFactory)
+    monkeypatch.setattr(agent_service, "get_data_factory", lambda: _FakeDataFactory())
     service = agent_service.TerraFinAgentService()
 
     payload = service.market_data("TEST", depth="full", view="daily")
@@ -149,7 +146,7 @@ def test_market_data_can_force_full_history(monkeypatch) -> None:
 
 
 def test_indicators_use_shared_processing_contract(monkeypatch) -> None:
-    monkeypatch.setattr(agent_service, "DataFactory", _FakeDataFactory)
+    monkeypatch.setattr(agent_service, "get_data_factory", lambda: _FakeDataFactory())
     service = agent_service.TerraFinAgentService()
 
     payload = service.indicators(
@@ -167,8 +164,7 @@ def test_indicators_use_shared_processing_contract(monkeypatch) -> None:
 
 
 def test_market_snapshot_and_calendar_include_processing(monkeypatch) -> None:
-    monkeypatch.setattr(agent_service, "DataFactory", _FakeDataFactory)
-    monkeypatch.setattr(agent_service, "get_private_data_service", lambda: _FakePrivateDataService())
+    monkeypatch.setattr(agent_service, "get_data_factory", lambda: _FakeDataFactory())
     monkeypatch.setattr(agent_service, "get_watchlist_service", lambda: _FakeWatchlistService())
     service = agent_service.TerraFinAgentService()
 
@@ -190,7 +186,7 @@ def test_market_snapshot_and_calendar_include_processing(monkeypatch) -> None:
 
 
 def test_macro_focus_uses_shared_market_pipeline(monkeypatch) -> None:
-    monkeypatch.setattr(agent_service, "DataFactory", _FakeDataFactory)
+    monkeypatch.setattr(agent_service, "get_data_factory", lambda: _FakeDataFactory())
     service = agent_service.TerraFinAgentService()
 
     payload = service.macro_focus("S&P 500", depth="auto", view="weekly")
@@ -202,7 +198,7 @@ def test_macro_focus_uses_shared_market_pipeline(monkeypatch) -> None:
 
 
 def test_economic_normalizes_human_friendly_indicator_aliases(monkeypatch) -> None:
-    monkeypatch.setattr(agent_service, "DataFactory", _FakeDataFactory)
+    monkeypatch.setattr(agent_service, "get_data_factory", lambda: _FakeDataFactory())
     service = agent_service.TerraFinAgentService()
 
     payload = service.economic(["Fed Funds Rate", "US Federal Reserve Balance Sheet"])
@@ -222,7 +218,7 @@ def test_economic_normalizes_human_friendly_indicator_aliases(monkeypatch) -> No
 
 
 def test_fear_greed_returns_full_widget_payload(monkeypatch) -> None:
-    monkeypatch.setattr(agent_service, "get_private_data_service", lambda: _FakePrivateDataService())
+    monkeypatch.setattr(agent_service, "get_data_factory", lambda: _FakeDataFactory())
     service = agent_service.TerraFinAgentService()
 
     payload = service.fear_greed()
@@ -236,7 +232,7 @@ def test_fear_greed_returns_full_widget_payload(monkeypatch) -> None:
 
 
 def test_top_companies_returns_full_list(monkeypatch) -> None:
-    monkeypatch.setattr(agent_service, "get_private_data_service", lambda: _FakePrivateDataService())
+    monkeypatch.setattr(agent_service, "get_data_factory", lambda: _FakeDataFactory())
     service = agent_service.TerraFinAgentService()
 
     payload = service.top_companies()
@@ -258,7 +254,7 @@ def test_market_regime_mirrors_route_placeholder() -> None:
 
 
 def test_trailing_forward_pe_returns_dashboard_shape(monkeypatch) -> None:
-    monkeypatch.setattr(agent_service, "get_private_data_service", lambda: _FakePrivateDataService())
+    monkeypatch.setattr(agent_service, "get_data_factory", lambda: _FakeDataFactory())
     service = agent_service.TerraFinAgentService()
 
     payload = service.trailing_forward_pe()
@@ -273,7 +269,7 @@ def test_trailing_forward_pe_returns_dashboard_shape(monkeypatch) -> None:
 def test_market_breadth_standalone_returns_metrics_list(monkeypatch) -> None:
     """Was bundled inside market_snapshot; now a standalone tool so agent
     and the MarketBreadthCard widget query the same data (DA Med-7)."""
-    monkeypatch.setattr(agent_service, "get_private_data_service", lambda: _FakePrivateDataService())
+    monkeypatch.setattr(agent_service, "get_data_factory", lambda: _FakeDataFactory())
     service = agent_service.TerraFinAgentService()
 
     payload = service.market_breadth()
@@ -297,7 +293,7 @@ def test_market_snapshot_no_longer_bundles_whole_market_widgets(monkeypatch) -> 
     "convenience" is what caused the original UI↔agent divergence —
     widgets refresh on their own cadence while market_snapshot bundled a
     point-in-time copy, so the agent's number could lag the UI's."""
-    monkeypatch.setattr(agent_service, "DataFactory", _FakeDataFactory)
+    monkeypatch.setattr(agent_service, "get_data_factory", lambda: _FakeDataFactory())
     service = agent_service.TerraFinAgentService()
 
     snapshot = service.market_snapshot("TEST")
@@ -323,7 +319,14 @@ def test_portfolio_exposes_top_holdings_matching_route_sort(monkeypatch) -> None
             )
             self.info = {"guru": "buffett"}
 
-    monkeypatch.setattr(agent_service, "get_portfolio_data", lambda _g: _FakePortfolio())
+    class _FactoryStub:
+        def __init__(self, *args, **kwargs) -> None:
+            _ = args, kwargs
+
+        def get_portfolio_data(self, _g):
+            return _FakePortfolio()
+
+    monkeypatch.setattr(agent_service, "get_data_factory", lambda: _FactoryStub())
     service = agent_service.TerraFinAgentService()
 
     payload = service.portfolio("buffett")
@@ -376,12 +379,21 @@ def test_valuation_passes_through_full_dcf_and_reverse_dcf_payloads(monkeypatch)
 
     class _FakeDF:
         def __init__(self) -> None:
-            self._data = {"TotalStockholdersEquity": [2_000_000_000], "SharesOutstanding": [20_000_000]}
-            self.columns = list(self._data.keys())
+            self._rows = {"TotalStockholdersEquity": [2_000_000_000], "SharesOutstanding": [20_000_000]}
+            self.index = list(self._rows.keys())
+            self.columns = ["2025-09-30"]
             self.empty = False
 
-        def __getitem__(self, col):
-            return type("_S", (), {"iloc": type("_I", (), {"__getitem__": lambda _, idx: self._data[col][idx]})()})()
+        class _Loc:
+            def __init__(self, outer):
+                self._outer = outer
+
+            def __getitem__(self, idx):
+                return type("_S", (), {"iloc": type("_I", (), {"__getitem__": lambda _, i: self._outer._rows[idx][i]})()})()
+
+        @property
+        def loc(self):
+            return _FakeDF._Loc(self)
 
     class _FactoryStub:
         def __init__(self, *args, **kwargs) -> None:
@@ -391,7 +403,7 @@ def test_valuation_passes_through_full_dcf_and_reverse_dcf_payloads(monkeypatch)
             _ = args, kwargs
             return _FakeDF()
 
-    monkeypatch.setattr(agent_service, "DataFactory", _FactoryStub)
+    monkeypatch.setattr(agent_service, "get_data_factory", lambda: _FactoryStub())
     service = agent_service.TerraFinAgentService()
 
     payload = service.valuation("AAPL")

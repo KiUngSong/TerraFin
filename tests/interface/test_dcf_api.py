@@ -3,14 +3,14 @@ from fastapi.testclient import TestClient
 import TerraFin.interface.market_insights.data_routes as market_insights_routes
 import TerraFin.interface.stock.data_routes as stock_routes
 from TerraFin.analytics.analysis.risk.models import BetaEstimate
-from TerraFin.interface.private_data_service import reset_private_data_service
+from TerraFin.data.cache.registry import reset_cache_manager
 from TerraFin.interface.server import create_app
 from TerraFin.interface.watchlist_service import reset_watchlist_service
 
 
 def _client() -> TestClient:
     reset_watchlist_service()
-    reset_private_data_service()
+    reset_cache_manager()
     return TestClient(create_app())
 
 

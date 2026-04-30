@@ -5,14 +5,11 @@ from fastapi.testclient import TestClient
 import TerraFin.data.cache.manager as cache_manager_module
 from TerraFin.data.cache.registry import reset_cache_manager
 from TerraFin.data.providers.private_access.client import PrivateAccessClient
-from TerraFin.data.providers.private_access.models import CalendarResponse
-from TerraFin.interface.private_data_service import reset_private_data_service
 from TerraFin.interface.server import create_app
 
 
 def _reset_services() -> None:
     reset_cache_manager()
-    reset_private_data_service()
 
 
 def test_calendar_events_endpoint_returns_contract(monkeypatch, tmp_path) -> None:
@@ -36,10 +33,11 @@ def test_calendar_events_are_filtered_by_category(monkeypatch, tmp_path) -> None
     monkeypatch.setattr(cache_manager_module, "_FILE_CACHE_DIR", tmp_path)
     now = datetime.utcnow()
 
-    def _mock_calendar(self):
+    def _mock_panel(self, resource):
         _ = self
-        return CalendarResponse(
-            events=[
+        assert resource == "calendar-events"
+        return {
+            "events": [
                 {
                     "id": f"{now.year}-{now.month:02d}-10-0",
                     "title": "Mock Macro",
@@ -53,9 +51,9 @@ def test_calendar_events_are_filtered_by_category(monkeypatch, tmp_path) -> None
                     "category": "earning",
                 },
             ]
-        )
+        }
 
-    monkeypatch.setattr(PrivateAccessClient, "fetch_calendar_events", _mock_calendar)
+    monkeypatch.setattr(PrivateAccessClient, "fetch_panel", _mock_panel)
     _reset_services()
     client = TestClient(create_app())
 
@@ -86,10 +84,11 @@ def test_calendar_events_use_private_source_when_available(monkeypatch, tmp_path
     monkeypatch.setattr(cache_manager_module, "_FILE_CACHE_DIR", tmp_path)
     now = datetime.utcnow()
 
-    def _mock_calendar(self):
+    def _mock_panel(self, resource):
         _ = self
-        return CalendarResponse(
-            events=[
+        assert resource == "calendar-events"
+        return {
+            "events": [
                 {
                     "id": f"{now.year}-{now.month:02d}-03-0",
                     "title": "Private Macro",
@@ -103,9 +102,9 @@ def test_calendar_events_use_private_source_when_available(monkeypatch, tmp_path
                     "category": "earning",
                 },
             ]
-        )
+        }
 
-    monkeypatch.setattr(PrivateAccessClient, "fetch_calendar_events", _mock_calendar)
+    monkeypatch.setattr(PrivateAccessClient, "fetch_panel", _mock_panel)
     _reset_services()
     client = TestClient(create_app())
 

@@ -24,7 +24,6 @@ from TerraFin.agent.session_store import (
 from TerraFin.agent.tools import TerraFinToolDefinition, TerraFinToolInvocationResult
 from TerraFin.data.contracts import HistoryChunk, TimeSeriesDataFrame
 from TerraFin.data.providers.corporate.filings.sec_edgar.filing import SecEdgarConfigurationError
-from TerraFin.interface.private_data_service import reset_private_data_service
 from TerraFin.interface.server import create_app
 from TerraFin.interface.watchlist_service import reset_watchlist_service
 
@@ -94,10 +93,14 @@ class _FakeDataFactory:
             }
         )
 
+    def get_portfolio_data(self, guru):
+        _ = guru
+        return _FakePortfolioOutput()
 
-class _FakePrivateDataService:
-    def get_market_breadth(self):
-        return [{"label": "Advancers", "value": "300", "tone": "#047857"}]
+    def get_panel_data(self, name):
+        if name == "market_breadth":
+            return [{"label": "Advancers", "value": "300", "tone": "#047857"}]
+        raise ValueError(f"Unknown panel: {name}")
 
     def get_calendar_events(self, *, year, month, categories=None, limit=None):
         _ = categories, limit
@@ -117,7 +120,7 @@ class _FakePrivateDataService:
 
 class _FakeWatchlistService:
     def get_watchlist_snapshot(self):
-        return [{"symbol": "AAPL", "name": "Apple", "move": "+1.1%"}]
+        return [{"symbol": "AAPL", "name": "Apple", "move": "+1.1%", "tags": []}]
 
 
 class _FakePortfolioOutput:
@@ -507,9 +510,8 @@ class _FakeHostedLoop:
 
 
 def _configure_agent_fakes(monkeypatch) -> None:
-    monkeypatch.setattr(agent_service, "DataFactory", _FakeDataFactory)
-    monkeypatch.setattr(stock_payloads, "DataFactory", _FakeDataFactory)
-    monkeypatch.setattr(agent_service, "get_private_data_service", lambda: _FakePrivateDataService())
+    monkeypatch.setattr(agent_service, "get_data_factory", lambda: _FakeDataFactory())
+    monkeypatch.setattr(stock_payloads, "get_data_factory", lambda: _FakeDataFactory())
     monkeypatch.setattr(agent_service, "get_watchlist_service", lambda: _FakeWatchlistService())
     monkeypatch.setattr(
         stock_payloads,
@@ -536,7 +538,6 @@ def _configure_agent_fakes(monkeypatch) -> None:
             }
         ],
     )
-    monkeypatch.setattr(agent_service, "get_portfolio_data", lambda guru: _FakePortfolioOutput())
 
 
 def _client(monkeypatch, *, hosted_loop=None) -> TestClient:
@@ -544,7 +545,6 @@ def _client(monkeypatch, *, hosted_loop=None) -> TestClient:
     if hosted_loop is not None:
         monkeypatch.setattr(agent_routes, "get_hosted_agent_loop", lambda: hosted_loop)
     reset_watchlist_service()
-    reset_private_data_service()
     return TestClient(create_app())
 
 
@@ -579,9 +579,8 @@ def test_agent_market_snapshot_contract(monkeypatch) -> None:
     resp = client.get("/agent/api/market-snapshot?ticker=TEST&depth=full")
     assert resp.status_code == 200
     payload = resp.json()
-    assert set(payload) == {"ticker", "price_action", "indicators", "market_breadth", "watchlist", "processing"}
+    assert set(payload) == {"ticker", "price_action", "indicators", "processing"}
     assert payload["processing"]["resolvedDepth"] == "full"
-    assert payload["watchlist"][0]["symbol"] == "AAPL"
 
 
 def test_agent_resolve_company_earnings_and_financials(monkeypatch) -> None:
@@ -667,17 +666,14 @@ def test_agent_openapi_includes_new_routes(monkeypatch) -> None:
 
 def test_agent_portfolio_returns_503_when_sec_edgar_is_not_configured(monkeypatch) -> None:
     _configure_agent_fakes(monkeypatch)
-    monkeypatch.setattr(
-        agent_service,
-        "get_portfolio_data",
-        lambda guru: (_ for _ in ()).throw(
-            SecEdgarConfigurationError(
-                "SEC EDGAR access is unavailable until `TERRAFIN_SEC_USER_AGENT` is configured."
-            )
-        ),
-    )
+
+    def _raise_config(self, guru):
+        raise SecEdgarConfigurationError(
+            "SEC EDGAR access is unavailable until `TERRAFIN_SEC_USER_AGENT` is configured."
+        )
+
+    monkeypatch.setattr(_FakeDataFactory, "get_portfolio_data", _raise_config)
     reset_watchlist_service()
-    reset_private_data_service()
     client = TestClient(create_app())
 
     response = client.get("/agent/api/portfolio?guru=Warren%20Buffett")

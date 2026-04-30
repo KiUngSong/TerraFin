@@ -1,8 +1,8 @@
 from fastapi import APIRouter, Body, HTTPException, Query
 from pydantic import BaseModel
 
+from TerraFin.data import get_data_factory
 from TerraFin.data.cache.registry import get_cache_manager, refresh_all_due
-from TerraFin.interface.private_data_service import get_private_data_service
 from TerraFin.interface.watchlist_service import (
     WatchlistConfigurationError,
     WatchlistConflictError,
@@ -10,6 +10,8 @@ from TerraFin.interface.watchlist_service import (
     WatchlistValidationError,
     get_watchlist_service,
 )
+
+from typing import Literal
 
 
 DASHBOARD_API_PREFIX = "/dashboard/api"
@@ -19,6 +21,7 @@ class WatchlistItemResponse(BaseModel):
     symbol: str
     name: str
     move: str
+    tags: list[str] = []
 
 
 class WatchlistSnapshotResponse(BaseModel):
@@ -27,12 +30,37 @@ class WatchlistSnapshotResponse(BaseModel):
     mode: str
 
 
+class WatchlistGroupResponse(BaseModel):
+    tag: str
+    count: int
+
+
+class WatchlistGroupsResponse(BaseModel):
+    groups: list[WatchlistGroupResponse]
+
+
 class WatchlistCreateRequest(BaseModel):
     symbol: str
+    tags: list[str] = []
+
+
+class WatchlistSymbolEntry(BaseModel):
+    symbol: str
+    tags: list[str] = []
 
 
 class WatchlistReplaceRequest(BaseModel):
-    symbols: list[str]
+    symbols: list[str | WatchlistSymbolEntry]
+
+
+class WatchlistTagsRequest(BaseModel):
+    tags: list[str]
+    mode: Literal["set", "add", "remove"] = "set"
+
+
+class WatchlistRenameGroupRequest(BaseModel):
+    old: str
+    new: str
 
 
 class BreadthMetricResponse(BaseModel):
@@ -85,7 +113,7 @@ class CacheStatusResponse(BaseModel):
 
 def create_dashboard_data_router() -> APIRouter:
     router = APIRouter()
-    private_data_service = get_private_data_service()
+    data_factory = get_data_factory()
     watchlist_service = get_watchlist_service()
     cache_manager = get_cache_manager()
 
@@ -98,13 +126,45 @@ def create_dashboard_data_router() -> APIRouter:
         )
 
     @router.get(f"{DASHBOARD_API_PREFIX}/watchlist", response_model=WatchlistSnapshotResponse)
-    def api_get_watchlist_snapshot():
-        return _watchlist_response(watchlist_service.get_watchlist_snapshot())
+    def api_get_watchlist_snapshot(group: str | None = Query(default=None)):
+        return _watchlist_response(watchlist_service.get_watchlist_snapshot(group=group))
+
+    @router.get(f"{DASHBOARD_API_PREFIX}/watchlist/groups", response_model=WatchlistGroupsResponse)
+    def api_get_watchlist_groups():
+        return WatchlistGroupsResponse(
+            groups=[WatchlistGroupResponse(**g) for g in watchlist_service.list_groups()]
+        )
+
+    @router.post(f"{DASHBOARD_API_PREFIX}/watchlist/groups/rename", response_model=WatchlistSnapshotResponse)
+    def api_rename_watchlist_group(body: WatchlistRenameGroupRequest = Body(...)):
+        try:
+            return _watchlist_response(watchlist_service.rename_group(body.old, body.new))
+        except WatchlistValidationError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except WatchlistConfigurationError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    @router.patch(f"{DASHBOARD_API_PREFIX}/watchlist/{{symbol}}/tags", response_model=WatchlistSnapshotResponse)
+    def api_patch_watchlist_tags(symbol: str, body: WatchlistTagsRequest = Body(...)):
+        try:
+            if body.mode == "set":
+                items = watchlist_service.set_tags(symbol, body.tags)
+            elif body.mode == "add":
+                items = watchlist_service.add_tags(symbol, body.tags)
+            else:
+                items = watchlist_service.remove_tags(symbol, body.tags)
+            return _watchlist_response(items)
+        except WatchlistNotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except WatchlistConfigurationError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+        except WatchlistValidationError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     @router.post(f"{DASHBOARD_API_PREFIX}/watchlist", response_model=WatchlistSnapshotResponse)
     def api_add_watchlist_symbol(body: WatchlistCreateRequest = Body(...)):
         try:
-            return _watchlist_response(watchlist_service.add_symbol(body.symbol))
+            return _watchlist_response(watchlist_service.add_symbol(body.symbol, tags=body.tags))
         except WatchlistConflictError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         except WatchlistConfigurationError as exc:
@@ -115,7 +175,11 @@ def create_dashboard_data_router() -> APIRouter:
     @router.put(f"{DASHBOARD_API_PREFIX}/watchlist", response_model=WatchlistSnapshotResponse)
     def api_replace_watchlist(body: WatchlistReplaceRequest = Body(...)):
         try:
-            return _watchlist_response(watchlist_service.replace_symbols(body.symbols))
+            normalized = [
+                s if isinstance(s, str) else s.model_dump()
+                for s in body.symbols
+            ]
+            return _watchlist_response(watchlist_service.replace_symbols(normalized))
         except WatchlistConfigurationError as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
         except WatchlistValidationError as exc:
@@ -134,12 +198,12 @@ def create_dashboard_data_router() -> APIRouter:
 
     @router.get(f"{DASHBOARD_API_PREFIX}/market-breadth", response_model=MarketBreadthResponse)
     def api_get_market_breadth():
-        metrics = private_data_service.get_market_breadth()
+        metrics = data_factory.get_panel_data("market_breadth")
         return MarketBreadthResponse(metrics=[BreadthMetricResponse.model_validate(metric) for metric in metrics])
 
     @router.get(f"{DASHBOARD_API_PREFIX}/trailing-forward-pe-spread", response_model=TrailingForwardPeSpreadResponse)
     def api_get_trailing_forward_pe_spread():
-        payload = private_data_service.get_trailing_forward_pe()
+        payload = data_factory.get_panel_data("trailing_forward_pe")
         summary = payload.get("summary", {}) if isinstance(payload, dict) else {}
         coverage = payload.get("coverage", {}) if isinstance(payload, dict) else {}
         history = payload.get("history", []) if isinstance(payload, dict) else []
@@ -158,12 +222,12 @@ def create_dashboard_data_router() -> APIRouter:
 
     @router.get(f"{DASHBOARD_API_PREFIX}/cape", response_model=CapeResponse)
     def api_get_cape():
-        data = private_data_service.get_cape()
+        data = data_factory.get_panel_data("cape")
         return CapeResponse(date=data.get("date"), cape=data.get("cape"))
 
     @router.get(f"{DASHBOARD_API_PREFIX}/fear-greed", response_model=FearGreedResponse)
     def api_get_fear_greed():
-        return FearGreedResponse.model_validate(private_data_service.get_fear_greed_current())
+        return FearGreedResponse.model_validate(data_factory.get_panel_data("fear_greed"))
 
     @router.get(f"{DASHBOARD_API_PREFIX}/cache-status", response_model=CacheStatusResponse)
     def api_get_cache_status():

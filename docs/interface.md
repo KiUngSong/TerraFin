@@ -274,8 +274,34 @@ configured.
 | `GET` | `/market-insights/api/regime` | Market regime (placeholder) |
 | `GET` | `/market-insights/api/macro-info` | Macro instrument summary (`?name=`) |
 | `GET` | `/market-insights/api/investor-positioning/gurus` | List available guru names |
-| `GET` | `/market-insights/api/investor-positioning/holdings` | Guru portfolio (`?guru=`) |
+| `GET` | `/market-insights/api/investor-positioning/holdings` | Guru portfolio (`?guru=`, optional `?filing_date=`) |
+| `GET` | `/market-insights/api/investor-positioning/history` | Filing index for period dropdown (`?guru=`) |
 | `GET` | `/market-insights/api/top-companies` | Private-source top-companies snapshot |
+
+### Investor positioning loading strategy
+
+Three-tier loading minimises time-to-first-render:
+
+1. **Fast path** (`/holdings` without `filing_date`) — fetches exactly 2 XMLs (latest + previous quarter) so colour coding works immediately.
+2. **Index only** (`/history`) — returns the SEC submissions index with no XML fetch; used to populate the period dropdown.
+3. **Background prefetch** — triggered by `/history`; caches remaining quarters via `asyncio.Task` so historical periods load instantly when selected.
+
+**Cancellation pattern** (`data_routes.py: _submit_prefetch`):
+
+```python
+_prefetch_tasks: dict[str, asyncio.Task] = {}
+
+async def _submit_prefetch(guru, filings):
+    for task in _prefetch_tasks.values():
+        if not task.done():
+            task.cancel()          # cancel ALL existing prefetch tasks
+    _prefetch_tasks.clear()
+    _prefetch_tasks[f"prefetch:{guru}"] = asyncio.create_task(
+        _prefetch_holdings_async(guru, filings)
+    )
+```
+
+When the user switches gurus, every in-flight prefetch is cancelled immediately. `run_in_executor` runs the blocking SEC download in a thread; `CancelledError` fires between iterations (not mid-download). To add a new cancellable background job type, follow the same pattern: key the task dict by a domain-specific string, clear all on new submission if mutual exclusion is desired, or key per-domain for independent queues.
 
 Market Insights now uses the shared TerraFin chart routes directly:
 - `POST /chart/api/chart-series/progressive/set` for initial seed
@@ -563,6 +589,86 @@ npm run build
 
 Do not commit `node_modules/`. The built output is committed so the server can
 run in environments without a frontend toolchain.
+
+## Alerting
+
+Source: `src/TerraFin/interface/alerting/`, `src/TerraFin/alerting/`
+
+TerraFin supports a push-model alert pipeline: an external real-time service monitors tickers and POSTs signals back to TerraFin, which forwards them to Telegram.
+
+### Architecture
+
+```
+External alert API ──register tickers──▶ TerraFin (outbound)
+External alert API ──POST /alerting/api/signal──▶ TerraFin (inbound)
+TerraFin ──sendMessage──▶ Telegram Bot API ──▶ User
+```
+
+TerraFin never handles real-time tick data. Signal computation stays in the external service.
+
+### Inbound webhook
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/alerting/api/signal` | Receive signal from external API → forward to Telegram |
+
+Request body (`InboundSignal`):
+```json
+{
+  "ticker": "AAPL",
+  "signal": "20일 이평선 터치",
+  "severity": "high",
+  "signal_id": "uuid-from-sender",
+  "fired_at": "2026-04-30T09:00:00"
+}
+```
+
+- `signal_id` is optional but required for deduplication (sender-provided UUID, not TerraFin-generated)
+- `X-Signature` header: HMAC-SHA256 of request body, keyed with `TERRAFIN_ALERT_WEBHOOK_SECRET`
+
+### Env vars
+
+| Variable | Purpose | Required |
+|----------|---------|----------|
+| `TERRAFIN_ALERT_PROVIDER_URL` | External alert API base URL | To enable outbound registration |
+| `TERRAFIN_ALERT_PROVIDER_KEY` | Bearer token for external API | If API requires auth |
+| `TERRAFIN_ALERT_WEBHOOK_SECRET` | HMAC secret for inbound verification | Strongly recommended |
+| `TERRAFIN_ALERT_CHANNEL` | `telegram` to forward via Telegram Bot | To enable Telegram |
+
+### Telegram setup
+
+1. Create a bot via [@BotFather](https://t.me/BotFather): `/newbot` → copy token
+
+2. Save token:
+```bash
+terrafin-alerting telegram setup 123456789:AAHfiq...
+```
+
+3. Pair — run the command, then DM your bot on Telegram:
+```bash
+terrafin-alerting telegram pair
+```
+Chat ID is captured automatically and saved to `~/.terrafin/telegram.json`.
+
+4. Test:
+```bash
+terrafin-alerting telegram test
+```
+
+5. Add to `.env`:
+```bash
+TERRAFIN_ALERT_CHANNEL=telegram
+TERRAFIN_ALERT_PROVIDER_URL=https://your-alert-api.com
+TERRAFIN_ALERT_WEBHOOK_SECRET=your-hmac-secret
+```
+
+Server startup registers current watchlist with the external API and starts a 60-second heartbeat to re-register on provider restart.
+
+### Extending
+
+To swap the external API provider, implement `AlertProvider` from `data/contracts/alert_provider.py` and replace `HttpAlertProvider` in `server.py`. The inbound webhook and Telegram forwarding are provider-agnostic.
+
+---
 
 ## See also
 

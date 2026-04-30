@@ -54,6 +54,7 @@ def _infotable_xml(rows: list[dict]) -> str:
         f"""
         <infoTable>
             <nameOfIssuer>{row["name"]}</nameOfIssuer>
+            <cusip>{row.get("cusip", "")}</cusip>
             <value>{row["value"]}</value>
             <shrsOrPrnAmt>
                 <sshPrnamt>{row["shares"]}</sshPrnamt>
@@ -68,16 +69,16 @@ def _infotable_xml(rows: list[dict]) -> str:
 def test_parse_13f_xml_aggregates_positions() -> None:
     xml = _infotable_xml(
         [
-            {"name": "Apple Inc", "value": 1000, "shares": 50},
-            {"name": "Apple Inc", "value": 500, "shares": 25},
-            {"name": "Nvidia", "value": 2000, "shares": 10},
+            {"name": "Apple Inc", "value": 1000, "shares": 50, "cusip": "037833100"},
+            {"name": "Apple Inc", "value": 500, "shares": 25, "cusip": "037833100"},
+            {"name": "Nvidia", "value": 2000, "shares": 10, "cusip": "67066G104"},
         ]
     )
 
     result = holdings._parse_13f_xml(xml)
 
-    assert result["Apple Inc"] == {"value": 1500, "shares": 75}
-    assert result["Nvidia"] == {"value": 2000, "shares": 10}
+    assert result["Apple Inc"] == {"value": 1500, "shares": 75, "cusips": {"037833100"}}
+    assert result["Nvidia"] == {"value": 2000, "shares": 10, "cusips": {"67066G104"}}
 
 
 def test_parse_13f_xml_rejects_external_entity_expansion() -> None:
@@ -119,7 +120,7 @@ def test_parse_13f_xml_skips_malformed_entries(caplog) -> None:
     with caplog.at_level("WARNING", logger=holdings.log.name):
         result = holdings._parse_13f_xml(xml)
 
-    assert result == {"Good Co": {"value": 42, "shares": 7}}
+    assert result == {"Good Co": {"value": 42, "shares": 7, "cusips": set()}}
     assert any("Skipped 2" in record.message for record in caplog.records)
 
 
@@ -144,3 +145,37 @@ def test_iter_13f_from_block_handles_misaligned_columns(caplog) -> None:
 
 def test_iter_13f_from_block_tolerates_missing_keys() -> None:
     assert holdings._iter_13f_from_block({}) == []
+
+
+def test_parse_13f_xml_captures_cusip_per_issuer() -> None:
+    xml = _infotable_xml(
+        [
+            {"name": "Alphabet Inc", "value": 100, "shares": 10, "cusip": "02079K305"},
+            {"name": "Alphabet Inc", "value": 100, "shares": 10, "cusip": "02079K107"},
+            {"name": "Mystery Trust", "value": 50, "shares": 5},  # no CUSIP
+        ]
+    )
+
+    result = holdings._parse_13f_xml(xml)
+
+    assert result["Alphabet Inc"]["cusips"] == {"02079K305", "02079K107"}
+    assert result["Mystery Trust"]["cusips"] == set()
+
+
+def test_format_rows_emits_ticker_and_cusip(monkeypatch) -> None:
+    monkeypatch.setattr(holdings, "resolve_cusip_to_ticker", lambda cusip: {"037833100": "AAPL"}.get(cusip))
+    rows = holdings._format_rows(
+        current={
+            "Apple Inc": {"value": 1000, "shares": 50, "cusips": {"037833100"}},
+            "Mystery Trust": {"value": 500, "shares": 25, "cusips": set()},
+        },
+        previous=None,
+    )
+
+    apple = next(r for r in rows if r["Stock"] == "Apple Inc")
+    mystery = next(r for r in rows if r["Stock"] == "Mystery Trust")
+
+    assert apple["Ticker"] == "AAPL"
+    assert apple["Cusip"] == "037833100"
+    assert mystery["Ticker"] is None
+    assert mystery["Cusip"] is None

@@ -38,7 +38,7 @@ def build_monthly_return_window(
     data_factory: DataFactory | None = None,
     lookback_years: int = 5,
 ) -> ReturnWindow:
-    factory = data_factory or DataFactory()
+    factory = data_factory or get_data_factory()
     normalized_symbol = normalize_symbol(symbol)
     normalized_benchmark = normalize_symbol(benchmark_symbol)
 

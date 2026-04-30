@@ -4,10 +4,11 @@ import pandas as pd
 import yfinance as yf
 
 from TerraFin.data.cache.manager import CacheManager
+from TerraFin.data.cache.policy import ttl_for
+from TerraFin.data.contracts import FinancialStatementFrame
 
 
 _CACHE_NAMESPACE = "yfinance_fundamentals"
-_CACHE_TTL_SECONDS = 86_400
 
 _STATEMENT_ATTRS: dict[str, dict[str, list[str]]] = {
     "income": {
@@ -55,7 +56,7 @@ def _coerce_statement_frame(raw: Any) -> pd.DataFrame | None:
 
 
 def _cached_statement(ticker: str, statement_type: str, period: str) -> pd.DataFrame | None:
-    cached = CacheManager.file_cache_read(_CACHE_NAMESPACE, _cache_key(ticker, statement_type, period), _CACHE_TTL_SECONDS)
+    cached = CacheManager.file_cache_read(_CACHE_NAMESPACE, _cache_key(ticker, statement_type, period), ttl_for("fundamentals.yfinance"))
     if cached is None:
         return None
     frame = pd.DataFrame(cached)
@@ -84,11 +85,36 @@ def _fetch_statement_frame(ticker: str, statement_type: str, period: str) -> pd.
     return None
 
 
+def _to_canonical(
+    frame: pd.DataFrame | None,
+    *,
+    statement_type: str,
+    period: str,
+    ticker: str,
+) -> FinancialStatementFrame:
+    """Build canonical FinancialStatementFrame: columns are date strings, rows are line items.
+
+    Source frame layout (legacy yfinance adapter): rows = periods with a `date` column,
+    columns = line items. Transpose so columns become reporting dates.
+    """
+    contract_period = "quarterly" if period == "quarter" else period
+    if frame is None or frame.empty or "date" not in frame.columns:
+        return FinancialStatementFrame.make_empty(statement_type, contract_period, ticker.upper())
+    pivoted = frame.set_index("date").transpose()
+    pivoted.columns = [str(col) for col in pivoted.columns]
+    return FinancialStatementFrame(
+        pivoted,
+        statement_type=statement_type,
+        period=contract_period,
+        ticker=ticker.upper(),
+    )
+
+
 def get_corporate_data(
     ticker: str,
     statement_type: str = "income",
     period: str = "annual",
-) -> pd.DataFrame | None:
+) -> FinancialStatementFrame:
     if statement_type not in _STATEMENT_ATTRS:
         raise ValueError(f"Unsupported statement_type: {statement_type}")
     if period not in ("annual", "quarter"):
@@ -96,11 +122,11 @@ def get_corporate_data(
 
     cached = _cached_statement(ticker, statement_type, period)
     if cached is not None:
-        return cached
+        return _to_canonical(cached, statement_type=statement_type, period=period, ticker=ticker)
 
     frame = _fetch_statement_frame(ticker, statement_type, period)
     _write_cached_statement(ticker, statement_type, period, frame)
-    return frame
+    return _to_canonical(frame, statement_type=statement_type, period=period, ticker=ticker)
 
 
 def clear_corporate_data_cache() -> None:

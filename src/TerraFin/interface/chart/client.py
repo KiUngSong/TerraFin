@@ -132,8 +132,8 @@ def get_chart_selection() -> dict | None:
 
 
 if __name__ == "__main__":
-    from TerraFin.data import DataFactory
+    from TerraFin.data import get_data_factory
 
-    data_factory = DataFactory()
+    data_factory = get_data_factory()
     df = data_factory.get_market_data("S&P 500")
     update_chart(df)

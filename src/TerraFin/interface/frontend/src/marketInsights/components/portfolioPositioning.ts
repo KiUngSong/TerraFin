@@ -1,5 +1,5 @@
 export interface PortfolioHoldingRow {
-  History?: string;
+  History?: (number | null)[] | string;
   Stock: string;
   ['% of Portfolio']: number | string;
   ['Recent Activity']: string;

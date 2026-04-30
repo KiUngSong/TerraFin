@@ -223,82 +223,73 @@ def _fetch_vvix_vix_ratio(_key: str):
     return _compute_vvix_vix_ratio_frame(get_yf_data("^VVIX"), get_yf_data("^VIX"))
 
 
-def _fetch_fear_greed(_key: str):
-    """Fetch Fear & Greed data via private access endpoint."""
-    from TerraFin.data.providers.private_access.fear_greed import get_fear_greed_frame
+def _private_frame(key: str):
+    from TerraFin.data.providers.private_access import PRIVATE_SERIES
+    from TerraFin.data.providers.private_access.series import get_private_series_frame
 
-    return get_fear_greed_frame()
+    return get_private_series_frame(PRIVATE_SERIES[key])
+
+
+def _private_recent(key: str, period: str) -> HistoryChunk:
+    from TerraFin.data.providers.private_access import PRIVATE_SERIES
+    from TerraFin.data.providers.private_access.series import get_private_series_recent_history
+
+    return get_private_series_recent_history(PRIVATE_SERIES[key], period=period)
+
+
+def _private_backfill(key: str, loaded_start: str | None) -> HistoryChunk:
+    from TerraFin.data.providers.private_access import PRIVATE_SERIES
+    from TerraFin.data.providers.private_access.series import get_private_series_full_history_backfill
+
+    return get_private_series_full_history_backfill(PRIVATE_SERIES[key], loaded_start=loaded_start)
+
+
+def _fetch_fear_greed(_key: str):
+    return _private_frame("fear_greed")
 
 
 def _fetch_net_breadth(_key: str):
-    """Fetch Net Breadth history via private access endpoint."""
-    from TerraFin.data.providers.private_access.net_breadth import get_net_breadth_frame
-
-    return get_net_breadth_frame()
+    return _private_frame("net_breadth")
 
 
 def _fetch_cape(_key: str):
-    """Fetch CAPE series via private access endpoint."""
-    from TerraFin.data.providers.private_access.cape import get_cape_frame
-
-    return get_cape_frame()
+    return _private_frame("cape")
 
 
 def _fetch_trailing_forward_pe(_key: str):
-    """Fetch trailing-forward P/E spread series via private access endpoint."""
-    from TerraFin.data.providers.private_access.trailing_forward_pe import get_trailing_forward_pe_frame
-
-    return get_trailing_forward_pe_frame()
+    return _private_frame("trailing_forward_pe")
 
 
 def _fear_greed_recent_history(_key: str, *, period: str = "3y") -> HistoryChunk:
-    from TerraFin.data.providers.private_access.fear_greed import get_fear_greed_recent_history
-
-    return get_fear_greed_recent_history(period=period)
+    return _private_recent("fear_greed", period)
 
 
 def _fear_greed_full_history_backfill(_key: str, *, loaded_start: str | None = None) -> HistoryChunk:
-    from TerraFin.data.providers.private_access.fear_greed import get_fear_greed_full_history_backfill
-
-    return get_fear_greed_full_history_backfill(loaded_start=loaded_start)
+    return _private_backfill("fear_greed", loaded_start)
 
 
 def _net_breadth_recent_history(_key: str, *, period: str = "3y") -> HistoryChunk:
-    from TerraFin.data.providers.private_access.net_breadth import get_net_breadth_recent_history
-
-    return get_net_breadth_recent_history(period=period)
+    return _private_recent("net_breadth", period)
 
 
 def _net_breadth_full_history_backfill(_key: str, *, loaded_start: str | None = None) -> HistoryChunk:
-    from TerraFin.data.providers.private_access.net_breadth import get_net_breadth_full_history_backfill
-
-    return get_net_breadth_full_history_backfill(loaded_start=loaded_start)
+    return _private_backfill("net_breadth", loaded_start)
 
 
 def _cape_recent_history(_key: str, *, period: str = "3y") -> HistoryChunk:
-    from TerraFin.data.providers.private_access.cape import get_cape_recent_history
-
-    return get_cape_recent_history(period=period)
+    return _private_recent("cape", period)
 
 
 def _cape_full_history_backfill(_key: str, *, loaded_start: str | None = None) -> HistoryChunk:
-    from TerraFin.data.providers.private_access.cape import get_cape_full_history_backfill
-
-    return get_cape_full_history_backfill(loaded_start=loaded_start)
+    return _private_backfill("cape", loaded_start)
 
 
 def _trailing_forward_pe_recent_history(_key: str, *, period: str = "3y") -> HistoryChunk:
-    from TerraFin.data.providers.private_access.trailing_forward_pe import get_trailing_forward_pe_recent_history
-
-    return get_trailing_forward_pe_recent_history(period=period)
+    return _private_recent("trailing_forward_pe", period)
 
 
 def _trailing_forward_pe_full_history_backfill(_key: str, *, loaded_start: str | None = None) -> HistoryChunk:
-    from TerraFin.data.providers.private_access.trailing_forward_pe import (
-        get_trailing_forward_pe_full_history_backfill,
-    )
-
-    return get_trailing_forward_pe_full_history_backfill(loaded_start=loaded_start)
+    return _private_backfill("trailing_forward_pe", loaded_start)
 
 
 MARKET_INDICATOR_REGISTRY = {

@@ -153,7 +153,25 @@ Then check these public surfaces:
 - agent service methods such as `market_data`, `market_snapshot`, or `macro_focus`
 - agent docs and skill task guidance if the feature is intended for general research use
 
-### A1. Private-source series vs private widget
+### A1. Adding a new private series or data type — the contract-first flow
+
+Every new data type follows the same four steps. There is no "wrapper module"
+shortcut and providers do not invent their own response shapes:
+
+1. Define a contract in `src/TerraFin/data/contracts/` if no existing one fits
+   (see [Data Layer › Contracts](./data-layer.md#contracts) for the canonical
+   list).
+2. Write the provider so it returns that contract — never an ad-hoc dict.
+3. Route the lookup through `DataFactory` so callers go through the single
+   facade.
+4. Wire caching through `CacheManager` rather than provider-local caches.
+
+For private-source data, the same flow applies: the `private_access` HTTP
+server in the sibling `~/Downloads/work/DataFactory` repo must shape its
+responses to the TerraFin contracts; the contracts in this repo are the
+source of truth.
+
+### A2. Private-source series vs private widget
 
 This distinction matters for scalability.
 

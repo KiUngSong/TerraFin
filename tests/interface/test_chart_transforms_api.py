@@ -3,13 +3,13 @@ from fastapi.testclient import TestClient
 
 import TerraFin.interface.chart.routes as chart_routes
 from TerraFin.data import DataFactory
+from TerraFin.data.cache.registry import reset_cache_manager
 from TerraFin.data.contracts import HistoryChunk
 from TerraFin.data.contracts.dataframes import TimeSeriesDataFrame
 from TerraFin.interface.chart.chart_view import apply_view
 from TerraFin.interface.chart.formatters import build_multi_payload as _build_multi_payload
 from TerraFin.interface.chart.formatters import build_source_payload as _build_source_payload
 from TerraFin.interface.chart.formatters import format_dataframe
-from TerraFin.interface.private_data_service import reset_private_data_service
 from TerraFin.interface.server import create_app
 
 
@@ -152,7 +152,7 @@ def test_apply_view_preserves_zone_metadata_for_line_series() -> None:
 
 
 def test_chart_view_endpoint_contract_and_transform() -> None:
-    reset_private_data_service()
+    reset_cache_manager()
     client = TestClient(create_app())
     headers = {"X-Session-ID": "chart-transform-contract"}
     source = {
@@ -191,7 +191,7 @@ def test_chart_view_endpoint_contract_and_transform() -> None:
 
 
 def test_chart_view_endpoint_keeps_candlestick_series_when_valid() -> None:
-    reset_private_data_service()
+    reset_cache_manager()
     client = TestClient(create_app())
     headers = {"X-Session-ID": "chart-candle-contract"}
     source = {
@@ -277,7 +277,7 @@ def test_chart_view_reuses_cached_indicators_for_same_transformed_source(monkeyp
         _wrap("range_vol", chart_routes.compute_range_volatility),
     )
 
-    reset_private_data_service()
+    reset_cache_manager()
     client = TestClient(create_app())
     headers = {"X-Session-ID": "chart-indicator-cache"}
     dates = pd.date_range("2025-01-01", periods=90, freq="D")
@@ -450,7 +450,7 @@ def test_progressive_seed_and_backfill_chart_series_contract(monkeypatch) -> Non
     monkeypatch.setattr(DataFactory, "get_recent_history", _recent_history)
     monkeypatch.setattr(DataFactory, "get_full_history_backfill", _backfill_history)
 
-    reset_private_data_service()
+    reset_cache_manager()
     client = TestClient(create_app())
     headers = {"X-Session-ID": "chart-progressive"}
 
@@ -509,7 +509,7 @@ def test_progressive_backfill_ignores_stale_request_token(monkeypatch) -> None:
         lambda self, _name, *, loaded_start=None: (_ for _ in ()).throw(AssertionError("should not backfill stale")),
     )
 
-    reset_private_data_service()
+    reset_cache_manager()
     client = TestClient(create_app())
     headers = {"X-Session-ID": "chart-progressive-stale"}
 
@@ -536,7 +536,7 @@ def test_progressive_backfill_ignores_stale_request_token(monkeypatch) -> None:
 
 def test_chart_data_preserves_price_scale_id_for_mixed_ohlc_and_lines() -> None:
     """POST mixed OHLC + lines with priceScaleId; GET and chart_view preserve priceScaleId."""
-    reset_private_data_service()
+    reset_cache_manager()
     client = TestClient(create_app())
     headers = {"X-Session-ID": "chart-multiscale"}
     source = {
@@ -586,7 +586,7 @@ def test_chart_data_preserves_price_scale_id_for_mixed_ohlc_and_lines() -> None:
 
 
 def test_chart_data_remove_keeps_forced_percentage_mode_when_raw_three_candles_remain() -> None:
-    reset_private_data_service()
+    reset_cache_manager()
     client = TestClient(create_app())
     headers = {"X-Session-ID": "chart-force-pct-remove"}
     source = {
@@ -644,7 +644,7 @@ def test_chart_data_remove_keeps_forced_percentage_mode_when_raw_three_candles_r
 
 
 def test_chart_view_preserves_two_candlestick_return_layout() -> None:
-    reset_private_data_service()
+    reset_cache_manager()
     client = TestClient(create_app())
     headers = {"X-Session-ID": "chart-two-candle-percent-view"}
     source = {
@@ -713,7 +713,7 @@ def test_chart_data_write_initializes_standard_history_and_named_series(monkeypa
         )
 
     monkeypatch.setattr(DataFactory, "get_recent_history", _fake_recent_history)
-    reset_private_data_service()
+    reset_cache_manager()
     client = TestClient(create_app())
     headers = {"X-Session-ID": "chart-direct-standard"}
     source = {
@@ -774,7 +774,7 @@ def test_chart_series_set_returns_snapshot_payload_and_entries(monkeypatch) -> N
         )
 
     monkeypatch.setattr(DataFactory, "get_recent_history", _fake_recent_history)
-    reset_private_data_service()
+    reset_cache_manager()
     client = TestClient(create_app())
 
     response = client.post("/chart/api/chart-series/set", json={"name": "spy", "pinned": True})
@@ -815,7 +815,7 @@ def test_chart_series_add_and_remove_return_mutation_patches(monkeypatch) -> Non
         )
 
     monkeypatch.setattr(DataFactory, "get_recent_history", _fake_recent_history)
-    reset_private_data_service()
+    reset_cache_manager()
     client = TestClient(create_app())
     headers = {"X-Session-ID": "chart-series-mutation"}
 

@@ -7,9 +7,11 @@ from typing import Any, Literal
 import pandas as pd
 
 from TerraFin.analytics.analysis.risk import BETA_5Y_MONTHLY_METHOD_ID, estimate_beta_5y_monthly
-from TerraFin.data import DataFactory
-from TerraFin.data.providers.corporate.fundamentals import get_corporate_data
-from TerraFin.data.providers.market.ticker_info import get_ticker_info
+from TerraFin.data import DataFactory, get_data_factory, get_ticker_info
+
+
+def get_corporate_data(ticker: str, statement_type: str, period: str = "annual"):
+    return get_data_factory().get_corporate_data(ticker, statement_type, period=period)
 
 from .models import DCFInputTemplate, SP500DCFOverrides, SP500YearAssumption, StockDCFOverrides
 from .rates import fit_current_treasury_curve
@@ -62,23 +64,31 @@ def _classify_quality(*, fallback_used: bool, warning_count: int) -> str:
     return "live"
 
 
-def _statement_column_lookup(frame: pd.DataFrame) -> dict[str, str]:
+def _statement_row_lookup(frame: pd.DataFrame) -> dict[str, Any]:
     return {
-        str(column).strip().lower().replace(" ", "").replace("-", ""): str(column)
-        for column in frame.columns
-        if str(column) != "date"
+        str(idx).strip().lower().replace(" ", "").replace("-", ""): idx
+        for idx in frame.index
     }
 
 
 def _statement_series(frame: pd.DataFrame | None, candidates: tuple[str, ...]) -> pd.Series | None:
+    """Return a numeric Series of values for a line item across reporting periods.
+
+    Frame layout (FinancialStatementFrame): rows = line items, columns = period dates
+    (newest first). Returned series is positional (index reset) so callers can use
+    .iloc and .head(N) regardless of column dtype.
+    """
     if frame is None or frame.empty:
         return None
-    lookup = _statement_column_lookup(frame)
+    lookup = _statement_row_lookup(frame)
     for candidate in candidates:
         key = candidate.strip().lower().replace(" ", "").replace("-", "")
         matched = lookup.get(key)
         if matched is not None:
-            return pd.to_numeric(frame[matched], errors="coerce")
+            row = frame.loc[matched]
+            if isinstance(row, pd.DataFrame):
+                row = row.iloc[0]
+            return pd.to_numeric(row.reset_index(drop=True), errors="coerce")
     return None
 
 
@@ -263,7 +273,7 @@ def build_sp500_template(
 ) -> DCFInputTemplate:
     snapshot_date = as_of or date.today()
     defaults = load_sp500_defaults()
-    factory = data_factory or DataFactory()
+    factory = data_factory or get_data_factory()
     warnings: list[str] = []
 
     current_price = _latest_close("^SPX", factory)
@@ -457,7 +467,7 @@ def build_stock_template(
 ) -> DCFInputTemplate:
     normalized = ticker.upper()
     snapshot_date = as_of or date.today()
-    factory = data_factory or DataFactory()
+    factory = data_factory or get_data_factory()
     warnings: list[str] = []
     curve = fit_current_treasury_curve(data_factory=factory, as_of=snapshot_date)
     horizon = _resolve_projection_years(projection_years)

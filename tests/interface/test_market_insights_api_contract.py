@@ -3,10 +3,10 @@ from fastapi.testclient import TestClient
 
 import TerraFin.data as data_module
 import TerraFin.interface.market_insights.data_routes as market_routes
+import TerraFin.interface.market_insights.payloads as market_payloads
 from TerraFin.data.contracts import HistoryChunk
 from TerraFin.data.contracts.dataframes import TimeSeriesDataFrame
 from TerraFin.data.providers.corporate.filings.sec_edgar.filing import SecEdgarConfigurationError
-from TerraFin.interface.private_data_service import reset_private_data_service
 from TerraFin.interface.server import create_app
 
 
@@ -32,7 +32,6 @@ class _FakePortfolioOutput:
 
 
 def test_market_insights_regime_contract() -> None:
-    reset_private_data_service()
     client = TestClient(create_app())
     response = client.get("/market-insights/api/regime")
     assert response.status_code == 200
@@ -45,7 +44,6 @@ def test_market_insights_regime_contract() -> None:
 
 
 def test_market_insights_gurus_contract() -> None:
-    reset_private_data_service()
     client = TestClient(create_app())
     response = client.get("/market-insights/api/investor-positioning/gurus")
     assert response.status_code == 200
@@ -59,12 +57,12 @@ def test_market_insights_gurus_contract() -> None:
 
 
 def test_market_insights_holdings_contract(monkeypatch) -> None:
-    def _fake_get_portfolio_data(guru: str):
-        assert guru == "Test Guru"
-        return _FakePortfolioOutput()
+    class _FakeFactory:
+        def get_portfolio_data(self, guru: str, filing_date: str | None = None):
+            assert guru == "Test Guru"
+            return _FakePortfolioOutput()
 
-    monkeypatch.setattr(market_routes, "get_portfolio_data", _fake_get_portfolio_data)
-    reset_private_data_service()
+    monkeypatch.setattr(market_routes, "get_data_factory", lambda: _FakeFactory())
     client = TestClient(create_app())
 
     response = client.get("/market-insights/api/investor-positioning/holdings?guru=Test Guru")
@@ -80,7 +78,6 @@ def test_market_insights_holdings_contract(monkeypatch) -> None:
 
 
 def test_market_insights_holdings_requires_guru_query() -> None:
-    reset_private_data_service()
     client = TestClient(create_app())
     response = client.get(
         "/market-insights/api/investor-positioning/holdings", headers={"X-Request-ID": "req-missing-guru"}
@@ -93,14 +90,14 @@ def test_market_insights_holdings_requires_guru_query() -> None:
 
 
 def test_market_insights_holdings_returns_503_when_sec_edgar_is_not_configured(monkeypatch) -> None:
-    def _raise_configuration_error(guru: str):
-        _ = guru
-        raise SecEdgarConfigurationError(
-            "SEC EDGAR access is unavailable until `TERRAFIN_SEC_USER_AGENT` is configured."
-        )
+    class _FakeFactory:
+        def get_portfolio_data(self, guru: str, filing_date: str | None = None):
+            _ = guru
+            raise SecEdgarConfigurationError(
+                "SEC EDGAR access is unavailable until `TERRAFIN_SEC_USER_AGENT` is configured."
+            )
 
-    monkeypatch.setattr(market_routes, "get_portfolio_data", _raise_configuration_error)
-    reset_private_data_service()
+    monkeypatch.setattr(market_routes, "get_data_factory", lambda: _FakeFactory())
     client = TestClient(create_app())
 
     response = client.get("/market-insights/api/investor-positioning/holdings?guru=Warren%20Buffett")
@@ -112,8 +109,9 @@ def test_market_insights_holdings_returns_503_when_sec_edgar_is_not_configured(m
 
 
 def test_market_insights_top_companies_contract_uses_private_data_service(monkeypatch) -> None:
-    class _FakePrivateDataService:
-        def get_top_companies(self) -> list[dict]:
+    class _FakeDataFactory:
+        def get_panel_data(self, name: str):
+            assert name == "top_companies"
             return [
                 {
                     "rank": 1,
@@ -124,8 +122,7 @@ def test_market_insights_top_companies_contract_uses_private_data_service(monkey
                 }
             ]
 
-    monkeypatch.setattr(market_routes, "get_private_data_service", lambda: _FakePrivateDataService())
-    reset_private_data_service()
+    monkeypatch.setattr(market_routes, "get_data_factory", lambda: _FakeDataFactory())
     client = TestClient(create_app())
 
     response = client.get("/market-insights/api/top-companies")
@@ -163,8 +160,7 @@ def test_market_insights_macro_info_contract_uses_single_lookup(monkeypatch) -> 
                 )
             )
 
-    monkeypatch.setattr(market_routes, "DataFactory", lambda: _FakeFactory())
-    reset_private_data_service()
+    monkeypatch.setattr(market_payloads, "get_data_factory", lambda: _FakeFactory())
     client = TestClient(create_app())
 
     response = client.get("/market-insights/api/macro-info?name=S%26P%20500")
@@ -199,8 +195,7 @@ def test_market_insights_macro_info_supports_shanghai_composite(monkeypatch) -> 
                 )
             )
 
-    monkeypatch.setattr(market_routes, "DataFactory", lambda: _FakeFactory())
-    reset_private_data_service()
+    monkeypatch.setattr(market_payloads, "get_data_factory", lambda: _FakeFactory())
     client = TestClient(create_app())
 
     response = client.get("/market-insights/api/macro-info?name=Shanghai%20Composite")
@@ -230,8 +225,7 @@ def test_market_insights_macro_info_accepts_case_insensitive_name(monkeypatch) -
                 )
             )
 
-    monkeypatch.setattr(market_routes, "DataFactory", lambda: _FakeFactory())
-    reset_private_data_service()
+    monkeypatch.setattr(market_payloads, "get_data_factory", lambda: _FakeFactory())
     client = TestClient(create_app())
 
     response = client.get("/market-insights/api/macro-info?name=kospi")
@@ -274,9 +268,8 @@ def test_market_insights_macro_info_prefers_session_series(monkeypatch) -> None:
             get_calls.append(name)
             raise AssertionError("macro-info should reuse session data instead of calling get()")
 
-    monkeypatch.setattr(data_module, "DataFactory", lambda: _FakeFactory())
-    monkeypatch.setattr(market_routes, "DataFactory", lambda: _FakeFactory())
-    reset_private_data_service()
+    monkeypatch.setattr(data_module, "get_data_factory", lambda: _FakeFactory())
+    monkeypatch.setattr(market_payloads, "get_data_factory", lambda: _FakeFactory())
     client = TestClient(create_app())
     headers = {"X-Session-ID": "macro-info-session"}
 
@@ -300,7 +293,6 @@ def test_market_insights_macro_info_prefers_session_series(monkeypatch) -> None:
 
 
 def test_market_insights_legacy_macro_chart_routes_are_removed() -> None:
-    reset_private_data_service()
     client = TestClient(create_app())
 
     assert client.get("/market-insights/api/macro-chart?name=S%26P%20500").status_code == 404

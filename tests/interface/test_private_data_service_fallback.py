@@ -1,33 +1,32 @@
 import TerraFin.data.cache.manager as cache_manager_module
+from TerraFin.data import DataFactory
 from TerraFin.data.cache.registry import reset_cache_manager
+from TerraFin.data.providers.private_access.client import PrivateAccessClient
 from TerraFin.data.providers.private_access.fallbacks import get_calendar_fallback
-from TerraFin.interface.private_data_service import PrivateDataService
 
 
-class _FailingPrivateClient:
-    def fetch_market_breadth(self):
-        raise RuntimeError("breadth source unavailable")
+def _install_failing_client(monkeypatch) -> None:
+    def _raise(self, resource):
+        _ = self, resource
+        raise RuntimeError(f"private source unavailable: {resource}")
 
-    def fetch_calendar_events(self):
-        raise RuntimeError("calendar source unavailable")
-
-    def fetch_top_companies(self):
-        raise RuntimeError("top companies source unavailable")
+    monkeypatch.setattr(PrivateAccessClient, "fetch_panel", _raise)
 
 
-def test_private_data_service_falls_back_for_breadth_and_calendar(monkeypatch, tmp_path) -> None:
+def test_panels_fall_back_for_breadth_and_calendar(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr(cache_manager_module, "_FILE_CACHE_DIR", tmp_path)
     reset_cache_manager()
-    service = PrivateDataService(_FailingPrivateClient())
+    _install_failing_client(monkeypatch)
+    factory = DataFactory()
 
-    service.refresh_market_breadth()
-    service.refresh_calendar()
+    factory.refresh_panel("market_breadth")
+    factory.refresh_panel("private.calendar")
 
-    breadth = service.get_market_breadth()
+    breadth = factory.get_panel_data("market_breadth")
     sample_event = get_calendar_fallback().events[0]
     year = int(sample_event.start[:4])
     month = int(sample_event.start[5:7])
-    events = service.get_calendar_events(year=year, month=month)
+    events = factory.get_calendar_events(year=year, month=month)
 
     assert isinstance(breadth, list)
     assert len(breadth) >= 1
@@ -38,11 +37,11 @@ def test_private_data_service_falls_back_for_breadth_and_calendar(monkeypatch, t
     assert {"title", "start", "category"}.issubset(events[0].keys())
 
 
-def test_private_data_service_top_companies_falls_back_to_empty_list(monkeypatch, tmp_path) -> None:
+def test_top_companies_falls_back_to_empty_list(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr(cache_manager_module, "_FILE_CACHE_DIR", tmp_path)
     reset_cache_manager()
-    service = PrivateDataService(_FailingPrivateClient())
+    _install_failing_client(monkeypatch)
+    factory = DataFactory()
 
-    service.refresh_top_companies()
-
-    assert service.get_top_companies() == []
+    factory.refresh_panel("top_companies")
+    assert factory.get_panel_data("top_companies") == []

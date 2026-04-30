@@ -4,13 +4,37 @@ import pandas as pd
 
 from TerraFin.env import apply_api_keys
 
-from .contracts import HistoryChunk, chart_output
+from .contracts import (
+    EventList,
+    FilingDocument,
+    HistoryChunk,
+    IndicatorSnapshot,
+    TOCEntry,
+    chart_output,
+)
 from .contracts.dataframes import TimeSeriesDataFrame
+from .providers.corporate.filings.sec_edgar import get_sec_data, get_sec_toc
 from .providers.corporate.fundamentals import get_corporate_data
 from .providers.corporate.investor_positioning import PortfolioOutput, get_portfolio_data
 from .providers.economic import get_economic_indicator, get_fred_data
+from .providers.economic.macro_calendar import get_macro_events_all
 from .providers.market import INDEX_MAP, MARKET_INDICATOR_REGISTRY, get_market_data
 from .providers.market.yfinance import get_yf_data, get_yf_full_history_backfill, get_yf_recent_history
+from .cache.registry import get_cache_manager
+from .providers.private_access import PRIVATE_SERIES, get_private_series_current
+from .providers.private_access.panels import (
+    PANEL_SOURCES,
+    SRC_BREADTH,
+    SRC_CALENDAR,
+    SRC_CAPE,
+    SRC_FEAR_GREED,
+    SRC_PE_SPREAD,
+    SRC_TOP_COMPANIES,
+    clear_panel_caches,
+    get_calendar_events_merged,
+    get_panel_payload,
+)
+from .providers.private_access.panels import set_calendar_events as _panels_set_calendar_events
 
 
 logger = logging.getLogger(__name__)
@@ -24,24 +48,18 @@ class DataFactory:
 
     def _to_timeseries(
         self,
-        data: pd.DataFrame | TimeSeriesDataFrame,
+        data: TimeSeriesDataFrame,
         *,
         source_name: str,
     ) -> TimeSeriesDataFrame:
-        """Normalize source outputs into a consistent chart-ready frame."""
-        try:
-            if isinstance(data, TimeSeriesDataFrame):
-                if not data.name:
-                    data.name = source_name.split(":", 1)[-1]
-                return data
-            out = TimeSeriesDataFrame(data)
-            out.name = source_name.split(":", 1)[-1]
-            return out
-        except Exception as exc:
-            logger.warning("Failed to normalize data from %s. Returning empty frame. error=%s", source_name, exc)
-            out = TimeSeriesDataFrame.make_empty()
-            out.name = source_name.split(":", 1)[-1]
-            return out
+        """Validate that providers return TimeSeriesDataFrame; assign default name if missing."""
+        if not isinstance(data, TimeSeriesDataFrame):
+            raise TypeError(
+                f"Provider {source_name} returned {type(data).__name__}, expected TimeSeriesDataFrame"
+            )
+        if not data.name:
+            data.name = source_name.split(":", 1)[-1]
+        return data
 
     @staticmethod
     def _frame_bounds(frame: TimeSeriesDataFrame) -> tuple[str | None, str | None]:
@@ -238,10 +256,106 @@ class DataFactory:
 
     def get_corporate_data(
         self, ticker: str, statement_type: str = "income", period: str = "annual"
-    ) -> pd.DataFrame | None:
-        """Get corporate data from the data layer."""
+    ):
+        """Get corporate data — returns a FinancialStatementFrame."""
         return get_corporate_data(ticker, statement_type, period=period)
 
-    def get_portfolio_data(self, guru_name: str) -> PortfolioOutput:
+    def get_portfolio_data(self, guru_name: str, filing_date: str | None = None) -> PortfolioOutput:
         """Get portfolio data from the data layer."""
-        return get_portfolio_data(guru_name)
+        return get_portfolio_data(guru_name, filing_date=filing_date)
+
+    def get_filing(self, ticker: str, filing_type: str = "10-K") -> FilingDocument:
+        """Return a parsed SEC filing as a FilingDocument."""
+        return get_sec_data(ticker, filing_type=filing_type)
+
+    def get_filing_toc(self, ticker: str, filing_type: str = "10-K") -> list[TOCEntry]:
+        """Return the table of contents for a SEC filing."""
+        return get_sec_toc(ticker, filing_type=filing_type)
+
+    def get_macro_events(self, start: str | None = None, end: str | None = None) -> EventList:
+        """Return macro calendar events, optionally filtered by ISO date bounds."""
+        events = get_macro_events_all()
+        if start is None and end is None:
+            return events
+        start_ts = pd.to_datetime(start, utc=True, errors="coerce") if start else None
+        end_ts = pd.to_datetime(end, utc=True, errors="coerce") if end else None
+        filtered = [
+            event
+            for event in events
+            if (start_ts is None or pd.Timestamp(event.start) >= start_ts)
+            and (end_ts is None or pd.Timestamp(event.start) <= end_ts)
+        ]
+        return EventList(events=filtered)
+
+    def get_indicator_snapshot(self, name: str) -> IndicatorSnapshot:
+        """Return a current scalar snapshot for a private-series indicator."""
+        spec = PRIVATE_SERIES.get(name)
+        if spec is None:
+            raise ValueError(f"Unknown indicator snapshot: {name}")
+        return get_private_series_current(spec)
+
+    # -----------------------------------------------------------------
+    # Private-source panel payloads (non-time-series). Exposed via
+    # `get_panel_data` plus calendar-specific helpers since calendar
+    # merges two cached sources.
+    # -----------------------------------------------------------------
+
+    _PANEL_NAME_TO_SOURCE: dict[str, str] = {
+        "market_breadth": SRC_BREADTH,
+        "trailing_forward_pe": SRC_PE_SPREAD,
+        "cape": SRC_CAPE,
+        "fear_greed": SRC_FEAR_GREED,
+        "top_companies": SRC_TOP_COMPANIES,
+    }
+
+    def get_panel_data(self, name: str):
+        """Return the cached panel payload (dict or list[dict]) for a non-time-series widget."""
+        source = self._PANEL_NAME_TO_SOURCE.get(name)
+        if source is None:
+            raise ValueError(f"Unknown panel: {name}")
+        payload = get_panel_payload(get_cache_manager(), source)
+        if isinstance(payload, list):
+            return [dict(item) for item in payload]
+        if isinstance(payload, dict):
+            return dict(payload)
+        return payload
+
+    def get_calendar_events(
+        self,
+        *,
+        year: int,
+        month: int,
+        categories: set[str] | None = None,
+        limit: int | None = None,
+    ) -> list[dict]:
+        """Return merged calendar events (private source + enriched macro)."""
+        return get_calendar_events_merged(
+            get_cache_manager(),
+            year=year,
+            month=month,
+            categories=categories,
+            limit=limit,
+        )
+
+    def set_calendar_events(self, events: list[dict]) -> None:
+        _panels_set_calendar_events(get_cache_manager(), events)
+
+    def refresh_panel(self, name: str) -> None:
+        source = self._PANEL_NAME_TO_SOURCE.get(name) or (name if name in PANEL_SOURCES else None)
+        if source is None:
+            raise ValueError(f"Unknown panel: {name}")
+        get_cache_manager().refresh_payload(source)
+
+    def clear_panel_caches(self) -> None:
+        clear_panel_caches(get_cache_manager())
+
+
+_DEFAULT_FACTORY: DataFactory | None = None
+
+
+def get_data_factory() -> DataFactory:
+    """Return the process-wide DataFactory singleton, lazy-initialized."""
+    global _DEFAULT_FACTORY
+    if _DEFAULT_FACTORY is None:
+        _DEFAULT_FACTORY = DataFactory()
+    return _DEFAULT_FACTORY

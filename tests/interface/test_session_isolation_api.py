@@ -3,14 +3,14 @@ from datetime import datetime
 from fastapi.testclient import TestClient
 
 from TerraFin.data import DataFactory
+from TerraFin.data.cache.registry import reset_cache_manager
 from TerraFin.data.contracts import HistoryChunk
 from TerraFin.data.contracts.dataframes import TimeSeriesDataFrame
-from TerraFin.interface.private_data_service import reset_private_data_service
 from TerraFin.interface.server import create_app
 
 
 def test_chart_same_session_read_after_write() -> None:
-    reset_private_data_service()
+    reset_cache_manager()
     client = TestClient(create_app())
     headers = {"X-Session-ID": "session-a"}
     payload = {
@@ -39,7 +39,7 @@ def test_chart_same_session_read_after_write() -> None:
 
 
 def test_chart_cross_session_isolation_for_data_and_selection() -> None:
-    reset_private_data_service()
+    reset_cache_manager()
     client = TestClient(create_app())
     headers_a = {"X-Session-ID": "A"}
     headers_b = {"X-Session-ID": "B"}
@@ -79,7 +79,7 @@ def test_chart_cross_session_isolation_for_data_and_selection() -> None:
 
 
 def test_calendar_same_session_read_after_write() -> None:
-    reset_private_data_service()
+    reset_cache_manager()
     client = TestClient(create_app())
     headers = {"X-Session-ID": "cal-a"}
     payload = {"eventId": "2026-02-25-0", "month": 2, "year": 2026}
@@ -94,7 +94,7 @@ def test_calendar_same_session_read_after_write() -> None:
 
 
 def test_calendar_cross_session_selection_isolation() -> None:
-    reset_private_data_service()
+    reset_cache_manager()
     client = TestClient(create_app())
     headers_a = {"X-Session-ID": "A"}
     headers_b = {"X-Session-ID": "B"}
@@ -110,7 +110,7 @@ def test_calendar_cross_session_selection_isolation() -> None:
 
 
 def test_default_session_behavior_without_header_is_stable() -> None:
-    reset_private_data_service()
+    reset_cache_manager()
     client = TestClient(create_app())
 
     chart_payload = {
@@ -153,7 +153,7 @@ def test_progressive_chart_history_is_isolated_by_session(monkeypatch) -> None:
 
     monkeypatch.setattr(DataFactory, "get_recent_history", _recent_history)
 
-    reset_private_data_service()
+    reset_cache_manager()
     client = TestClient(create_app())
 
     response_a = client.post(

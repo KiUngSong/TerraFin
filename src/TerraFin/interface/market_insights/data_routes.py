@@ -1,3 +1,4 @@
+import asyncio
 import logging
 
 from fastapi import APIRouter, Query, Request
@@ -5,14 +6,17 @@ from pydantic import BaseModel
 
 from TerraFin.analytics.analysis.fundamental import build_sp500_dcf_payload
 from TerraFin.analytics.analysis.fundamental.dcf.models import SP500DCFOverrides, SP500YearAssumption
+from TerraFin.data import get_data_factory
 from TerraFin.data.providers.corporate.filings.sec_edgar.filing import (
     SecEdgarConfigurationError,
     SecEdgarUnavailableError,
 )
 from TerraFin.data.providers.corporate.investor_positioning import (
     ALL_GURUS,
+    get_guru_filings_index,
+    get_guru_holdings_for_date,
     get_investor_positioning_capability,
-    get_portfolio_data,
+    get_portfolio_history_data,
 )
 from TerraFin.interface.errors import AppRuntimeError
 from TerraFin.interface.market_insights.payloads import (
@@ -20,12 +24,12 @@ from TerraFin.interface.market_insights.payloads import (
     canonical_macro_name,
     load_macro_dataframe,
 )
-from TerraFin.interface.private_data_service import get_private_data_service
 from TerraFin.interface.valuation_models import DCFValuationResponse, SP500DCFRequest
 
 
 _logger = logging.getLogger(__name__)
 
+_prefetch_tasks: dict[str, asyncio.Task] = {}
 
 MARKET_INSIGHTS_API_PREFIX = "/market-insights/api"
 
@@ -89,9 +93,12 @@ def create_market_insights_data_router() -> APIRouter:
         f"{MARKET_INSIGHTS_API_PREFIX}/investor-positioning/holdings",
         response_model=InvestorPositioningResponse,
     )
-    def api_get_investor_positioning_holdings(guru: str = Query(..., min_length=1)):
+    def api_get_investor_positioning_holdings(
+        guru: str = Query(..., min_length=1),
+        filing_date: str | None = Query(default=None),
+    ):
         try:
-            output = get_portfolio_data(guru)
+            output = get_data_factory().get_portfolio_data(guru, filing_date=filing_date)
         except Exception as exc:
             _raise_investor_positioning_error(exc, guru=guru)
         rows = output.df.to_dict(orient="records")
@@ -108,10 +115,21 @@ def create_market_insights_data_router() -> APIRouter:
             topHoldings=top_holdings,
         )
 
+    @router.get(f"{MARKET_INSIGHTS_API_PREFIX}/investor-positioning/history")
+    async def api_get_investor_positioning_history(guru: str = Query(..., min_length=1)):
+        try:
+            history = get_portfolio_history_data(guru)
+        except Exception as exc:
+            _raise_investor_positioning_error(exc, guru=guru)
+        filings = [{"filing_date": entry["filing_date"], "period": entry["period"]} for entry in history]
+        if len(history) > 2:
+            await _submit_prefetch(guru, history[2:])
+        return {"filings": filings}
+
     @router.get(f"{MARKET_INSIGHTS_API_PREFIX}/top-companies")
     def api_get_top_companies():
         try:
-            companies = get_private_data_service().get_top_companies()
+            companies = get_data_factory().get_panel_data("top_companies")
             return {"companies": companies, "count": len(companies)}
         except Exception as e:
             _logger.warning("Failed to fetch top companies: %s", e)
@@ -164,6 +182,25 @@ def create_market_insights_data_router() -> APIRouter:
         )
 
     return router
+
+
+async def _submit_prefetch(guru: str, filings: list[dict]) -> None:
+    for task in _prefetch_tasks.values():
+        if not task.done():
+            task.cancel()
+    _prefetch_tasks.clear()
+    _prefetch_tasks[f"prefetch:{guru}"] = asyncio.create_task(_prefetch_holdings_async(guru, filings))
+
+
+async def _prefetch_holdings_async(guru: str, filings: list[dict]) -> None:
+    loop = asyncio.get_running_loop()
+    for entry in filings:
+        try:
+            await loop.run_in_executor(None, get_guru_holdings_for_date, guru, entry["filing_date"])
+        except asyncio.CancelledError:
+            return
+        except Exception as exc:
+            _logger.debug("Background prefetch failed for %s/%s: %s", guru, entry["filing_date"], exc)
 
 
 def _raise_investor_positioning_error(exc: Exception, *, guru: str) -> None:

@@ -20,11 +20,10 @@ def _register_default_sources(manager: CacheManager) -> None:
     from TerraFin.data.providers.corporate.filings.sec_edgar.holdings import clear_guru_holdings_cache
     from TerraFin.data.providers.economic.fred_data import clear_fred_cache
     from TerraFin.data.providers.market.ticker_info import clear_ticker_info_cache
-    from TerraFin.data.providers.market.yfinance import clear_yfinance_cache
+    from TerraFin.data.providers.private_access.panels import register_panel_sources
 
     clear_only_callbacks = {
         "fred.cache": clear_fred_cache,
-        "yfinance.cache": clear_yfinance_cache,
         "portfolio.cache": clear_guru_holdings_cache,
         "ticker_info.cache": clear_ticker_info_cache,
         "sec_filings.cache": clear_sec_filings_cache,
@@ -43,6 +42,8 @@ def _register_default_sources(manager: CacheManager) -> None:
                 clear_fn=clear_fn,
             )
         )
+
+    register_panel_sources(manager)
 
 
 def clear_all_cache() -> None:

@@ -12,9 +12,8 @@ from TerraFin.analytics.analysis.fundamental.screen import run_fundamental_scree
 from TerraFin.analytics.analysis.risk.profile import run_risk_profile
 from TerraFin.analytics.analysis.risk.returns import extract_close_series
 from TerraFin.analytics.analysis.technical import DEFAULT_MFD_WINDOWS
-from TerraFin.data import DataFactory
+from TerraFin.data import DataFactory, get_data_factory
 from TerraFin.data.contracts import TimeSeriesDataFrame
-from TerraFin.data.providers.corporate.investor_positioning import get_portfolio_data
 from TerraFin.interface.chart.chart_view import apply_view
 from TerraFin.interface.chart.formatters import build_multi_payload
 from TerraFin.interface.chart.indicators.adapter import (
@@ -33,7 +32,6 @@ from TerraFin.interface.market_insights.payloads import (
     get_macro_description,
     resolve_macro_type,
 )
-from TerraFin.interface.private_data_service import get_private_data_service
 from TerraFin.interface.stock.data_routes import build_beta_estimate_payload
 from TerraFin.interface.stock.payloads import (
     build_company_info_payload,
@@ -351,7 +349,7 @@ def _calendar_processing() -> dict[str, Any]:
 
 class TerraFinAgentService:
     def __init__(self, data_factory: DataFactory | None = None) -> None:
-        self._data_factory = data_factory or DataFactory()
+        self._data_factory = data_factory or get_data_factory()
 
     def _market_series(self, name: str, *, depth: str = "auto", view: str = "daily") -> dict[str, Any]:
         requested_depth = _normalize_depth(depth)
@@ -635,7 +633,7 @@ class TerraFinAgentService:
         }
 
     def portfolio(self, guru: str) -> dict[str, Any]:
-        output = get_portfolio_data(guru)
+        output = self._data_factory.get_portfolio_data(guru)
         # Mirror the route's `topHoldings` pre-computation so the agent and
         # the UI's treemap/ranking use the same top 8. Without this, the
         # agent would have to re-sort the full `holdings` list and could
@@ -798,7 +796,7 @@ class TerraFinAgentService:
         elif categories is not None:
             category_filter = {str(item).strip() for item in categories if str(item).strip()}
 
-        events = get_private_data_service().get_calendar_events(
+        events = self._data_factory.get_calendar_events(
             year=year,
             month=month,
             categories=category_filter,
@@ -905,18 +903,18 @@ class TerraFinAgentService:
         bvps = None
         graham_number = None
         if balance is not None and not balance.empty:
-            equity_col = None
-            shares_col = None
-            for col in balance.columns:
-                cl = str(col).lower().replace(" ", "")
+            equity_row = None
+            shares_row = None
+            for idx in balance.index:
+                cl = str(idx).lower().replace(" ", "")
                 if cl in ("totalstockholdersequity", "stockholdersequity", "totalequity"):
-                    equity_col = col
+                    equity_row = idx
                 if cl in ("ordinarysharesoutstanding", "sharesoutstanding", "commonstock"):
-                    shares_col = col
-            if equity_col is not None and shares_col is not None:
+                    shares_row = idx
+            if equity_row is not None and shares_row is not None and len(balance.columns) > 0:
                 try:
-                    eq = float(balance[equity_col].iloc[-1])
-                    sh = float(balance[shares_col].iloc[-1])
+                    eq = float(balance.loc[equity_row].iloc[-1])
+                    sh = float(balance.loc[shares_row].iloc[-1])
                     if sh > 0:
                         bvps = round(eq / sh, 2)
                 except (TypeError, ValueError, IndexError):
@@ -971,7 +969,7 @@ class TerraFinAgentService:
 
     def fear_greed(self) -> dict[str, Any]:
         """CNN Fear & Greed index — matches `/dashboard/api/fear-greed`."""
-        payload = dict(get_private_data_service().get_fear_greed_current())
+        payload = dict(self._data_factory.get_panel_data("fear_greed"))
         payload["processing"] = _full_processing(
             requested_depth="full",
             source_version="fear-greed",
@@ -1014,7 +1012,7 @@ class TerraFinAgentService:
     def top_companies(self) -> dict[str, Any]:
         """Market-insights top-companies list — matches `/market-insights/api/top-companies`."""
         try:
-            companies = get_private_data_service().get_top_companies()
+            companies = self._data_factory.get_panel_data("top_companies")
         except Exception:
             companies = []
         return {
@@ -1057,8 +1055,7 @@ class TerraFinAgentService:
 
     def trailing_forward_pe(self) -> dict[str, Any]:
         """Trailing minus forward P/E spread — matches `/dashboard/api/trailing-forward-pe-spread`."""
-        private_service = get_private_data_service()
-        payload = private_service.get_trailing_forward_pe() or {}
+        payload = self._data_factory.get_panel_data("trailing_forward_pe") or {}
         summary = payload.get("summary", {}) if isinstance(payload, dict) else {}
         coverage = payload.get("coverage", {}) if isinstance(payload, dict) else {}
         history = payload.get("history", []) if isinstance(payload, dict) else []
@@ -1087,7 +1084,7 @@ class TerraFinAgentService:
         per-ticker view with whole-market state. Now a standalone capability
         so agent and the MarketBreadthCard widget query the same data.
         """
-        metrics = get_private_data_service().get_market_breadth()
+        metrics = self._data_factory.get_panel_data("market_breadth")
         return {
             "metrics": list(metrics),
             "processing": _full_processing(

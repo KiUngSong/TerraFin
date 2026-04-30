@@ -24,6 +24,9 @@ def test_get_corporate_data_normalizes_yfinance_statement_shape(monkeypatch, tmp
     frame = fundamentals_module.get_corporate_data("TEST", "cashflow", period="quarter")
 
     assert frame is not None
-    assert frame.columns.tolist() == ["date", "Operating Cash Flow", "Capital Expenditure"]
-    assert frame["date"].tolist() == ["2025-12-31", "2025-09-30"]
-    assert frame["Operating Cash Flow"].tolist() == [300.0, 280.0]
+    assert frame.statement_type == "cashflow"
+    assert frame.period == "quarterly"
+    assert frame.ticker == "TEST"
+    assert frame.columns.tolist() == ["2025-12-31", "2025-09-30"]
+    assert frame.index.tolist() == ["Operating Cash Flow", "Capital Expenditure"]
+    assert frame.loc["Operating Cash Flow"].tolist() == [300.0, 280.0]

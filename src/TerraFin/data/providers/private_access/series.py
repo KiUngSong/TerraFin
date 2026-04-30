@@ -1,23 +1,15 @@
 from dataclasses import dataclass
-from typing import Any, Callable
 
 import pandas as pd
 
 from TerraFin.data.cache.manager import CacheManager, CachePayloadSpec
+from TerraFin.data.cache.policy import ttl_for
 from TerraFin.data.cache.registry import get_cache_manager
-from TerraFin.data.contracts import HistoryChunk
+from TerraFin.data.contracts import HistoryChunk, IndicatorSnapshot
 from TerraFin.data.contracts.dataframes import TimeSeriesDataFrame
 
 from .client import PrivateAccessClient
 from .config import load_private_access_config
-
-
-HistoryNormalizer = Callable[[Any], list[dict]]
-CurrentNormalizer = Callable[[dict], dict]
-HistoryDeriver = Callable[[list[dict]], dict]
-FrameBuilder = Callable[[list[dict]], TimeSeriesDataFrame]
-HistoryFetcher = Callable[[PrivateAccessClient], Any]
-CurrentFetcher = Callable[[PrivateAccessClient], dict]
 
 
 @dataclass(frozen=True)
@@ -25,27 +17,40 @@ class PrivateSeriesSpec:
     key: str
     display_name: str
     history_cache_namespace: str
-    history_fetcher: HistoryFetcher
-    history_normalizer: HistoryNormalizer
-    frame_builder: FrameBuilder
     current_cache_namespace: str | None = None
-    current_fetcher: CurrentFetcher | None = None
-    current_normalizer: CurrentNormalizer | None = None
-    current_deriver: HistoryDeriver | None = None
     history_cache_key: str = "history"
     current_cache_key: str = "current"
-    history_ttl: int = 86_400
-    current_ttl: int = 3_600
 
-def get_private_series_history(
-    spec: PrivateSeriesSpec,
-    *,
-    force_refresh: bool = False,
-    client: PrivateAccessClient | None = None,
-) -> list[dict]:
-    if client is not None:
-        return _fetch_series_history_direct(spec, force_refresh=force_refresh, client=client)
 
+def _build_frame(records: list[dict], display_name: str) -> TimeSeriesDataFrame:
+    if records:
+        df = pd.DataFrame(records)
+        df["time"] = pd.to_datetime(df["time"], errors="coerce")
+        df["close"] = pd.to_numeric(df["close"], errors="coerce")
+        df = df.dropna(subset=["time", "close"]).sort_values("time").drop_duplicates(subset=["time"], keep="last")
+        df["time"] = df["time"].dt.strftime("%Y-%m-%d")
+        frame = TimeSeriesDataFrame(df.reset_index(drop=True), name=display_name)
+    else:
+        frame = TimeSeriesDataFrame(pd.DataFrame(columns=["time", "close"]), name=display_name)
+    frame.name = display_name
+    return frame
+
+
+def _snapshot_from_payload(payload: dict, spec: PrivateSeriesSpec) -> IndicatorSnapshot:
+    value = payload.get("value")
+    return IndicatorSnapshot(
+        name=payload.get("name") or spec.display_name,
+        value=value if value is not None else "",
+        as_of=str(payload.get("as_of") or ""),
+        unit=payload.get("unit"),
+        change=payload.get("change"),
+        change_pct=payload.get("change_pct"),
+        rating=payload.get("rating"),
+        metadata=dict(payload.get("metadata") or {}),
+    )
+
+
+def _history_records(spec: PrivateSeriesSpec, *, force_refresh: bool = False) -> list[dict]:
     manager = get_cache_manager()
     _ensure_series_sources_registered(manager, spec)
     result = manager.get_payload(_history_source_name(spec), force_refresh=force_refresh, allow_stale=True)
@@ -53,17 +58,9 @@ def get_private_series_history(
     return [dict(item) for item in payload] if isinstance(payload, list) else []
 
 
-def get_private_series_current(
-    spec: PrivateSeriesSpec,
-    *,
-    force_refresh: bool = False,
-    client: PrivateAccessClient | None = None,
-) -> dict:
-    if spec.current_cache_namespace is None or spec.current_deriver is None:
+def _current_payload(spec: PrivateSeriesSpec, *, force_refresh: bool = False) -> dict:
+    if spec.current_cache_namespace is None:
         raise RuntimeError(f"{spec.display_name} does not define a current snapshot contract.")
-
-    if client is not None:
-        return _fetch_series_current_direct(spec, force_refresh=force_refresh, client=client)
 
     manager = get_cache_manager()
     _ensure_series_sources_registered(manager, spec)
@@ -72,10 +69,18 @@ def get_private_series_current(
     return dict(payload) if isinstance(payload, dict) else {}
 
 
+def get_private_series_history(spec: PrivateSeriesSpec, *, force_refresh: bool = False) -> TimeSeriesDataFrame:
+    records = _history_records(spec, force_refresh=force_refresh)
+    return _build_frame(records, spec.display_name)
+
+
+def get_private_series_current(spec: PrivateSeriesSpec, *, force_refresh: bool = False) -> IndicatorSnapshot:
+    payload = _current_payload(spec, force_refresh=force_refresh)
+    return _snapshot_from_payload(payload, spec)
+
+
 def get_private_series_frame(spec: PrivateSeriesSpec) -> TimeSeriesDataFrame:
-    frame = spec.frame_builder(get_private_series_history(spec))
-    frame.name = spec.display_name
-    return frame
+    return get_private_series_history(spec)
 
 
 def get_private_series_recent_history(spec: PrivateSeriesSpec, *, period: str = "3y") -> HistoryChunk:
@@ -122,7 +127,7 @@ def refresh_private_series_cache(spec: PrivateSeriesSpec) -> None:
     manager = get_cache_manager()
     _ensure_series_sources_registered(manager, spec)
     manager.refresh_payload(_history_source_name(spec), allow_stale=True)
-    if spec.current_cache_namespace is not None and spec.current_deriver is not None:
+    if spec.current_cache_namespace is not None:
         manager.refresh_payload(_current_source_name(spec), allow_stale=True)
 
 
@@ -132,71 +137,6 @@ def clear_private_series_cache(spec: PrivateSeriesSpec) -> None:
     manager.clear_payload(_history_source_name(spec))
     if spec.current_cache_namespace is not None:
         manager.clear_payload(_current_source_name(spec))
-
-
-def _normalize_current(spec: PrivateSeriesSpec, payload: dict) -> dict:
-    if spec.current_normalizer is not None:
-        return spec.current_normalizer(payload)
-    return dict(payload)
-
-
-def _fetch_series_history_direct(
-    spec: PrivateSeriesSpec,
-    *,
-    force_refresh: bool,
-    client: PrivateAccessClient,
-) -> list[dict]:
-    if not force_refresh:
-        cached = CacheManager.file_cache_read(spec.history_cache_namespace, spec.history_cache_key, spec.history_ttl)
-        if isinstance(cached, list):
-            return [dict(item) for item in spec.history_normalizer(cached)]
-
-    try:
-        normalized = spec.history_normalizer(spec.history_fetcher(client))
-        if not normalized:
-            raise ValueError(f"No {spec.display_name} history returned from private source.")
-        CacheManager.file_cache_write(spec.history_cache_namespace, spec.history_cache_key, normalized)
-        return [dict(item) for item in normalized]
-    except Exception:
-        stale = CacheManager.file_cache_read_stale(spec.history_cache_namespace, spec.history_cache_key)
-        if isinstance(stale, list):
-            return [dict(item) for item in spec.history_normalizer(stale)]
-        raise
-
-
-def _fetch_series_current_direct(
-    spec: PrivateSeriesSpec,
-    *,
-    force_refresh: bool,
-    client: PrivateAccessClient,
-) -> dict:
-    if not force_refresh:
-        cached = CacheManager.file_cache_read(spec.current_cache_namespace, spec.current_cache_key, spec.current_ttl)
-        if isinstance(cached, dict):
-            return dict(_normalize_current(spec, cached))
-
-    try:
-        if spec.current_fetcher is None or spec.current_normalizer is None:
-            raise RuntimeError(f"{spec.display_name} has no direct current fetcher.")
-        current = spec.current_normalizer(spec.current_fetcher(client))
-        history = _fetch_series_history_direct(spec, force_refresh=False, client=client)
-        if history:
-            current = _merge_history_context(spec, current, history)
-        CacheManager.file_cache_write(spec.current_cache_namespace, spec.current_cache_key, current)
-        return dict(current)
-    except Exception:
-        try:
-            history = _fetch_series_history_direct(spec, force_refresh=force_refresh, client=client)
-        except Exception:
-            history = None
-        if history:
-            current = spec.current_deriver(history)
-            CacheManager.file_cache_write(spec.current_cache_namespace, spec.current_cache_key, current)
-            return dict(current)
-        stale = CacheManager.file_cache_read_stale(spec.current_cache_namespace, spec.current_cache_key)
-        if isinstance(stale, dict):
-            return dict(_normalize_current(spec, stale))
-        raise
 
 
 def _history_source_name(spec: PrivateSeriesSpec) -> str:
@@ -213,56 +153,33 @@ def _ensure_series_sources_registered(manager: CacheManager, spec: PrivateSeries
             source=_history_source_name(spec),
             namespace=spec.history_cache_namespace,
             key=spec.history_cache_key,
-            ttl_seconds=spec.history_ttl,
+            ttl_seconds=ttl_for("private.series.history"),
             fetch_fn=lambda spec=spec: _fetch_series_history_runtime(spec),
         )
     )
-    if spec.current_cache_namespace is not None and spec.current_deriver is not None:
+    if spec.current_cache_namespace is not None:
         manager.register_payload(
             CachePayloadSpec(
                 source=_current_source_name(spec),
                 namespace=spec.current_cache_namespace,
                 key=spec.current_cache_key,
-                ttl_seconds=spec.current_ttl,
+                ttl_seconds=ttl_for("private.series.current"),
                 fetch_fn=lambda spec=spec: _fetch_series_current_runtime(spec),
-                fallback_fn=lambda spec=spec: dict(spec.current_deriver(get_private_series_history(spec))),
             )
         )
 
 
 def _fetch_series_history_runtime(spec: PrivateSeriesSpec) -> list[dict]:
     active_client = PrivateAccessClient(load_private_access_config())
-    normalized = spec.history_normalizer(spec.history_fetcher(active_client))
-    if not normalized:
+    records = list(active_client.fetch_series_history(spec.key))
+    if not records:
         raise ValueError(f"No {spec.display_name} history returned from private source.")
-    return normalized
+    return records
 
 
 def _fetch_series_current_runtime(spec: PrivateSeriesSpec) -> dict:
-    if spec.current_fetcher is None or spec.current_normalizer is None:
-        raise RuntimeError(f"{spec.display_name} has no direct current fetcher.")
     active_client = PrivateAccessClient(load_private_access_config())
-    current = spec.current_normalizer(spec.current_fetcher(active_client))
-    history_result = get_cache_manager().get_payload(_history_source_name(spec), allow_stale=True)
-    history = history_result.payload if isinstance(history_result.payload, list) else []
-    if history:
-        current = _merge_history_context(spec, current, history)
-    return current
-
-
-def _merge_history_context(spec: PrivateSeriesSpec, current: dict, history: list[dict]) -> dict:
-    if spec.current_deriver is None:
-        return dict(current)
-    merged = dict(current)
-    derived = spec.current_deriver(history)
-    for field in ("previous_close", "previous_1_week", "previous_1_month"):
-        if merged.get(field) is None and field in derived:
-            merged[field] = derived.get(field)
-    if not merged.get("timestamp"):
-        merged["timestamp"] = derived.get("timestamp", "")
-    if not merged.get("rating"):
-        merged["rating"] = derived.get("rating", "Unavailable")
-    return merged
+    return dict(active_client.fetch_series_current(spec.key))
 
 
 def _frame_bounds(frame: TimeSeriesDataFrame) -> tuple[str | None, str | None]:

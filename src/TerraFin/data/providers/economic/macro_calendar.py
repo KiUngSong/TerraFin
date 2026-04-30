@@ -4,11 +4,12 @@ Uses the FRED release/dates API to get upcoming dates for major US
 economic releases. Free, reliable, covers full year ahead.
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
 
 import requests
 
 from TerraFin.configuration import load_terrafin_config
+from TerraFin.data.contracts import CalendarEvent, EventList
 
 
 _FRED_RELEASES_URL = "https://api.stlouisfed.org/fred/release/dates"
@@ -36,28 +37,22 @@ MACRO_RELEASES: dict[int, dict] = {
 }
 
 
-def get_macro_events(year: int, month: int) -> list[dict]:
-    """Get macro calendar events for a given month.
-
-    Returns list of calendar event dicts matching TerraFin's CalendarEvent contract.
-    """
+def get_macro_events(year: int, month: int) -> EventList:
+    """Get macro calendar events for a given month."""
     all_events = get_macro_events_all()
-    return [
+    return EventList(events=[
         e for e in all_events
-        if e["start"][5:7] == f"{month:02d}" and e["start"][:4] == str(year)
-    ]
+        if e.start.year == year and e.start.month == month
+    ])
 
 
-def get_macro_events_all() -> list[dict]:
-    """Fetch all available macro calendar events (no month filter).
-
-    Returns list of calendar event dicts for all dates returned by FRED.
-    """
+def get_macro_events_all() -> EventList:
+    """Fetch all available macro calendar events (no month filter)."""
     api_key = load_terrafin_config().fred.api_key or ""
     if not api_key:
-        return []
+        return EventList.make_empty()
 
-    events: list[dict] = []
+    events: list[CalendarEvent] = []
     day_counter: dict[str, int] = {}
 
     for release_id, info in MACRO_RELEASES.items():
@@ -68,26 +63,25 @@ def get_macro_events_all() -> list[dict]:
 
         for date_str in dates:
             try:
-                datetime.strptime(date_str, "%Y-%m-%d")
+                parsed = datetime.strptime(date_str, "%Y-%m-%d").replace(tzinfo=timezone.utc)
             except ValueError:
                 continue
 
             day_counter[date_str] = day_counter.get(date_str, 0) + 1
             event_id = f"macro-{release_id}-{date_str}-{day_counter[date_str]}"
 
-            events.append(
-                {
-                    "id": event_id,
-                    "title": info["name"],
-                    "start": f"{date_str}T00:00:00",
-                    "category": "macro",
-                    "importance": info["importance"],
-                    "source": "FRED",
-                }
-            )
+            events.append(CalendarEvent(
+                id=event_id,
+                title=info["name"],
+                start=parsed,
+                category="macro",
+                importance=info["importance"],
+                display_time="",
+                source="FRED",
+            ))
 
-    events.sort(key=lambda e: e["start"])
-    return events
+    events.sort(key=lambda e: e.start)
+    return EventList(events=events)
 
 
 def _fetch_release_dates(release_id: int, api_key: str) -> list[str]:

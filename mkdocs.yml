@@ -95,7 +95,9 @@ nav:
       - API Reference: api-reference.md
       - Examples & Workflows: examples.md
   - Reference:
+      - Architecture Overview: architecture.md
       - Data Layer: data-layer.md
+      - Private Data Wire Spec: private-data-wire-spec.md
       - Analytics: analytics.md
       - Analytics Notes: analytics-notes.md
       - Caching: caching.md

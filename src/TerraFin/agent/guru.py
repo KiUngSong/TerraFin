@@ -572,7 +572,7 @@ def _sanitize_guru_tool_message(
         filtered_payload = {
             "ticker": payload.get("ticker"),
             "price_action": payload.get("price_action"),
-            "market_breadth": payload.get("market_breadth"),
+            "indicators": payload.get("indicators"),
             "processing": payload.get("processing"),
         }
     elif persona.name == WARREN_BUFFETT and tool_call.tool_name == "valuation":

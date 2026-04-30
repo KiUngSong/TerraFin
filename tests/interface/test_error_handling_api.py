@@ -1,11 +1,11 @@
 from fastapi.testclient import TestClient
 
 import TerraFin.interface.server as server_module
-from TerraFin.interface.private_data_service import reset_private_data_service
+from TerraFin.data.cache.registry import reset_cache_manager
 
 
 def test_validation_error_payload_is_standardized() -> None:
-    reset_private_data_service()
+    reset_cache_manager()
     client = TestClient(server_module.create_app())
 
     response = client.get("/calendar/api/events?month=13&year=2026", headers={"X-Request-ID": "req-422"})
@@ -23,7 +23,7 @@ def test_uncaught_exception_payload_is_standardized(monkeypatch) -> None:
         raise Exception("unexpected failure")
 
     monkeypatch.setattr(server_module, "_service_version", _raise_unexpected)
-    reset_private_data_service()
+    reset_cache_manager()
     client = TestClient(server_module.create_app(), raise_server_exceptions=False)
 
     response = client.get("/health", headers={"X-Request-ID": "req-500"})
@@ -36,12 +36,12 @@ def test_uncaught_exception_payload_is_standardized(monkeypatch) -> None:
 
 
 def test_known_runtime_error_payload_is_standardized(monkeypatch) -> None:
-    def _raise_private_data_error():
-        raise RuntimeError("private data unavailable")
+    def _raise_data_factory_error():
+        raise RuntimeError("data factory unavailable")
 
-    reset_private_data_service()
+    reset_cache_manager()
     app = server_module.create_app()
-    monkeypatch.setattr(server_module, "get_private_data_service", _raise_private_data_error)
+    monkeypatch.setattr(server_module, "get_data_factory", _raise_data_factory_error)
     client = TestClient(app)
 
     response = client.get("/ready", headers={"X-Request-ID": "req-503"})
@@ -50,4 +50,4 @@ def test_known_runtime_error_payload_is_standardized(monkeypatch) -> None:
     assert payload["error"]["code"] == "service_not_ready"
     assert payload["error"]["message"] == "Service is not ready."
     assert payload["error"]["request_id"] == "req-503"
-    assert payload["error"]["details"]["checks"]["private_data_service"]["ok"] is False
+    assert payload["error"]["details"]["checks"]["data_factory"]["ok"] is False

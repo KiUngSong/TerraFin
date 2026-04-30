@@ -1349,17 +1349,6 @@ const GlobalAgentWidget: React.FC = () => {
             >
               Sessions
             </button>
-            {hasActivity ? (
-              <button
-                type="button"
-                className={`tf-agent-widget__header-button ${
-                  isActivityDrawerOpen ? 'tf-agent-widget__header-button--active' : ''
-                } ${pendingApprovals.length > 0 ? 'tf-agent-widget__header-button--attention' : ''}`}
-                onClick={() => toggleDrawer('activity')}
-              >
-                Activity{activityCount > 0 ? ` ${activityCount}` : ''}
-              </button>
-            ) : null}
             <button
               type="button"
               className="tf-agent-widget__header-button"
@@ -1379,12 +1368,23 @@ const GlobalAgentWidget: React.FC = () => {
           </div>
         </div>
 
-        {primaryRuntimeModelLabel || showSessionLabel || newChatRuntimeModelLabel ? (
+        {primaryRuntimeModelLabel || showSessionLabel || newChatRuntimeModelLabel || hasActivity ? (
           <div className="tf-agent-widget__header-sub">
             {primaryRuntimeModelLabel ? (
               <span className="tf-agent-widget__meta-pill tf-agent-widget__meta-pill--inline">
                 {primaryRuntimeModelLabel}
               </span>
+            ) : null}
+            {hasActivity ? (
+              <button
+                type="button"
+                className={`tf-agent-widget__meta-pill tf-agent-widget__meta-pill--button ${
+                  isActivityDrawerOpen ? 'tf-agent-widget__meta-pill--active' : ''
+                } ${pendingApprovals.length > 0 ? 'tf-agent-widget__meta-pill--attention' : ''}`}
+                onClick={() => toggleDrawer('activity')}
+              >
+                Activity{activityCount > 0 ? ` ${activityCount}` : ''}
+              </button>
             ) : null}
             {showSessionLabel ? (
               <span className="tf-agent-widget__session-pill">{currentSessionLabel}</span>

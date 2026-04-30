@@ -9,8 +9,8 @@ from TerraFin.data.providers.corporate.filings.sec_edgar import filing
 @pytest.fixture(autouse=True)
 def _isolated_file_cache(tmp_path, monkeypatch):
     monkeypatch.setattr(cache_manager, "_FILE_CACHE_DIR", tmp_path)
-    # Reset the process-global ticker→CIK memo so each test starts cold.
-    monkeypatch.setattr(filing, "_TICKER2CIK_DICT", None)
+    # Reset the managed CIK/submissions/parsed caches so each test starts cold.
+    filing.clear_sec_filings_cache()
     yield
 
 
@@ -48,7 +48,8 @@ def test_get_sec_data_caches_parsed_result(monkeypatch) -> None:
     first = sec_pkg.get_sec_data("AAPL")
     second = sec_pkg.get_sec_data("AAPL")
 
-    assert first == second
+    assert first.markdown == second.markdown
+    assert first.ticker == "AAPL"
     assert len(downloads) == 1, "second call must skip download"
     assert len(parses) == 1, "second call must skip parse"
 
@@ -61,8 +62,8 @@ def test_get_sec_data_caches_per_include_images_flag(monkeypatch) -> None:
     no_img = sec_pkg.get_sec_data("AAPL", include_images=False)
     with_img = sec_pkg.get_sec_data("AAPL", include_images=True)
 
-    assert "images=False" in no_img
-    assert "images=True" in with_img
+    assert "images=False" in no_img.markdown
+    assert "images=True" in with_img.markdown
     # Distinct cache entries → two fetches & two parses.
     assert len(downloads) == 2
     assert len(parses) == 2
@@ -72,25 +73,6 @@ def test_get_sec_data_caches_per_include_images_flag(monkeypatch) -> None:
     sec_pkg.get_sec_data("AAPL", include_images=True)
     assert len(downloads) == 2
     assert len(parses) == 2
-
-
-def test_get_sec_data_parse_false_skips_cache_and_returns_raw_html(monkeypatch) -> None:
-    downloads: list = []
-    parses: list = []
-    _install_fakes(
-        monkeypatch,
-        download_calls=downloads,
-        parse_calls=parses,
-        html="<html>raw</html>",
-    )
-
-    first = sec_pkg.get_sec_data("AAPL", parse=False)
-    second = sec_pkg.get_sec_data("AAPL", parse=False)
-
-    assert first == "<html>raw</html>"
-    assert second == "<html>raw</html>"
-    assert len(parses) == 0, "parse=False must not invoke the parser"
-    assert len(downloads) == 2, "parse=False intentionally bypasses the parsed-output cache"
 
 
 def test_clear_sec_filings_cache_invalidates_parsed_output(monkeypatch) -> None:
@@ -145,8 +127,8 @@ def test_get_sec_toc_default_is_top_level_only(monkeypatch) -> None:
 
     toc = sec_pkg.get_sec_toc("AAPL")
 
-    assert [(e["level"], e["text"]) for e in toc] == [(2, "PART I")]
-    assert all({"slug", "line_index", "char_count"}.issubset(e) for e in toc)
+    assert [(e.level, e.title) for e in toc] == [(2, "PART I")]
+    assert all(e.id and e.anchor for e in toc)
 
     # Follow-up get_sec_data with the same flags hits the cache get_sec_toc populated.
     sec_pkg.get_sec_data("AAPL")
@@ -166,7 +148,7 @@ def test_get_sec_toc_full_hierarchy_when_max_level_none(monkeypatch) -> None:
 
     toc = sec_pkg.get_sec_toc("AAPL", max_level=None)
 
-    assert [(e["level"], e["text"]) for e in toc] == [
+    assert [(e.level, e.title) for e in toc] == [
         (2, "PART I"),
         (3, "Item 1"),
         (3, "Item 2"),

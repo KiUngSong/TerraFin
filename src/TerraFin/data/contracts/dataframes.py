@@ -207,9 +207,18 @@ class PortfolioDataFrame(pd.DataFrame):
         self._is_processed = True
 
     def make_figure(self):
-        # Split the Stock column into Ticker and Company
         df = self.copy()
-        df[["Ticker", "Company"]] = df["Stock"].str.split(" - ", expand=True)
+        # Holdings now carry a CUSIP-resolved `Ticker` column out of
+        # `_format_rows`. When that's absent (legacy callers) fall back to the
+        # historical "TICKER - Company" split. When `Ticker` is null for a
+        # given row (closed-end fund / unit trust without an exchange ticker)
+        # use the issuer name so the treemap still has a non-null path key.
+        if "Ticker" not in df.columns:
+            df[["Ticker", "Company"]] = df["Stock"].str.split(" - ", expand=True)
+        else:
+            if "Company" not in df.columns:
+                df["Company"] = df["Stock"]
+            df["Ticker"] = df["Ticker"].fillna(df["Stock"])
 
         # Color labels: dark red, medium red, light red, light gray, light green, medium green, dark green
         labels = [

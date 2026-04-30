@@ -8,6 +8,7 @@ from TerraFin.data.providers.corporate.filings.sec_edgar import filing
 def _isolated_file_cache(tmp_path, monkeypatch):
     """Redirect the shared file cache to a tmp dir so tests don't touch ~/.terrafin."""
     monkeypatch.setattr(cache_manager, "_FILE_CACHE_DIR", tmp_path)
+    filing.clear_sec_index_cache()
     yield
 
 

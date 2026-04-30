@@ -74,8 +74,6 @@ class MarketSnapshotResponse(BaseModel):
     ticker: str
     price_action: PriceAction
     indicators: IndicatorSummary
-    market_breadth: list[dict]
-    watchlist: list[dict]
     processing: ProcessingMetadata
 
 
@@ -98,6 +96,7 @@ class CompanyInfoResponse(BaseModel):
     previousClose: float | None = None
     changePercent: float | None = None
     exchange: str | None = None
+    beta: float | None = None
     processing: ProcessingMetadata
 
 

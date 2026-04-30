@@ -5,10 +5,14 @@ from typing import Any
 
 from fastapi import HTTPException
 
-from TerraFin.data import DataFactory
+from TerraFin.data import (
+    INDEX_DESCRIPTIONS,
+    INDEX_MAP,
+    MARKET_INDICATOR_REGISTRY,
+    get_data_factory,
+    indicator_registry,
+)
 from TerraFin.data.contracts.dataframes import TimeSeriesDataFrame
-from TerraFin.data.providers.economic import indicator_registry
-from TerraFin.data.providers.market import INDEX_DESCRIPTIONS, INDEX_MAP, MARKET_INDICATOR_REGISTRY
 from TerraFin.interface.chart.state import get_named_series
 
 
@@ -122,7 +126,7 @@ def load_macro_dataframe(
             return indicator_type, description, session_df
 
     try:
-        factory = DataFactory()
+        factory = get_data_factory()
         if hasattr(factory, "get_recent_history"):
             history_chunk = factory.get_recent_history(resolved_name, period="3y")
             df = history_chunk.frame
@@ -130,7 +134,7 @@ def load_macro_dataframe(
             df = factory.get(resolved_name)
     except Exception:
         try:
-            df = DataFactory().get(resolved_name)
+            df = get_data_factory().get(resolved_name)
         except Exception as fallback_exc:
             raise HTTPException(status_code=502, detail=f"Failed to fetch data: {fallback_exc}") from fallback_exc
 

@@ -32,6 +32,11 @@ interface GuruListPayload {
   message?: string | null;
 }
 
+interface FilingSummary {
+  filing_date: string;
+  period: string;
+}
+
 const INVESTOR_POSITIONING_PANEL_HEIGHT = 520;
 
 const MarketInsightsPage: React.FC = () => {
@@ -47,6 +52,8 @@ const MarketInsightsPage: React.FC = () => {
   const [topCompanies, setTopCompanies] = useState<Array<{ rank: number; ticker: string; name: string; marketCap: string; country: string }>>([]);
   const [isNarrowLayout, setIsNarrowLayout] = useState(false);
   const [sp500DcfOpen, setSp500DcfOpen] = useState(false);
+  const [filingHistory, setFilingHistory] = useState<FilingSummary[]>([]);
+  const [selectedFilingDate, setSelectedFilingDate] = useState<string | null>(null);
 
   useEffect(() => {
     if (!macroChartReady) return;
@@ -90,6 +97,19 @@ const MarketInsightsPage: React.FC = () => {
   }, [macroChartReady]);
 
   useEffect(() => {
+    if (!selectedGuru || !investorPositioningEnabled) {
+      setFilingHistory([]);
+      setSelectedFilingDate(null);
+      return;
+    }
+    fetch(`/market-insights/api/investor-positioning/history?guru=${encodeURIComponent(selectedGuru)}`)
+      .then((res) => (res.ok ? res.json() : Promise.reject(new Error(`${res.status}`))))
+      .then((data: { filings?: FilingSummary[] }) => setFilingHistory(data.filings || []))
+      .catch(() => setFilingHistory([]));
+    setSelectedFilingDate(null);
+  }, [investorPositioningEnabled, selectedGuru]);
+
+  useEffect(() => {
     if (!macroChartReady || !selectedGuru || !investorPositioningEnabled) {
       setIsLoading(false);
       setPositioning(null);
@@ -97,12 +117,15 @@ const MarketInsightsPage: React.FC = () => {
     }
     setActiveHoldingKey(null);
     setIsLoading(true);
-    fetch(`/market-insights/api/investor-positioning/holdings?guru=${encodeURIComponent(selectedGuru)}`)
+    const url = selectedFilingDate
+      ? `/market-insights/api/investor-positioning/holdings?guru=${encodeURIComponent(selectedGuru)}&filing_date=${encodeURIComponent(selectedFilingDate)}`
+      : `/market-insights/api/investor-positioning/holdings?guru=${encodeURIComponent(selectedGuru)}`;
+    fetch(url)
       .then((res) => (res.ok ? res.json() : Promise.reject(new Error(`${res.status}`))))
       .then((payload: InvestorPositioningPayload) => setPositioning(payload))
       .catch(() => setPositioning(null))
       .finally(() => setIsLoading(false));
-  }, [investorPositioningEnabled, macroChartReady, selectedGuru]);
+  }, [investorPositioningEnabled, macroChartReady, selectedGuru, selectedFilingDate]);
 
   useEffect(() => {
     if (!activeHoldingKey) {
@@ -289,9 +312,42 @@ const MarketInsightsPage: React.FC = () => {
                   </option>
                 ))}
               </select>
-              <div style={{ fontSize: 12, color: '#64748b' }}>
-                {positioning?.info?.Period ? `Period: ${positioning.info.Period}` : ''}
-              </div>
+              {investorPositioningEnabled && (
+                <>
+                  <label htmlFor="period-selector" style={{ fontSize: 13, color: '#334155', fontWeight: 600 }}>
+                    Period
+                  </label>
+                  <select
+                    id="period-selector"
+                    value={selectedFilingDate ?? ''}
+                    onChange={(e) => setSelectedFilingDate(e.target.value || null)}
+                    disabled={isLoading || filingHistory.length === 0}
+                    style={{
+                      border: '1px solid #cbd5e1',
+                      borderRadius: 8,
+                      padding: '8px 10px',
+                      background: filingHistory.length === 0 ? '#f8fafc' : '#fff',
+                      color: filingHistory.length === 0 ? '#94a3b8' : '#0f172a',
+                      cursor: filingHistory.length === 0 || isLoading ? 'not-allowed' : 'pointer',
+                      fontSize: 13,
+                      minWidth: 110,
+                    }}
+                  >
+                    {filingHistory.length === 0 ? (
+                      <option value="">—</option>
+                    ) : (
+                      <>
+                        <option value="">{filingHistory[0].period}</option>
+                        {filingHistory.slice(1).map((f) => (
+                          <option key={f.filing_date} value={f.filing_date}>
+                            {f.period}
+                          </option>
+                        ))}
+                      </>
+                    )}
+                  </select>
+                </>
+              )}
             </div>
 
             {!investorPositioningEnabled && investorPositioningMessage ? (

@@ -45,8 +45,8 @@ def test_chart_output_methods_are_marked() -> None:
 
 
 def test_get_market_data_contract_stubbed(monkeypatch) -> None:
-    def _stub_market_data(_name: str) -> pd.DataFrame:
-        return pd.DataFrame({"Close": [100.0, 101.5, 103.0]}, index=["2026-01-01", "2026-01-02", "2026-01-03"])
+    def _stub_market_data(_name: str) -> TimeSeriesDataFrame:
+        return TimeSeriesDataFrame(pd.DataFrame({"Close": [100.0, 101.5, 103.0]}, index=["2026-01-01", "2026-01-02", "2026-01-03"]))
 
     monkeypatch.setattr(factory_module, "get_market_data", _stub_market_data)
     factory = DataFactory()
@@ -55,8 +55,8 @@ def test_get_market_data_contract_stubbed(monkeypatch) -> None:
 
 
 def test_get_fred_data_contract_stubbed(monkeypatch) -> None:
-    def _stub_fred_data(_name: str) -> pd.DataFrame:
-        return pd.DataFrame({"Close": [2.5, 2.6, 2.7]}, index=["2026-01-01", "2026-01-02", "2026-01-03"])
+    def _stub_fred_data(_name: str) -> TimeSeriesDataFrame:
+        return TimeSeriesDataFrame(pd.DataFrame({"Close": [2.5, 2.6, 2.7]}, index=["2026-01-01", "2026-01-02", "2026-01-03"]))
 
     monkeypatch.setattr(factory_module, "get_fred_data", _stub_fred_data)
     factory = DataFactory()
@@ -65,8 +65,8 @@ def test_get_fred_data_contract_stubbed(monkeypatch) -> None:
 
 
 def test_get_economic_data_contract_stubbed(monkeypatch) -> None:
-    def _stub_economic_data(_name: str) -> pd.DataFrame:
-        return pd.DataFrame({"Close": [1.0, 0.9, 0.8]}, index=["2026-01-01", "2026-01-02", "2026-01-03"])
+    def _stub_economic_data(_name: str) -> TimeSeriesDataFrame:
+        return TimeSeriesDataFrame(pd.DataFrame({"Close": [1.0, 0.9, 0.8]}, index=["2026-01-01", "2026-01-02", "2026-01-03"]))
 
     monkeypatch.setattr(factory_module, "get_economic_indicator", _stub_economic_data)
     factory = DataFactory()
@@ -323,14 +323,14 @@ def test_get_recent_history_uses_economic_indicator_for_rrp(monkeypatch) -> None
         _ = period
         raise AssertionError("yfinance recent-history loader should not run for economic indicators")
 
-    def _stub_economic_indicator(name: str) -> pd.DataFrame:
+    def _stub_economic_indicator(name: str) -> TimeSeriesDataFrame:
         assert name == "RRP"
-        return pd.DataFrame(
+        return TimeSeriesDataFrame(pd.DataFrame(
             {
                 "Close": [2.0, 4.0, 6.0, 8.0],
             },
             index=["2020-01-01", "2022-01-01", "2024-01-01", "2026-01-01"],
-        )
+        ))
 
     monkeypatch.setattr(factory_module, "get_yf_recent_history", _forbid_recent_history)
     monkeypatch.setattr(factory_module, "get_economic_indicator", _stub_economic_indicator)
@@ -386,14 +386,14 @@ def test_get_full_history_backfill_uses_economic_indicator_for_rrp(monkeypatch) 
         _ = loaded_start
         raise AssertionError("yfinance full-history loader should not run for economic indicators")
 
-    def _stub_economic_indicator(name: str) -> pd.DataFrame:
+    def _stub_economic_indicator(name: str) -> TimeSeriesDataFrame:
         assert name == "RRP"
-        return pd.DataFrame(
+        return TimeSeriesDataFrame(pd.DataFrame(
             {
                 "Close": [2.0, 4.0, 6.0, 8.0],
             },
             index=["2020-01-01", "2022-01-01", "2024-01-01", "2026-01-01"],
-        )
+        ))
 
     monkeypatch.setattr(factory_module, "get_yf_full_history_backfill", _forbid_full_history)
     monkeypatch.setattr(factory_module, "get_economic_indicator", _stub_economic_indicator)

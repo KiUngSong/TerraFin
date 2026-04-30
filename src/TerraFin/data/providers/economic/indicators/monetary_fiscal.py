@@ -1,6 +1,6 @@
 import pandas as pd
 
-from TerraFin.data.providers.private_access.cape import get_cape_history
+from TerraFin.data.providers.private_access import PRIVATE_SERIES, get_private_series_history
 
 from ..fred_data import get_fred_data
 from ..registry import EconomicIndicator
@@ -40,17 +40,14 @@ def cape_ratio(*args, **kwargs):
 
     Fetches full history from DataFactory.
     """
-    records = get_cape_history()
-    if not records:
+    frame = get_private_series_history(PRIVATE_SERIES["cape"])
+    if frame is None or frame.empty:
         return pd.DataFrame(columns=["Close"])
 
-    rows = []
-    for r in records:
-        date_str = r["date"]
-        # Convert "YYYY-MM" to timestamp (first day of month)
-        rows.append({"Date": pd.Timestamp(date_str + "-01"), "Close": r["cape"]})
-
-    df = pd.DataFrame(rows).set_index("Date").sort_index()
+    df = pd.DataFrame({
+        "Date": pd.to_datetime(frame["time"]),
+        "Close": pd.to_numeric(frame["close"], errors="coerce"),
+    }).dropna().set_index("Date").sort_index()
     return df
 
 

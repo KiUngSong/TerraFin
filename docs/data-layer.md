@@ -24,6 +24,142 @@ For most callers, the important pieces are:
 - `HistoryChunk` for progressive chart-history loading
 - `PortfolioOutput` for 13F holdings data
 
+## Architecture
+
+```
+Routes / Agent / Frontend
+        ↓
+   DataFactory ──── CacheManager (uniform cache for all sources)
+        ↓
+   Providers (all return predefined contracts only)
+   ├── yfinance        (market data, fundamentals)
+   ├── FRED            (economic indicators)
+   ├── market indicator (VIX, MOVE, ...)
+   ├── economic        (UNRATE, M2, derived indicators)
+   ├── private_access  (CAPE, fear/greed, breadth, P/E spread — HTTP to sibling DataFactory)
+   ├── SEC EDGAR       (filings, 13F)
+   └── corporate       (yfinance fundamentals)
+```
+
+## Rules of the road
+
+These are hard rules. They apply to every provider, every route, every agent
+capability.
+
+- **Contracts are the only return type.** All providers return ONLY a
+  predefined contract from `src/TerraFin/data/contracts/`. No ad-hoc dicts
+  (`{date, cape}` etc.) — ever.
+- **`DataFactory` is the single facade.** Routes, the agent, and the frontend
+  never call providers directly. They go through `DataFactory`.
+- **Caching is unified.** All caching goes through `CacheManager`. Providers
+  themselves are pure fetchers.
+- **`private_access` must shape to TerraFin contracts.** The HTTP server in
+  the sibling `~/Downloads/work/DataFactory` repo MUST shape responses to
+  match the contracts in this repo. Contract definitions in
+  `src/TerraFin/data/contracts/` are the source of truth.
+- **Adding a new data type is a three-step pattern, no exceptions:**
+  1. Define a contract in `data/contracts/` (or reuse an existing one).
+  2. Write a provider that returns that contract.
+  3. Register the provider with `DataFactory`.
+
+## Contracts
+
+Source: `src/TerraFin/data/contracts/` (canonical list in
+[`__init__.py`](https://github.com/KiUngSong/TerraFin/blob/main/src/TerraFin/data/contracts/__init__.py))
+
+Every provider's public return type is one of the contracts below. Each entry
+gives the file location, the key fields, the validation the contract enforces
+on construction, and one short example.
+
+### `TimeSeriesDataFrame`
+
+- Location: `src/TerraFin/data/contracts/dataframes.py`
+- Subclass of `pd.DataFrame`
+- Columns kept (in order): `time`, `open`, `high`, `low`, `close`, `volume`
+- Validation: `close` is required after normalization; `time` must parse as
+  datetime; rows are sorted by `time` and de-duplicated; non-positive prices
+  are dropped; column aliases (`Date`, `datetime`, `Close`, ...) are
+  normalized; on failure the constructor returns an empty frame with the
+  canonical schema.
+- Carries `.name` (series label) and `.chart_meta` (chart-side metadata).
+- Example: `df = factory.get("AAPL")` → `TimeSeriesDataFrame` chart-ready.
+
+### `HistoryChunk`
+
+- Location: `src/TerraFin/data/contracts/history.py`
+- Dataclass with `frame: TimeSeriesDataFrame`, `loaded_start`, `loaded_end`,
+  `requested_period`, `is_complete`, `has_older`, `source_version`.
+- Used for progressive chart loading. Bounds and flags let the frontend
+  decide whether to backfill older history.
+- Example: `chunk = factory.get_recent_history("S&P 500", period="3y")` →
+  seed window plus `has_older=True` to drive the backfill request.
+
+### `PortfolioDataFrame` and `PortfolioOutput`
+
+- Location: `src/TerraFin/data/contracts/dataframes.py`
+- `PortfolioDataFrame` is a `pd.DataFrame` subclass with a `make_figure()`
+  method that renders a Plotly treemap of 13F holdings.
+- `PortfolioOutput` (defined alongside `DataFactory`) bundles `info: dict`
+  metadata and `df: PortfolioDataFrame`.
+- Validation: `Stock` / `Ticker` / `% of Portfolio` / `Updated` /
+  `Recent Activity` columns are expected by `make_figure()`.
+- Example: `out = factory.get_portfolio_data("Warren Buffett")` →
+  `out.df.make_figure()` for the treemap.
+
+### `FinancialStatementFrame`
+
+- Location: `src/TerraFin/data/contracts/statements.py`
+- `pd.DataFrame` subclass. Columns are reporting-period dates (ISO strings or
+  `pd.Timestamp`); rows are line items.
+- Required at construction: `statement_type` ∈ {`income`, `balance`,
+  `cashflow`}, `period` ∈ {`annual`, `quarterly`}, `ticker`. Column-shape
+  validation rejects non-date columns.
+- Example: `frame = factory.get_corporate_data("AAPL",
+  statement_type="income", period="annual")` → income statement keyed by
+  fiscal year.
+
+### `CalendarEvent` and `EventList`
+
+- Location: `src/TerraFin/data/contracts/events.py`
+- `CalendarEvent` is a frozen dataclass with `id`, `title`, `start`
+  (timezone-aware datetime — enforced), `category` ∈ {`macro`, `earning`,
+  `fed`, `dividend`, `ipo`}, `importance` ∈ {`low`, `medium`, `high`},
+  `display_time`, plus optional `description`, `source`, `metadata`.
+- `EventList` wraps `list[CalendarEvent]` and supports iteration and
+  indexing.
+- Example: macro calendar provider returns an `EventList` of FOMC and
+  release-date events; the calendar route serializes them directly.
+
+### `TOCEntry` and `FilingDocument`
+
+- Location: `src/TerraFin/data/contracts/filings.py`
+- `TOCEntry`: frozen dataclass — `id`, `title`, `level`, `anchor`.
+- `FilingDocument`: dataclass with `ticker`, `filing_type` ∈ {`10-K`,
+  `10-Q`, `8-K`, `13F`, `S-1`, `DEF 14A`}, `accession`, `filing_date`,
+  `markdown`, `toc: list[TOCEntry]`, optional `metadata`.
+- Example: SEC EDGAR provider returns a `FilingDocument` whose `markdown`
+  body and `toc` drive the Stock Analysis filings panel.
+
+### `IndicatorSnapshot`
+
+- Location: `src/TerraFin/data/contracts/indicators.py`
+- Frozen dataclass: `name`, `value` (number or string), `as_of`,
+  optional `unit`, `change`, `change_pct`, `rating`, `metadata`.
+- Use for single-value scalar indicators (current Fear & Greed score, latest
+  CAPE, breadth-of-the-day) where a full time series isn't needed.
+- Example: dashboard fear/greed widget reads
+  `snapshot = factory.get_indicator("fear_greed")` and renders
+  `snapshot.value` and `snapshot.rating`.
+
+### `chart_output`
+
+- Location: `src/TerraFin/data/contracts/markers.py`
+- Decorator that normalizes the return of any time-series-shaped
+  `DataFactory` method into a `TimeSeriesDataFrame` via `_to_timeseries`,
+  tagging the source for cache and debug visibility.
+- Not a return type itself — a marker applied to factory methods that
+  promise time-series output.
+
 ## DataFactory
 
 Source: `src/TerraFin/data/factory.py`
@@ -58,53 +194,18 @@ already know the source.
 The time-series methods are normalized by the `@chart_output` decorator before
 they are returned.
 
-## Output types
+## Output type conveniences
 
-Source: `src/TerraFin/data/utils/output_types.py`
+The contract definitions above are the source of truth. A few notes about
+working with them in practice:
 
-### TimeSeriesDataFrame
-
-`TimeSeriesDataFrame` is TerraFin's canonical time-series container. The class
-extends `pd.DataFrame`, but it normalizes columns and validates the result on
-construction.
-
-| Behavior | Notes |
-|----------|-------|
-| Canonical columns | Keeps only `time`, `open`, `high`, `low`, `close`, `volume` when present |
-| Required signal | `close` must exist after normalization |
-| Time parsing | Uses a `time`-like column if available, otherwise the index |
-| Ordering | Sorts by time and drops duplicate timestamps |
-| Aliases | Normalizes names like `Date`, `datetime`, and `Close` to TerraFin's schema |
-| Empty fallback | Returns an empty frame with the canonical columns on normalization failure |
-
-Common conveniences:
-
-- `.name` stores the series label used by the chart and interface layers
-- `make_empty()` creates an empty frame with the expected schema
-- slicing and pandas operations preserve the custom type
-
-### PortfolioOutput and PortfolioDataFrame
-
-`get_portfolio_data()` returns a `PortfolioOutput` dataclass:
-
-- `info: dict` for metadata such as period and source
-- `df: PortfolioDataFrame` for holdings rows
-
-`PortfolioDataFrame` adds `make_figure()`, which renders a Plotly treemap of
-portfolio holdings.
-
-### HistoryChunk
-
-Progressive chart loading uses `HistoryChunk` rather than a bare dataframe.
-
-It carries:
-
-- `frame`: the actual `TimeSeriesDataFrame`
-- `loaded_start` and `loaded_end`: the time span currently covered
-- `requested_period`: the seed period, such as `3y`, when relevant
-- `is_complete`: whether the entire history is already loaded
-- `has_older`: whether more data exists before `loaded_start`
-- `source_version`: a lightweight debug label for the source/cache path used
+- `TimeSeriesDataFrame.make_empty()` returns an empty frame with the canonical
+  schema; `.name` and `.chart_meta` survive slicing and pandas operations.
+- `FinancialStatementFrame.make_empty(statement_type, period, ticker)`
+  creates an empty statement frame with the right metadata for a missing
+  source.
+- `EventList.make_empty()` and `FilingDocument.make_empty(ticker, filing_type)`
+  exist for the same reason — empty results stay typed.
 
 ## Provider map
 

@@ -13,17 +13,17 @@ from TerraFin.analytics.analysis.fundamental.dcf.inputs import (
     _select_stock_fcf_base,
     _three_year_avg_fcf,
 )
-from TerraFin.data import DataFactory
-from TerraFin.data.providers.corporate.filings.sec_edgar import (
+from TerraFin.data import (
+    SecEdgarError,
+    get_data_factory,
     build_toc,
     download_filing,
     get_company_filings,
+    get_ticker_earnings,
+    get_ticker_info,
     get_ticker_to_cik_dict_cached,
     parse_sec_filing,
 )
-from TerraFin.data.providers.corporate.filings.sec_edgar.filing import SecEdgarError
-from TerraFin.data.providers.corporate.fundamentals import get_corporate_data
-from TerraFin.data.providers.market.ticker_info import get_ticker_earnings, get_ticker_info
 from TerraFin.interface.market_insights.payloads import canonical_macro_name, resolve_macro_type
 
 
@@ -35,7 +35,12 @@ def _resolve_macro_name(name: str) -> str | None:
 def build_company_info_payload(ticker: str) -> dict[str, Any]:
     normalized = ticker.upper()
     info = get_ticker_info(normalized)
-    if not info:
+    if not info or (
+        not info.get("shortName")
+        and not info.get("currentPrice")
+        and not info.get("regularMarketPrice")
+        and not info.get("marketCap")
+    ):
         raise HTTPException(status_code=404, detail=f"No data found for ticker '{ticker}'.")
 
     current = info.get("currentPrice") or info.get("regularMarketPrice")
@@ -70,6 +75,8 @@ def build_company_info_payload(ticker: str) -> dict[str, Any]:
 def build_earnings_payload(ticker: str) -> dict[str, Any]:
     normalized = ticker.upper()
     records = get_ticker_earnings(normalized)
+    if not records:
+        raise HTTPException(status_code=404, detail=f"No data found for ticker '{ticker}'.")
     return {
         "ticker": normalized,
         "earnings": [dict(record) for record in records],
@@ -89,8 +96,9 @@ def build_fcf_history_payload(ticker: str, *, years: int = 10) -> dict[str, Any]
     info = get_ticker_info(normalized) or {}
     shares_outstanding = _safe_float(info.get("sharesOutstanding"))
 
-    cashflow_quarter = get_corporate_data(normalized, "cashflow", period="quarter")
-    cashflow_annual = get_corporate_data(normalized, "cashflow", period="annual")
+    factory = get_data_factory()
+    cashflow_quarter = factory.get_corporate_data(normalized, "cashflow", period="quarter")
+    cashflow_annual = factory.get_corporate_data(normalized, "cashflow", period="annual")
     annual_series = _annual_fcf_series(cashflow_annual)
     ttm_fcf, ttm_source = _latest_stock_fcf(cashflow_quarter, cashflow_annual)
 
@@ -109,9 +117,9 @@ def build_fcf_history_payload(ticker: str, *, years: int = 10) -> dict[str, Any]
     if (
         annual_series is not None
         and cashflow_annual is not None
-        and "date" in cashflow_annual.columns
+        and len(cashflow_annual.columns) > 0
     ):
-        dates = cashflow_annual["date"].tolist()
+        dates = [str(c) for c in cashflow_annual.columns]
         for date_value, fcf_value in zip(dates[:years], annual_series.head(years).tolist()):
             fcf_float = _finite_or_none(fcf_value)
             year_label = str(date_value)[:4] if date_value else None
@@ -154,9 +162,9 @@ def build_fcf_history_payload(ticker: str, *, years: int = 10) -> dict[str, Any]
     if (
         annual_series is not None
         and cashflow_annual is not None
-        and "date" in cashflow_annual.columns
+        and len(cashflow_annual.columns) > 0
     ):
-        annual_dates = cashflow_annual["date"].tolist()
+        annual_dates = [str(c) for c in cashflow_annual.columns]
         for date_value, fcf_value in zip(
             reversed(annual_dates[:years]),
             reversed(annual_series.head(years).tolist()),
@@ -176,9 +184,9 @@ def build_fcf_history_payload(ticker: str, *, years: int = 10) -> dict[str, Any]
         quarter_series = _annual_fcf_series(cashflow_quarter)
         if (
             quarter_series is not None
-            and "date" in cashflow_quarter.columns
+            and len(cashflow_quarter.columns) > 0
         ):
-            quarter_dates = cashflow_quarter["date"].tolist()
+            quarter_dates = [str(c) for c in cashflow_quarter.columns]
             n = len(quarter_series)
             for end_idx in range(n - 4, -1, -1):
                 window = quarter_series.iloc[end_idx : end_idx + 4]
@@ -233,7 +241,7 @@ def build_financial_statement_payload(
 ) -> dict[str, Any]:
     normalized = ticker.upper()
     try:
-        df = DataFactory().get_corporate_data(normalized, statement, period)
+        df = get_data_factory().get_corporate_data(normalized, statement, period)
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"Failed to fetch financials: {exc}") from exc
 
@@ -246,23 +254,14 @@ def build_financial_statement_payload(
             "rows": [],
         }
 
-    if "date" in df.columns:
-        dates = df["date"].tolist()
-        data_cols = [column for column in df.columns if column != "date"]
-        rows = []
-        for column in data_cols:
-            values = {}
-            for idx, date in enumerate(dates):
-                value = df[column].iloc[idx]
-                values[str(date)] = value if value is not None else None
-            rows.append({"label": column, "values": values})
-        return {
-            "ticker": normalized,
-            "statement": statement,
-            "period": period,
-            "columns": [str(date) for date in dates],
-            "rows": rows,
-        }
+    import math
+
+    def _clean(value: Any) -> Any:
+        if value is None:
+            return None
+        if isinstance(value, float) and not math.isfinite(value):
+            return None
+        return value
 
     return {
         "ticker": normalized,
@@ -272,7 +271,7 @@ def build_financial_statement_payload(
         "rows": [
             {
                 "label": str(idx),
-                "values": {str(column): df.at[idx, column] for column in df.columns},
+                "values": {str(column): _clean(df.at[idx, column]) for column in df.columns},
             }
             for idx in df.index
         ],

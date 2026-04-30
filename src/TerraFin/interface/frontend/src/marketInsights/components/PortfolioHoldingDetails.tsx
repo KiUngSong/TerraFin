@@ -299,15 +299,20 @@ const PortfolioHoldingDetails: React.FC<PortfolioHoldingDetailsProps> = ({
 
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
                       <div style={{ fontSize: 9.5, color: '#475569' }}>{formatPortfolioActivity(holding)}</div>
-                      <div
-                        style={{
-                          ...listItemValueStyle,
-                          fontSize: 9.5,
-                          fontWeight: 700,
-                          color: update < 0 ? '#b42318' : update > 0 ? '#166534' : '#475569',
-                        }}
-                      >
-                        {formatSignedPercent(update)}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                        {Array.isArray(holding.History) ? (
+                          <HistorySparkline data={holding.History as (number | null)[]} />
+                        ) : null}
+                        <div
+                          style={{
+                            ...listItemValueStyle,
+                            fontSize: 9.5,
+                            fontWeight: 700,
+                            color: update < 0 ? '#b42318' : update > 0 ? '#166534' : '#475569',
+                          }}
+                        >
+                          {formatSignedPercent(update)}
+                        </div>
                       </div>
                     </div>
                   </div>
@@ -329,6 +334,38 @@ const PortfolioHoldingDetails: React.FC<PortfolioHoldingDetailsProps> = ({
         </div>
       </div>
     </div>
+  );
+};
+
+interface SparklineProps {
+  data: (number | null)[];
+  width?: number;
+  height?: number;
+}
+
+const HistorySparkline: React.FC<SparklineProps> = ({ data, width = 48, height = 18 }) => {
+  const values = data.filter((v): v is number => v != null);
+  if (values.length < 2) return null;
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const range = max - min || 1;
+  const points = data
+    .map((v, i) => {
+      if (v == null) return null;
+      const x = (i / (data.length - 1)) * width;
+      const y = height - ((v - min) / range) * height;
+      return `${x.toFixed(1)},${y.toFixed(1)}`;
+    })
+    .filter(Boolean)
+    .join(' ');
+  const lastVal = data[data.length - 1];
+  const prevVal = data.slice(0, -1).reverse().find((v) => v != null);
+  const trending = lastVal != null && prevVal != null ? lastVal >= prevVal : null;
+  const color = trending === true ? '#166534' : trending === false ? '#b42318' : '#64748b';
+  return (
+    <svg width={width} height={height} style={{ display: 'block', flexShrink: 0 }}>
+      <polyline points={points} fill="none" stroke={color} strokeWidth={1.5} strokeLinejoin="round" />
+    </svg>
   );
 };
 

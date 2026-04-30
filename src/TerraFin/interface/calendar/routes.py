@@ -5,11 +5,11 @@ from fastapi import APIRouter, Query, Request
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
+from TerraFin.data import get_data_factory
 from TerraFin.interface.calendar.state import (
     get_calendar_selection,
     set_calendar_selection,
 )
-from TerraFin.interface.private_data_service import get_private_data_service
 
 
 CALENDAR_PATH = "/calendar"
@@ -59,7 +59,7 @@ class OkResponse(BaseModel):
 
 def create_calendar_router(build_dir: Path) -> APIRouter:
     router = APIRouter()
-    private_data_service = get_private_data_service()
+    data_factory = get_data_factory()
 
     @router.get(f"{CALENDAR_API_PATH}/events", response_model=CalendarEventsResponse)
     def api_get_calendar_events(
@@ -71,7 +71,7 @@ def create_calendar_router(build_dir: Path) -> APIRouter:
         category_filter = None
         if categories:
             category_filter = {item.strip() for item in categories.split(",") if item.strip()}
-        filtered = private_data_service.get_calendar_events(
+        filtered = data_factory.get_calendar_events(
             year=year,
             month=month,
             categories=category_filter,
@@ -82,7 +82,7 @@ def create_calendar_router(build_dir: Path) -> APIRouter:
 
     @router.post(f"{CALENDAR_API_PATH}/events", response_model=UpsertEventsResponse)
     def api_post_calendar_events(body: UpsertEventsRequest):
-        private_data_service.set_calendar_events([event.model_dump() for event in body.events])
+        data_factory.set_calendar_events([event.model_dump() for event in body.events])
         return {"ok": True, "count": len(body.events)}
 
     @router.get(f"{CALENDAR_API_PATH}/selection", response_model=CalendarSelection | None)

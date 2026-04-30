@@ -48,10 +48,12 @@ const InsightCard: React.FC<InsightCardProps> = ({
 
   const content = (
     <>
-      <div className="tf-insight-card__header">
-        <h3 className="tf-insight-card__title">{title}</h3>
-        <p className="tf-insight-card__subtitle">{subtitle}</p>
-      </div>
+      {title ? (
+        <div className="tf-insight-card__header">
+          <h3 className="tf-insight-card__title">{title}</h3>
+          {subtitle ? <p className="tf-insight-card__subtitle">{subtitle}</p> : null}
+        </div>
+      ) : null}
       <div className={contentClassNames}>{children}</div>
     </>
   );

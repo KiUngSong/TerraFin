@@ -1,20 +1,41 @@
 import pandas as pd
 
+from TerraFin.data.cache.registry import get_cache_manager
 from TerraFin.data.providers.market import ticker_info as ticker_info_module
 
 
-class _FakeCacheManager:
-    @staticmethod
-    def file_cache_read(_namespace, _key, _ttl):
-        return None
+def _reset_manager_caches(monkeypatch) -> None:
+    manager = get_cache_manager()
+    for source in list(manager._payload_specs.keys()):
+        if source.startswith("market.ticker_info.") or source.startswith("market.earnings."):
+            manager.clear_payload(source)
+    manager._memory_payloads.clear()
+    monkeypatch.setattr(
+        ticker_info_module,
+        "_manager",
+        lambda: _PatchedManager(manager),
+    )
 
-    @staticmethod
-    def file_cache_write(_namespace, _key, _payload):
-        return None
 
-    @staticmethod
-    def file_cache_clear(_namespace):
-        return None
+class _PatchedManager:
+    """Wrap manager so file_cache_* are no-ops in tests (avoid disk writes)."""
+
+    def __init__(self, real):
+        self._real = real
+
+    def __getattr__(self, name):
+        return getattr(self._real, name)
+
+    def get_payload(self, source, **kwargs):
+        spec = self._real._payload_specs[source]
+        from TerraFin.data.cache.manager import CachePayloadResult
+
+        memory = self._real._read_memory_payload(source, spec.ttl_seconds)
+        if memory is not None:
+            return CachePayloadResult(payload=memory, freshness="fresh")
+        payload = spec.fetch_fn()
+        self._real._write_memory_payload(source, payload)
+        return CachePayloadResult(payload=payload, freshness="fresh")
 
 
 def test_get_ticker_info_falls_back_to_fast_info_when_info_is_empty(monkeypatch) -> None:
@@ -39,8 +60,7 @@ def test_get_ticker_info_falls_back_to_fast_info_when_info_is_empty(monkeypatch)
             assert auto_adjust is True
             return pd.DataFrame()
 
-    ticker_info_module._INFO_CACHE.clear()
-    monkeypatch.setattr(ticker_info_module, "_file_cache", lambda: _FakeCacheManager)
+    _reset_manager_caches(monkeypatch)
     monkeypatch.setattr(ticker_info_module.yf, "Ticker", lambda ticker: _FakeTicker())
 
     info = ticker_info_module.get_ticker_info("aapl")
@@ -76,8 +96,7 @@ def test_get_ticker_info_falls_back_to_history_when_fast_info_is_incomplete(monk
                 }
             )
 
-    ticker_info_module._INFO_CACHE.clear()
-    monkeypatch.setattr(ticker_info_module, "_file_cache", lambda: _FakeCacheManager)
+    _reset_manager_caches(monkeypatch)
     monkeypatch.setattr(ticker_info_module.yf, "Ticker", lambda ticker: _FakeTicker())
 
     info = ticker_info_module.get_ticker_info("msft")

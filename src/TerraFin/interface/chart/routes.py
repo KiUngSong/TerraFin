@@ -515,9 +515,9 @@ def remove_single_series_chart(name: str, sid: str) -> dict:
             if isinstance(s, dict) and not s.get("indicator") and s.get("id"):
                 series_id = s["id"]
                 try:
-                    from TerraFin.data import DataFactory
+                    from TerraFin.data import get_data_factory
 
-                    df = DataFactory().get(series_id)
+                    df = get_data_factory().get(series_id)
                     df.name = series_id
                     formatted_item = format_series_item(df, default_id=series_id)
                     add_named_series(series_id, df, sid, formatted_item=formatted_item)
@@ -674,9 +674,9 @@ def create_chart_router(build_dir: Path) -> APIRouter:
             }
         before_payload = get_chart_payload(sid)
         try:
-            from TerraFin.data import DataFactory
+            from TerraFin.data import get_data_factory
 
-            history_chunk = DataFactory().get_recent_history(name, period="3y")
+            history_chunk = get_data_factory().get_recent_history(name, period="3y")
         except Exception as e:
             return {
                 "ok": False,
@@ -737,9 +737,9 @@ def create_chart_router(build_dir: Path) -> APIRouter:
         clear_series_history(sid)
         set_chart_view("daily", sid)
         try:
-            from TerraFin.data import DataFactory
+            from TerraFin.data import get_data_factory
 
-            history_chunk = DataFactory().get_recent_history(name, period="3y")
+            history_chunk = get_data_factory().get_recent_history(name, period="3y")
         except Exception as e:
             return {
                 "ok": False,
@@ -779,9 +779,9 @@ def create_chart_router(build_dir: Path) -> APIRouter:
         clear_series_history(sid)
         set_chart_view("daily", sid)
         try:
-            from TerraFin.data import DataFactory
+            from TerraFin.data import get_data_factory
 
-            history_chunk = DataFactory().get_recent_history(name, period=seed_period)
+            history_chunk = get_data_factory().get_recent_history(name, period=seed_period)
         except Exception as exc:
             return {"ok": False, "error": str(exc), **_chart_response(get_chart_payload(sid), sid)}
 
@@ -834,9 +834,9 @@ def create_chart_router(build_dir: Path) -> APIRouter:
 
         before_payload = get_chart_payload(sid)
         try:
-            from TerraFin.data import DataFactory
+            from TerraFin.data import get_data_factory
 
-            history_chunk = DataFactory().get_full_history_backfill(name, loaded_start=status.get("loadedStart"))
+            history_chunk = get_data_factory().get_full_history_backfill(name, loaded_start=status.get("loadedStart"))
         except Exception as exc:
             return {"ok": False, "error": str(exc), "requestToken": request_token}
 

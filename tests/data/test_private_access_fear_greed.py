@@ -1,62 +1,74 @@
 import TerraFin.data.cache.manager as cache_manager_module
-import TerraFin.data.providers.private_access.fear_greed as fear_greed_module
+from TerraFin.data.cache.registry import reset_cache_manager
+from TerraFin.data.providers.private_access import (
+    PRIVATE_SERIES,
+    clear_private_series_cache,
+    get_private_series_current,
+    get_private_series_history,
+)
+from TerraFin.data.providers.private_access.client import PrivateAccessClient
 
 
-class _StubClient:
-    def __init__(self, history: list[dict], current: dict | Exception) -> None:
-        self._history = history
-        self._current = current
-        self.history_calls = 0
-        self.current_calls = 0
-
-    def fetch_fear_greed(self) -> list[dict]:
-        self.history_calls += 1
-        return list(self._history)
-
-    def fetch_fear_greed_current(self) -> dict:
-        self.current_calls += 1
-        if isinstance(self._current, Exception):
-            raise self._current
-        return dict(self._current)
+_FG_SPEC = PRIVATE_SERIES["fear_greed"]
 
 
 def test_fear_greed_history_uses_file_cache_after_first_fetch(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr(cache_manager_module, "_FILE_CACHE_DIR", tmp_path)
-    fear_greed_module.clear_fear_greed_cache()
+    reset_cache_manager()
+    clear_private_series_cache(_FG_SPEC)
 
     history = [
-        {"date": "2026-01-01", "score": 35},
-        {"date": "2026-01-02", "score": 42},
-        {"date": "2026-01-03", "score": 51},
+        {"time": "2026-01-01", "close": 35},
+        {"time": "2026-01-02", "close": 42},
+        {"time": "2026-01-03", "close": 51},
     ]
-    client = _StubClient(history=history, current={"score": 51, "rating": "neutral", "timestamp": "2026-01-03"})
+    history_calls = {"count": 0}
 
-    first = fear_greed_module.get_fear_greed_history(client=client)
-    assert client.history_calls == 1
-    assert first[-1]["score"] == 51
+    def _mock_history(self, series_key):
+        _ = self, series_key
+        history_calls["count"] += 1
+        return list(history)
 
-    second = fear_greed_module.get_fear_greed_history(client=client)
-    assert client.history_calls == 1
-    assert second == first
+    monkeypatch.setattr(PrivateAccessClient, "fetch_series_history", _mock_history)
+
+    first = get_private_series_history(_FG_SPEC)
+    assert history_calls["count"] == 1
+    assert int(first["close"].iloc[-1]) == 51
+
+    second = get_private_series_history(_FG_SPEC)
+    assert history_calls["count"] == 1
+    assert second.equals(first)
 
 
-def test_fear_greed_current_falls_back_to_history_when_realtime_endpoint_misses(monkeypatch, tmp_path) -> None:
+def test_fear_greed_current_returns_snapshot_from_canonical_wire(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr(cache_manager_module, "_FILE_CACHE_DIR", tmp_path)
-    fear_greed_module.clear_fear_greed_cache()
+    reset_cache_manager()
+    clear_private_series_cache(_FG_SPEC)
 
-    history = [
-        {"date": "2026-01-01", "score": 25},
-        {"date": "2026-01-10", "score": 40},
-        {"date": "2026-01-28", "score": 62},
-        {"date": "2026-02-01", "score": 70},
-    ]
-    client = _StubClient(history=history, current=RuntimeError("current endpoint unavailable"))
+    current_calls = {"count": 0}
 
-    current = fear_greed_module.get_fear_greed_current(client=client)
+    def _mock_current(self, series_key):
+        _ = self, series_key
+        current_calls["count"] += 1
+        return {
+            "name": "Fear & Greed",
+            "value": 70,
+            "as_of": "2026-02-01",
+            "rating": "Greed",
+            "change": 8.0,
+            "change_pct": 12.9,
+            "unit": None,
+            "metadata": {"previous_close": 62, "previous_1_week": 40, "previous_1_month": 25},
+        }
 
-    assert client.current_calls == 1
-    assert current["score"] == 70
-    assert current["rating"] == "Greed"
-    assert current["previous_close"] == 62
-    assert current["previous_1_week"] == 40
-    assert current["previous_1_month"] == 25
+    monkeypatch.setattr(PrivateAccessClient, "fetch_series_current", _mock_current)
+
+    snapshot = get_private_series_current(_FG_SPEC)
+
+    assert current_calls["count"] == 1
+    assert snapshot.value == 70
+    assert snapshot.rating == "Greed"
+    assert snapshot.as_of == "2026-02-01"
+    assert snapshot.metadata["previous_close"] == 62
+    assert snapshot.metadata["previous_1_week"] == 40
+    assert snapshot.metadata["previous_1_month"] == 25

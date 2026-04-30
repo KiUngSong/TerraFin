@@ -2,64 +2,81 @@ import pandas as pd
 from fredapi import Fred
 
 from TerraFin.configuration import load_terrafin_config
+from TerraFin.data.cache.policy import ttl_for
 
-
-FRED_CACHE: dict[str, pd.DataFrame] = {}
 
 _NAMESPACE = "fred"
-_FILE_TTL = 7 * 86_400  # 7 days
+_SOURCE_PREFIX = "fred"
 
 
-def _file_cache():
+def _manager():
     """Lazy import to avoid circular dependency."""
-    from TerraFin.data.cache.manager import CacheManager
+    from TerraFin.data.cache.registry import get_cache_manager
 
-    return CacheManager
+    return get_cache_manager()
 
 
-def get_fred_data(name: str) -> pd.DataFrame:
+def _serialize_frame(df: pd.DataFrame) -> dict:
+    return {
+        "records": df.reset_index().to_dict(orient="records"),
+        "index": df.index.astype(str).tolist(),
+        "index_name": df.index.name,
+    }
+
+
+def _deserialize_frame(payload: dict) -> pd.DataFrame:
+    df = pd.DataFrame(payload["records"])
+    if "index" in payload:
+        df.index = pd.to_datetime(payload["index"])
+        df.index.name = payload.get("index_name")
+    if "Close" in df.columns and len(df.columns) > 1:
+        df = df[["Close"]]
+    return df
+
+
+def _ensure_source(name: str) -> str:
+    from TerraFin.data.cache.manager import CachePayloadSpec
+
+    source = f"{_SOURCE_PREFIX}.{name}"
+    manager = _manager()
+    if source not in manager._payload_specs:
+        manager.register_payload(
+            CachePayloadSpec(
+                source=source,
+                namespace=_NAMESPACE,
+                key=name,
+                ttl_seconds=ttl_for("fred"),
+                fetch_fn=lambda series_id=name: _fetch_fred(series_id),
+            )
+        )
+    return source
+
+
+def _fetch_fred(name: str) -> dict:
     api_key = load_terrafin_config().fred.api_key
     if not api_key:
         raise ValueError(
-            "API key FRED_API_KEY not found in environment variables. Pass FRED_API_KEY to the DataFactory constructor."
+            "API key FRED_API_KEY not found in environment variables. Pass FRED_API_KEY to the data factory constructor."
         )
     fred = Fred(api_key=api_key)
-
-    # Check memory cache
-    if name in FRED_CACHE:
-        return FRED_CACHE[name].copy()
-
-    # Check file cache
-    cached = _file_cache().file_cache_read(_NAMESPACE, name, _FILE_TTL)
-    if cached is not None:
-        try:
-            df = pd.DataFrame(cached["records"])
-            if "index" in cached:
-                df.index = pd.to_datetime(cached["index"])
-                df.index.name = cached.get("index_name")
-            FRED_CACHE[name] = df
-            return df.copy()
-        except Exception:
-            pass  # fall through to download
-
-    # Download fresh from FRED
     fred_data = pd.DataFrame(fred.get_series(name), columns=["Close"])
-    FRED_CACHE[name] = fred_data
+    return _serialize_frame(fred_data)
 
-    # Persist to file cache
-    try:
-        payload = {
-            "records": fred_data.reset_index().to_dict(orient="records"),
-            "index": fred_data.index.astype(str).tolist(),
-            "index_name": fred_data.index.name,
-        }
-        _file_cache().file_cache_write(_NAMESPACE, name, payload)
-    except Exception:
-        pass  # non-fatal
 
-    return fred_data.copy()
+def get_fred_data(name: str) -> pd.DataFrame:
+    source = _ensure_source(name)
+    result = _manager().get_payload(source)
+    payload = result.payload if isinstance(result.payload, dict) else {}
+    if not payload:
+        return pd.DataFrame(columns=["Close"])
+    return _deserialize_frame(payload)
 
 
 def clear_fred_cache() -> None:
-    FRED_CACHE.clear()
-    _file_cache().file_cache_clear(_NAMESPACE)
+    from TerraFin.data.cache.manager import CacheManager
+
+    manager = _manager()
+    for source in list(manager._payload_specs.keys()):
+        if source.startswith(_SOURCE_PREFIX + "."):
+            manager.clear_payload(source)
+    CacheManager.file_cache_clear(_NAMESPACE)

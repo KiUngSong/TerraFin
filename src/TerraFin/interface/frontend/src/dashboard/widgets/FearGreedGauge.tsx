@@ -31,19 +31,24 @@ const SCORE_BANDS = [
 const FearGreedGauge: React.FC = () => {
   const [data, setData] = useState<FearGreedData | null>(null);
   const [failed, setFailed] = useState(false);
+  const [unavailable, setUnavailable] = useState(false);
 
   useEffect(() => {
     fetch('/dashboard/api/fear-greed')
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d) => {
+      .then((r) => (r.ok ? r.json() : Promise.reject()))
+      .then((d: FearGreedData) => {
         if (d && d.score != null) setData(d);
-        else setFailed(true);
+        else setUnavailable(true);
       })
       .catch(() => setFailed(true));
   }, []);
 
   if (failed) {
     return <div style={{ fontSize: 12, color: '#94a3b8' }}>Data source not connected</div>;
+  }
+
+  if (unavailable) {
+    return <div style={{ fontSize: 12, color: '#94a3b8' }}>Unavailable</div>;
   }
 
   if (!data || data.score == null) {

@@ -6,10 +6,12 @@ observations. Each FRED release_id maps to a headline series_id.
 
 import json
 import logging
+from dataclasses import replace
 
 import requests
 
 from TerraFin.configuration import load_terrafin_config
+from TerraFin.data.contracts import EventList
 
 
 _logger = logging.getLogger(__name__)
@@ -42,41 +44,44 @@ _RELEASE_SERIES: dict[int, dict] = {
 _obs_cache: dict[str, list[dict]] = {}
 
 
-def enrich_macro_events_all(events: list[dict]) -> list[dict]:
+def enrich_macro_events_all(events: EventList) -> EventList:
     """Add Latest/Previous values to all macro events from FRED observations."""
     return _enrich(events)
 
 
-def enrich_macro_events(events: list[dict], year: int, month: int) -> list[dict]:
+def enrich_macro_events(events: EventList, year: int, month: int) -> EventList:
     """Add Latest/Previous values to macro events from FRED observations."""
     return _enrich(events)
 
 
-def _enrich(events: list[dict]) -> list[dict]:
+def _enrich(events: EventList) -> EventList:
     """Core enrichment logic using FRED series observations."""
     api_key = load_terrafin_config().fred.api_key or ""
     if not api_key:
         return events
 
-    # Group events by release_id (extracted from event id: "macro-{release_id}-...")
+    enriched = []
     for event in events:
-        event_id = event.get("id", "")
-        parts = event_id.split("-")
+        parts = (event.id or "").split("-")
         if len(parts) < 2 or parts[0] != "macro":
+            enriched.append(event)
             continue
 
         try:
             release_id = int(parts[1])
         except (ValueError, IndexError):
+            enriched.append(event)
             continue
 
         series_info = _RELEASE_SERIES.get(release_id)
         if not series_info:
+            enriched.append(event)
             continue
 
         series_id = series_info["series_id"]
         obs = _fetch_observations(series_id, api_key)
         if len(obs) < 1:
+            enriched.append(event)
             continue
 
         latest = obs[0]
@@ -102,9 +107,9 @@ def _enrich(events: list[dict]) -> list[dict]:
 
         desc_data["expected"] = "-"
         desc_data["label"] = series_info["label"]
-        event["description"] = json.dumps(desc_data)
+        enriched.append(replace(event, description=json.dumps(desc_data)))
 
-    return events
+    return EventList(events=enriched)
 
 
 def _fetch_observations(series_id: str, api_key: str) -> list[dict]:

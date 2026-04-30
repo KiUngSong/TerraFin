@@ -1,23 +1,17 @@
 import logging
 from functools import wraps
-from typing import TYPE_CHECKING, Any, Callable
+from typing import Any, Callable
 
 from .dataframes import TimeSeriesDataFrame
-
-
-if TYPE_CHECKING:
-    from ..factory import DataFactory
 
 
 logger = logging.getLogger(__name__)
 
 
 def chart_output(source_name: str, query_arg: str) -> Callable:
-    """Mark DataFactory methods that return chart-ready time series output."""
-
     def decorator(func: Callable) -> Callable:
         @wraps(func)
-        def wrapper(self: "DataFactory", *args: Any, **kwargs: Any) -> TimeSeriesDataFrame:
+        def wrapper(self: Any, *args: Any, **kwargs: Any) -> TimeSeriesDataFrame:
             query_value = kwargs.get(query_arg)
             if query_value is None and args:
                 query_value = args[0]

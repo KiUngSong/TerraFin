@@ -9,7 +9,13 @@ from TerraFin.data.providers.corporate.filings.sec_edgar.filing import (
     sec_edgar_is_configured,
     sec_edgar_status_message,
 )
-from TerraFin.data.providers.corporate.filings.sec_edgar.holdings import get_available_gurus, get_guru_holdings
+from TerraFin.data.providers.corporate.filings.sec_edgar.holdings import (
+    get_available_gurus,
+    get_guru_filings_index,
+    get_guru_holdings,
+    get_guru_holdings_for_date,
+    get_guru_holdings_history,
+)
 
 
 ALL_GURUS: list[str] = get_available_gurus()
@@ -35,16 +41,28 @@ def get_investor_positioning_capability() -> InvestorPositioningCapability:
     )
 
 
-def get_portfolio_data(guru_name: str) -> PortfolioOutput:
+def get_portfolio_data(guru_name: str, filing_date: str | None = None) -> PortfolioOutput:
     """Get portfolio data for a guru via SEC EDGAR 13F.
 
-    Fetches latest two quarterly filings and computes share changes
-    (Buy, Add, Reduce) between them. Cached to disk (7-day TTL).
+    When filing_date is None, returns the latest filing (fast path, 1 XML).
+    When filing_date is given, fetches exactly that quarter + previous (2 XMLs).
     """
-    info, rows = get_guru_holdings(guru_name)
+    if filing_date is None:
+        info, rows = get_guru_holdings(guru_name)
+    else:
+        info, rows = get_guru_holdings_for_date(guru_name, filing_date)
     df = PortfolioDataFrame(pd.DataFrame(rows))
     df.guru_name = guru_name
     return PortfolioOutput(info=info, df=df)
+
+
+def get_portfolio_history_data(guru_name: str) -> list[dict]:
+    """Return filing index for a guru (filing_date, period, accession), newest first.
+
+    No XML fetching — only the SEC submissions index. Fast enough to call on every
+    guru selection to populate the period dropdown.
+    """
+    return get_guru_filings_index(guru_name)
 
 
 __all__ = [
@@ -53,4 +71,7 @@ __all__ = [
     "PortfolioOutput",
     "get_investor_positioning_capability",
     "get_portfolio_data",
+    "get_portfolio_history_data",
+    "get_guru_filings_index",
+    "get_guru_holdings_for_date",
 ]

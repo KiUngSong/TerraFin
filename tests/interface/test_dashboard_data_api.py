@@ -2,22 +2,21 @@ import pandas as pd
 from fastapi.testclient import TestClient
 
 import TerraFin.data.cache.manager as cache_manager_module
-import TerraFin.data.providers.private_access.cape as cape_module
-import TerraFin.data.providers.private_access.fear_greed as fear_greed_module
 import TerraFin.interface.watchlist_service as watchlist_service_module
+from TerraFin.data import DataFactory
 from TerraFin.data.cache.registry import reset_cache_manager
+from TerraFin.data.providers.private_access import PRIVATE_SERIES, clear_private_series_cache
 from TerraFin.data.providers.private_access.client import PrivateAccessClient
-from TerraFin.data.providers.private_access.models import MarketBreadthResponse
-from TerraFin.interface.private_data_service import reset_private_data_service
 from TerraFin.interface.server import create_app
 from TerraFin.interface.watchlist_service import reset_watchlist_service
 
 
 def _assert_watchlist_item_shape(item: dict) -> None:
-    assert set(item) == {"symbol", "name", "move"}
+    assert set(item) == {"symbol", "name", "move", "tags"}
     assert isinstance(item["symbol"], str)
     assert isinstance(item["name"], str)
     assert isinstance(item["move"], str)
+    assert isinstance(item["tags"], list)
 
 
 def _assert_breadth_metric_shape(metric: dict) -> None:
@@ -34,7 +33,6 @@ def _fake_history_frame() -> pd.DataFrame:
 def _reset_services() -> None:
     reset_cache_manager()
     reset_watchlist_service()
-    reset_private_data_service()
 
 
 def test_dashboard_data_uses_fallback_when_private_source_unconfigured(monkeypatch, tmp_path) -> None:
@@ -64,11 +62,12 @@ def test_dashboard_data_uses_fallback_when_private_source_unconfigured(monkeypat
 def test_dashboard_market_breadth_uses_private_source_when_available(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr(cache_manager_module, "_FILE_CACHE_DIR", tmp_path)
 
-    def _mock_breadth(self):
+    def _mock_panel(self, resource):
         _ = self
-        return MarketBreadthResponse(metrics=[{"label": "Advancers", "value": "500", "tone": "#047857"}])
+        assert resource == "market-breadth"
+        return {"metrics": [{"label": "Advancers", "value": "500", "tone": "#047857"}]}
 
-    monkeypatch.setattr(PrivateAccessClient, "fetch_market_breadth", _mock_breadth)
+    monkeypatch.setattr(PrivateAccessClient, "fetch_panel", _mock_panel)
     _reset_services()
 
     client = TestClient(create_app())
@@ -81,23 +80,36 @@ def test_dashboard_market_breadth_uses_private_source_when_available(monkeypatch
 def test_dashboard_fear_greed_falls_back_to_cached_history_when_current_misses(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr(cache_manager_module, "_FILE_CACHE_DIR", tmp_path)
     _reset_services()
-    fear_greed_module.clear_fear_greed_cache()
+    clear_private_series_cache(PRIVATE_SERIES["fear_greed"])
 
-    def _mock_history(self):
-        _ = self
+    def _mock_history(self, key):
+        _ = self, key
         return [
-            {"date": "2026-01-01", "score": 25},
-            {"date": "2026-01-10", "score": 40},
-            {"date": "2026-01-28", "score": 62},
-            {"date": "2026-02-01", "score": 70},
+            {"time": "2026-01-01", "close": 25},
+            {"time": "2026-01-10", "close": 40},
+            {"time": "2026-01-28", "close": 62},
+            {"time": "2026-02-01", "close": 70},
         ]
 
-    def _mock_current(self):
-        _ = self
-        raise RuntimeError("current unavailable")
+    def _mock_current(self, key):
+        _ = self, key
+        return {
+            "name": "Fear & Greed",
+            "value": 70,
+            "as_of": "2026-02-01",
+            "rating": "Greed",
+            "metadata": {
+                "score": 70,
+                "rating": "Greed",
+                "timestamp": "2026-02-01",
+                "previous_close": 62,
+                "previous_1_week": 40,
+                "previous_1_month": 25,
+            },
+        }
 
-    monkeypatch.setattr(PrivateAccessClient, "fetch_fear_greed", _mock_history)
-    monkeypatch.setattr(PrivateAccessClient, "fetch_fear_greed_current", _mock_current)
+    monkeypatch.setattr(PrivateAccessClient, "fetch_series_history", _mock_history)
+    monkeypatch.setattr(PrivateAccessClient, "fetch_series_current", _mock_current)
     client = TestClient(create_app())
     payload = client.get("/dashboard/api/fear-greed").json()
 
@@ -111,21 +123,26 @@ def test_dashboard_fear_greed_falls_back_to_cached_history_when_current_misses(m
 def test_dashboard_cape_falls_back_to_series_history_when_current_misses(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr(cache_manager_module, "_FILE_CACHE_DIR", tmp_path)
     _reset_services()
-    cape_module.clear_cape_cache()
+    clear_private_series_cache(PRIVATE_SERIES["cape"])
 
-    def _mock_history(self):
-        _ = self
+    def _mock_history(self, key):
+        _ = self, key
         return [
-            {"date": "2025-12", "cape": 29.4},
-            {"date": "2026-01", "cape": 31.1},
+            {"time": "2025-12-01", "close": 29.4},
+            {"time": "2026-01-01", "close": 31.1},
         ]
 
-    def _mock_current(self):
-        _ = self
-        raise RuntimeError("current unavailable")
+    def _mock_current(self, key):
+        _ = self, key
+        return {
+            "name": "CAPE",
+            "value": 31.1,
+            "as_of": "2026-01-01",
+            "metadata": {"date": "2026-01", "cape": 31.1},
+        }
 
-    monkeypatch.setattr(PrivateAccessClient, "fetch_cape_history", _mock_history)
-    monkeypatch.setattr(PrivateAccessClient, "fetch_cape_current", _mock_current)
+    monkeypatch.setattr(PrivateAccessClient, "fetch_series_history", _mock_history)
+    monkeypatch.setattr(PrivateAccessClient, "fetch_series_current", _mock_current)
     client = TestClient(create_app())
     payload = client.get("/dashboard/api/cape").json()
 
@@ -160,7 +177,11 @@ def test_dashboard_watchlist_crud(monkeypatch, tmp_path) -> None:
 
     monkeypatch.setenv("TERRAFIN_MONGODB_URI", "mongodb://example.test")
     monkeypatch.setattr(cache_manager_module, "_FILE_CACHE_DIR", tmp_path)
-    monkeypatch.setattr(watchlist_service_module, "get_yf_data", lambda symbol: _fake_history_frame())
+    monkeypatch.setattr(
+        DataFactory,
+        "get_market_data",
+        lambda self, symbol: _fake_history_frame(),
+    )
     monkeypatch.setattr(watchlist_service_module, "_resolve_company_name", lambda symbol: f"{symbol} Holdings")
     monkeypatch.setattr(watchlist_service_module, "MongoClient", _FakeMongoClient)
 
@@ -183,7 +204,7 @@ def test_dashboard_watchlist_crud(monkeypatch, tmp_path) -> None:
     created_payload = created.json()
     assert created_payload["backendConfigured"] is True
     assert created_payload["mode"] == "mongo"
-    assert created_payload["items"] == [{"symbol": "META", "name": "META Holdings", "move": "+2.00%"}]
+    assert created_payload["items"] == [{"symbol": "META", "name": "META Holdings", "move": "+2.00%", "tags": []}]
 
     duplicate = client.post("/dashboard/api/watchlist", json={"symbol": "META"})
     assert duplicate.status_code == 409

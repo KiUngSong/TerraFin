@@ -59,6 +59,7 @@
 
 .tf-dashboard-layout__rail--grid {
   grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: start;
 }
 
 .tf-dashboard-layout__widget {
@@ -958,6 +959,24 @@
   max-width: min(100%, 220px);
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.tf-agent-widget__meta-pill--button {
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.tf-agent-widget__meta-pill--active {
+  background: rgba(239, 246, 255, 0.96);
+  border-color: rgba(96, 165, 250, 0.34);
+  color: #1d4ed8;
+}
+
+.tf-agent-widget__meta-pill--attention {
+  background: rgba(255, 251, 235, 0.98);
+  border-color: rgba(245, 158, 11, 0.24);
+  color: #92400e;
 }
 
 .tf-agent-widget__close {

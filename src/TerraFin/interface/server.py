@@ -1,5 +1,7 @@
 """Unified interface server for chart and dashboard."""
 
+import asyncio
+import logging
 import os
 import signal
 import socket
@@ -9,6 +11,9 @@ import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
+
+
+_log = logging.getLogger(__name__)
 
 
 if __package__ in (None, ""):
@@ -36,10 +41,14 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
+from TerraFin.data import get_data_factory
 from TerraFin.data.cache.registry import get_cache_manager
 from TerraFin.data.contracts.dataframes import TimeSeriesDataFrame
 from TerraFin.env import load_entrypoint_dotenv
 from TerraFin.interface.agent.data_routes import create_agent_data_router
+from TerraFin.interface.alerting.heartbeat import registration_heartbeat
+from TerraFin.interface.alerting.http_provider import get_alert_provider_from_env
+from TerraFin.interface.alerting.routes import create_alerting_router
 from TerraFin.interface.calendar.routes import create_calendar_router
 from TerraFin.interface.calendar.state import reset_calendar_state
 from TerraFin.interface.chart.formatters import format_dataframe
@@ -52,7 +61,6 @@ from TerraFin.interface.errors import AppRuntimeError, build_error_response
 from TerraFin.interface.frontend_assets import FrontendBuildError, validate_frontend_build
 from TerraFin.interface.market_insights.data_routes import create_market_insights_data_router
 from TerraFin.interface.market_insights.routes import create_market_insights_router
-from TerraFin.interface.private_data_service import get_private_data_service
 from TerraFin.interface.stock.data_routes import create_stock_data_router
 from TerraFin.interface.stock.routes import create_stock_router
 from TerraFin.interface.watchlist.routes import create_watchlist_router
@@ -78,6 +86,55 @@ def get_runtime_config():
     return load_runtime_config()
 
 
+def _maybe_start_alert_scanner() -> "asyncio.Task | None":
+    """Start background alert scanner if TERRAFIN_ALERT_CHANNEL is set to a non-stdout channel."""
+    channel_type = os.environ.get("TERRAFIN_ALERT_CHANNEL", "stdout")
+    if channel_type in ("stdout", ""):
+        return None
+    interval = int(os.environ.get("TERRAFIN_ALERT_INTERVAL", "300"))
+    group = os.environ.get("TERRAFIN_ALERT_GROUP") or None
+    _log.info("Alert scanner enabled (channel=%s, interval=%ds, group=%s)", channel_type, interval, group or "all")
+    return asyncio.create_task(_alert_scanner_loop(interval, group))
+
+
+async def _alert_scanner_loop(interval: int, group: str | None) -> None:
+    loop = asyncio.get_running_loop()
+    while True:
+        try:
+            from TerraFin.alerting.dedup import deduplicate
+            from TerraFin.alerting.notify import get_channel_from_env
+            from TerraFin.alerting.scanner import scan
+
+            signals = await loop.run_in_executor(None, scan, group)
+            fired = deduplicate(signals)
+            if fired:
+                channel = get_channel_from_env()
+                payload = {
+                    "signals": [
+                        {
+                            "name": s.name,
+                            "ticker": s.ticker,
+                            "severity": s.severity,
+                            "message": s.message,
+                            "snapshot": s.snapshot,
+                        }
+                        for s in fired
+                    ],
+                    "total": len(fired),
+                }
+                title = f"TerraFin Alerts — {len(fired)} signal(s)"
+                body = "\n".join(f"[{s.severity.upper()}] {s.ticker} {s.name}: {s.message}" for s in fired)
+                await loop.run_in_executor(None, channel.send, title, body, payload)
+                _log.info("Alert: sent %d signal(s)", len(fired))
+            else:
+                _log.debug("Alert scan complete — no new signals")
+        except asyncio.CancelledError:
+            return
+        except Exception:
+            _log.exception("Alert scanner error (will retry in %ds)", interval)
+        await asyncio.sleep(interval)
+
+
 def create_app(initial_data: TimeSeriesDataFrame | None = None, base_path: str = "") -> FastAPI:
     reset_chart_state(initial_data, format_dataframe)
     reset_calendar_state()
@@ -99,13 +156,25 @@ def create_app(initial_data: TimeSeriesDataFrame | None = None, base_path: str =
     @asynccontextmanager
     async def _lifespan(app: FastAPI):
         _ = app
-        _ = get_private_data_service()
         _ = get_watchlist_service()
         cache_manager = get_cache_manager()
         cache_manager.start()
+        background_tasks: list[asyncio.Task] = []
+        if t := _maybe_start_alert_scanner():
+            background_tasks.append(t)
+        alert_provider = get_alert_provider_from_env()
+        if alert_provider is not None:
+            background_tasks.append(asyncio.create_task(registration_heartbeat(alert_provider)))
+            _log.info("Alert provider configured — heartbeat started")
         try:
             yield
         finally:
+            for t in background_tasks:
+                t.cancel()
+                try:
+                    await t
+                except (asyncio.CancelledError, Exception):
+                    pass
             cache_manager.stop()
 
     app = FastAPI(lifespan=_lifespan)
@@ -166,6 +235,7 @@ def create_app(initial_data: TimeSeriesDataFrame | None = None, base_path: str =
     app.include_router(create_agent_data_router(), prefix=prefix)
     app.include_router(create_stock_data_router(), prefix=prefix)
     app.include_router(create_stock_router(frontend_build.build_dir), prefix=prefix)
+    app.include_router(create_alerting_router(), prefix=prefix)
 
     @app.get("/")
     def index():
@@ -193,11 +263,11 @@ def create_app(initial_data: TimeSeriesDataFrame | None = None, base_path: str =
             checks["cache_manager"] = {"ok": False, "message": str(exc)}
 
         try:
-            _ = get_private_data_service()
-            checks["private_data_service"] = {"ok": True}
+            _ = get_data_factory()
+            checks["data_factory"] = {"ok": True}
         except Exception as exc:  # pragma: no cover - defensive readiness guard
             is_ready = False
-            checks["private_data_service"] = {"ok": False, "message": str(exc)}
+            checks["data_factory"] = {"ok": False, "message": str(exc)}
 
         if not is_ready:
             raise AppRuntimeError(

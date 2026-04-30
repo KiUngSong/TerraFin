@@ -31,7 +31,7 @@ def fit_current_treasury_curve(
     data_factory: DataFactory | None = None,
     as_of: date | None = None,
 ) -> RateCurveSnapshot:
-    factory = data_factory or DataFactory()
+    factory = data_factory or get_data_factory()
     snapshot_date = (as_of or date.today()).isoformat()
     points: list[RateCurvePoint] = []
 

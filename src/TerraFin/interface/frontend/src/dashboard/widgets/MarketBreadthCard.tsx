@@ -30,6 +30,7 @@ const MarketBreadthCard: React.FC = () => {
       title="Market Breadth"
       subtitle="Daily S&P 500 breadth from advancers and decliners."
       href="/market-insights?ticker=Net%20Breadth"
+      minHeight={0}
     >
       <div className="tf-dashboard-breadth-grid">
         {metrics.map((item) => (

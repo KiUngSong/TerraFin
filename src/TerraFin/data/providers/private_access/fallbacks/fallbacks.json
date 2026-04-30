@@ -1,13 +1,13 @@
 {
   "watchlist": {
     "items": [
-      { "symbol": "AAPL", "name": "Apple", "move": "+0.82%" },
-      { "symbol": "AMZN", "name": "Amazon", "move": "+0.47%" },
-      { "symbol": "GOOGL", "name": "Alphabet", "move": "+0.69%" },
-      { "symbol": "META", "name": "Meta", "move": "+1.24%" },
-      { "symbol": "MSFT", "name": "Microsoft", "move": "+1.11%" },
-      { "symbol": "NVDA", "name": "NVIDIA", "move": "+2.54%" },
-      { "symbol": "TSLA", "name": "Tesla", "move": "-1.09%" }
+      { "symbol": "AAPL", "name": "Apple", "move": "+0.82%", "tags": ["M7"] },
+      { "symbol": "AMZN", "name": "Amazon", "move": "+0.47%", "tags": ["M7"] },
+      { "symbol": "GOOGL", "name": "Alphabet", "move": "+0.69%", "tags": ["M7"] },
+      { "symbol": "META", "name": "Meta", "move": "+1.24%", "tags": ["M7"] },
+      { "symbol": "MSFT", "name": "Microsoft", "move": "+1.11%", "tags": ["M7"] },
+      { "symbol": "NVDA", "name": "NVIDIA", "move": "+2.54%", "tags": ["M7"] },
+      { "symbol": "TSLA", "name": "Tesla", "move": "-1.09%", "tags": ["M7"] }
     ]
   },
   "market_breadth": {

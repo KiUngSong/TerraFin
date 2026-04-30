@@ -4,30 +4,27 @@ from typing import Any
 import pandas as pd
 
 from TerraFin.configuration import load_terrafin_config
+from TerraFin.data.cache.policy import ttl_for
 
 from .client import SECClient
 
 
 log = logging.getLogger(__name__)
 
-# All SEC-filings cache entries live under this single namespace so
-# `clear_sec_filings_cache()` wipes everything in one call and the CacheManager
-# lifecycle (see `data/cache/policy.py`) covers the whole layer.
+# Parsed-markdown cache (step 5, not migrated) still lives under this namespace.
 SEC_FILINGS_CACHE_NAMESPACE = "sec_filings"
 
-# TTLs reflect how often each dataset actually changes upstream.
-_CIK_MAPPING_TTL = 7 * 86_400  # SEC publishes this list; cadence ~monthly.
-_SUBMISSIONS_TTL = 86_400  # Recent filings grow daily.
-_SUBMISSIONS_HISTORY_TTL = 30 * 86_400  # Paginated history chunks rarely change.
+# Managed-cache namespaces for the index/CIK paths (step 4 migration).
+SEC_CIK_NAMESPACE = "sec.cik"
+SEC_SUBMISSIONS_NAMESPACE = "sec.submissions"
+
+_CIK_MAPPING_SOURCE = "sec.cik.mapping"
+_CIK_MAPPING_KEY = "mapping"
+_TICKER_TO_CIK_SOURCE = "sec.cik.ticker_to_cik"
+_TICKER_TO_CIK_KEY = "ticker_to_cik"
 
 CIK_URL = "https://www.sec.gov/files/company_tickers_exchange.json"
 SEC_EDGAR_SETUP_EXAMPLE = "Set TERRAFIN_SEC_USER_AGENT='Your Org Name sec-contact@example.com'."
-
-# Process-local ticker→CIK memo. Backed by the file cache via
-# `_try_cik_request`, but held in memory to avoid repeated ~1MB JSON reads
-# and DataFrame construction on the hot path. `clear_sec_filings_cache()`
-# nulls this out so disk + memory stay coherent.
-_TICKER2CIK_DICT: dict[Any, Any] | None = None
 
 
 class SecEdgarError(RuntimeError):
@@ -108,32 +105,103 @@ def _fetch_text(url: str, *, host_url: str = "www.sec.gov") -> str:
         ) from exc
 
 
-# ── File-cache adapters (lazy CacheManager import breaks the circular dep) ──
+# ── Managed-cache wiring ────────────────────────────────────────────────────
 
 
-def _read_cached_dict(key: str, ttl_seconds: int) -> dict | None:
+def _ensure_cik_mapping_registered() -> None:
+    from TerraFin.data.cache.manager import CachePayloadSpec
+    from TerraFin.data.cache.registry import get_cache_manager
+
+    manager = get_cache_manager()
+    manager.register_payload(
+        CachePayloadSpec(
+            source=_CIK_MAPPING_SOURCE,
+            namespace=SEC_CIK_NAMESPACE,
+            key=_CIK_MAPPING_KEY,
+            ttl_seconds=ttl_for("sec.cik"),
+            fetch_fn=lambda: _fetch_json(CIK_URL, host_url="www.sec.gov"),
+        )
+    )
+    manager.register_payload(
+        CachePayloadSpec(
+            source=_TICKER_TO_CIK_SOURCE,
+            namespace=SEC_CIK_NAMESPACE,
+            key=_TICKER_TO_CIK_KEY,
+            ttl_seconds=ttl_for("sec.cik"),
+            fetch_fn=_build_ticker_to_cik_dict,
+        )
+    )
+
+
+def _build_ticker_to_cik_dict() -> dict[str, Any]:
+    cik_list = _try_cik_request()
+    df = pd.DataFrame(cik_list["data"], columns=cik_list["fields"])
+    return df.set_index("ticker")["cik"].to_dict()
+
+
+def _submissions_source(cik: int) -> str:
+    return f"sec.submissions.{cik}"
+
+
+def _submissions_history_source(name: str) -> str:
+    return f"sec.submissions.history.{name}"
+
+
+def _ensure_submissions_registered(cik: int) -> None:
+    from TerraFin.data.cache.manager import CachePayloadSpec
+    from TerraFin.data.cache.registry import get_cache_manager
+
+    url = f"https://data.sec.gov/submissions/CIK{str(cik).zfill(10)}.json"
+    get_cache_manager().register_payload(
+        CachePayloadSpec(
+            source=_submissions_source(cik),
+            namespace=SEC_SUBMISSIONS_NAMESPACE,
+            key=str(cik),
+            ttl_seconds=ttl_for("sec.submissions"),
+            fetch_fn=lambda url=url: _fetch_json(url),
+        )
+    )
+
+
+def _ensure_submissions_history_registered(name: str) -> None:
+    from TerraFin.data.cache.manager import CachePayloadSpec
+    from TerraFin.data.cache.registry import get_cache_manager
+
+    url = f"https://data.sec.gov/submissions/{name}"
+    get_cache_manager().register_payload(
+        CachePayloadSpec(
+            source=_submissions_history_source(name),
+            namespace=SEC_SUBMISSIONS_NAMESPACE,
+            key=f"history_{name}",
+            ttl_seconds=ttl_for("sec.submissions.history"),
+            fetch_fn=lambda url=url: _fetch_json(url),
+        )
+    )
+
+
+def clear_sec_index_cache() -> None:
+    """Clear all managed CIK + submissions payload sources and their on-disk dirs."""
     from TerraFin.data.cache.manager import CacheManager
+    from TerraFin.data.cache.registry import get_cache_manager
 
-    payload = CacheManager.file_cache_read(SEC_FILINGS_CACHE_NAMESPACE, key, ttl_seconds)
-    return payload if isinstance(payload, dict) else None
-
-
-def _write_cached_dict(key: str, payload: dict) -> None:
-    from TerraFin.data.cache.manager import CacheManager
-
-    CacheManager.file_cache_write(SEC_FILINGS_CACHE_NAMESPACE, key, payload)
+    manager = get_cache_manager()
+    for source in list(manager._payload_specs):
+        if source.startswith("sec.cik.") or source.startswith("sec.submissions."):
+            manager.clear_payload(source)
+    CacheManager.file_cache_clear(SEC_CIK_NAMESPACE)
+    CacheManager.file_cache_clear(SEC_SUBMISSIONS_NAMESPACE)
 
 
 def clear_sec_filings_cache() -> None:
-    """Clear the unified SEC filings file cache: CIK mapping, submissions, parsed markdown.
-
-    Also resets the in-memory ticker→CIK memo so repeat lookups go back through
-    the (now empty) file cache rather than silently serving the stale dict.
-    """
+    """Clear every SEC-filings cache: CIK map, submissions, parsed markdown."""
     from TerraFin.data.cache.manager import CacheManager
+    from TerraFin.data.cache.registry import get_cache_manager
 
-    global _TICKER2CIK_DICT
-    _TICKER2CIK_DICT = None
+    clear_sec_index_cache()
+    manager = get_cache_manager()
+    for source in list(manager._payload_specs):
+        if source.startswith("sec.parsed."):
+            manager.clear_payload(source)
     CacheManager.file_cache_clear(SEC_FILINGS_CACHE_NAMESPACE)
 
 
@@ -141,14 +209,12 @@ def clear_sec_filings_cache() -> None:
 
 
 def _try_cik_request() -> dict[str, Any]:
-    """Fetch the SEC ticker→CIK mapping, persisted via the shared file cache."""
-    cached = _read_cached_dict("cik_mapping", _CIK_MAPPING_TTL)
-    if cached is not None:
-        return cached
+    """Fetch the SEC ticker→CIK mapping, persisted via the managed cache."""
+    from TerraFin.data.cache.registry import get_cache_manager
 
-    data = _fetch_json(CIK_URL, host_url="www.sec.gov")
-    _write_cached_dict("cik_mapping", data)
-    return data
+    _ensure_cik_mapping_registered()
+    result = get_cache_manager().get_payload(_CIK_MAPPING_SOURCE)
+    return result.payload  # type: ignore[return-value]
 
 
 def get_cik_mapping():
@@ -169,11 +235,11 @@ def ticker_to_cik_dict() -> dict[Any, Any] | Any:
 
 
 def get_ticker_to_cik_dict_cached() -> dict[Any, Any]:
-    """Memoized ticker→CIK lookup. Reset by `clear_sec_filings_cache()`."""
-    global _TICKER2CIK_DICT
-    if _TICKER2CIK_DICT is None:
-        _TICKER2CIK_DICT = ticker_to_cik_dict()
-    return _TICKER2CIK_DICT
+    """Ticker→CIK lookup served from the managed cache."""
+    from TerraFin.data.cache.registry import get_cache_manager
+
+    _ensure_cik_mapping_registered()
+    return get_cache_manager().get_payload(_TICKER_TO_CIK_SOURCE).payload  # type: ignore[return-value]
 
 
 def _block_to_df(block: dict, target_filing_form: list[str]) -> pd.DataFrame:
@@ -181,12 +247,6 @@ def _block_to_df(block: dict, target_filing_form: list[str]) -> pd.DataFrame:
     if df.empty or "form" not in df.columns:
         return df
     return df[df.form.isin(target_filing_form)]
-
-
-def _submissions_cache_key(cik: int, history_name: str | None = None) -> str:
-    if history_name:
-        return f"submissions_history_{history_name}"
-    return f"submissions_{cik}"
 
 
 def get_company_filings(
@@ -216,16 +276,16 @@ def get_company_filings(
     if cik is None:
         return None
 
+    from TerraFin.data.cache.registry import get_cache_manager
+
     target_filing_form = ["10-K", "10-Q"]
     if include_8k:
         target_filing_form.append("8-K")
 
-    recent_key = _submissions_cache_key(cik)
-    cik_metadata = _read_cached_dict(recent_key, _SUBMISSIONS_TTL)
-    if cik_metadata is None:
-        url = f"https://data.sec.gov/submissions/CIK{str(cik).zfill(10)}.json"
-        cik_metadata = _fetch_json(url)
-        _write_cached_dict(recent_key, cik_metadata)
+    _ensure_submissions_registered(cik)
+    cik_metadata = get_cache_manager().get_payload(_submissions_source(cik)).payload
+    if not isinstance(cik_metadata, dict):
+        cik_metadata = {}
 
     filings_meta = cik_metadata.get("filings") or {}
     frames = [_block_to_df(filings_meta.get("recent") or {}, target_filing_form)]
@@ -235,15 +295,12 @@ def get_company_filings(
             name = file_info.get("name")
             if not name:
                 continue
-            hist_key = _submissions_cache_key(cik, name)
-            history = _read_cached_dict(hist_key, _SUBMISSIONS_HISTORY_TTL)
-            if history is None:
-                try:
-                    history = _fetch_json(f"https://data.sec.gov/submissions/{name}")
-                except SecEdgarError as exc:
-                    log.warning("Skipping historical submissions file %s: %s", name, exc)
-                    continue
-                _write_cached_dict(hist_key, history)
+            _ensure_submissions_history_registered(name)
+            try:
+                history = get_cache_manager().get_payload(_submissions_history_source(name)).payload
+            except SecEdgarError as exc:
+                log.warning("Skipping historical submissions file %s: %s", name, exc)
+                continue
             frames.append(_block_to_df(history, target_filing_form))
 
     non_empty = [f for f in frames if not f.empty]

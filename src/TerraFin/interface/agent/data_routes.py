@@ -60,10 +60,7 @@ from TerraFin.agent.session_store import (
     TerraFinHostedViewContextRecord,
 )
 from TerraFin.agent.tools import TerraFinToolDefinition, TerraFinToolInvocationResult
-from TerraFin.data.providers.corporate.filings.sec_edgar.filing import (
-    SecEdgarConfigurationError,
-    SecEdgarUnavailableError,
-)
+from TerraFin.data import SecEdgarConfigurationError, SecEdgarUnavailableError
 from TerraFin.interface.errors import AppRuntimeError
 
 

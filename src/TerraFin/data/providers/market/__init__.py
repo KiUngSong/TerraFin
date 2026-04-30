@@ -1,3 +1,5 @@
+from TerraFin.data.contracts.dataframes import TimeSeriesDataFrame
+
 from .market_indicator import MARKET_INDICATOR_REGISTRY
 from .yfinance import get_yf_data
 
@@ -27,7 +29,7 @@ def get_index_ticker_if_exists(index_name: str):
     return INDEX_MAP.get(index_name, index_name)
 
 
-def get_market_data(ticker_or_index_name_or_indicator_name: str):
+def get_market_data(ticker_or_index_name_or_indicator_name: str) -> TimeSeriesDataFrame:
     if ticker_or_index_name_or_indicator_name in MARKET_INDICATOR_REGISTRY:
         indicator = MARKET_INDICATOR_REGISTRY[ticker_or_index_name_or_indicator_name]
         data = indicator.get_data(indicator.key)
@@ -35,9 +37,9 @@ def get_market_data(ticker_or_index_name_or_indicator_name: str):
         ticker = get_index_ticker_if_exists(ticker_or_index_name_or_indicator_name)
         data = get_yf_data(ticker)
 
-    # Return raw dataframe here.
-    # DataFactory-level chart_output normalization handles unified output contract.
-    return data
+    if isinstance(data, TimeSeriesDataFrame):
+        return data
+    return TimeSeriesDataFrame(data)
 
 
 __all__ = [

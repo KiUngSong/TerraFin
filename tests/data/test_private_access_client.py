@@ -23,7 +23,7 @@ def test_private_access_client_raises_when_endpoint_unconfigured() -> None:
         PrivateAccessConfig(endpoint=None, access_key=None, access_value=None, timeout_seconds=1.0)
     )
     with pytest.raises(RuntimeError, match="not configured"):
-        client.fetch_watchlist_snapshot()
+        client.fetch_panel("watchlist-snapshot")
 
 
 def test_private_access_client_propagates_http_errors(monkeypatch) -> None:
@@ -39,7 +39,7 @@ def test_private_access_client_propagates_http_errors(monkeypatch) -> None:
         PrivateAccessConfig(endpoint="https://example.test", access_key=None, access_value=None, timeout_seconds=1.0)
     )
     with pytest.raises(RuntimeError, match="Private source request failed for resource 'market-breadth' with HTTP 500."):
-        client.fetch_market_breadth()
+        client.fetch_panel("market-breadth")
 
 
 def test_private_access_client_propagates_request_exceptions(monkeypatch) -> None:
@@ -52,7 +52,7 @@ def test_private_access_client_propagates_request_exceptions(monkeypatch) -> Non
         PrivateAccessConfig(endpoint="https://example.test", access_key=None, access_value=None, timeout_seconds=1.0)
     )
     with pytest.raises(RuntimeError, match="Private source request timed out for resource 'calendar-events'."):
-        client.fetch_calendar_events()
+        client.fetch_panel("calendar-events")
 
 
 def test_private_access_client_redacts_endpoint_for_auth_failures(monkeypatch) -> None:
@@ -74,11 +74,11 @@ def test_private_access_client_redacts_endpoint_for_auth_failures(monkeypatch) -
     )
 
     with pytest.raises(RuntimeError) as excinfo:
-        client.fetch_fear_greed()
+        client.fetch_series_history("fear-greed")
 
     message = str(excinfo.value)
     assert "TERRAFIN_PRIVATE_SOURCE_ACCESS_VALUE" in message
-    assert "https://example.test/private/fear-greed" not in message
+    assert "https://example.test/private/series/fear-greed" not in message
 
 
 def test_private_access_client_rejects_non_dict_payload(monkeypatch) -> None:
@@ -91,7 +91,7 @@ def test_private_access_client_rejects_non_dict_payload(monkeypatch) -> None:
         PrivateAccessConfig(endpoint="https://example.test", access_key=None, access_value=None, timeout_seconds=1.0)
     )
     with pytest.raises(ValueError, match="Invalid payload"):
-        client.fetch_watchlist_snapshot()
+        client.fetch_panel("watchlist-snapshot")
 
 
 def test_private_access_client_fetches_normalized_private_series(monkeypatch) -> None:
@@ -102,10 +102,8 @@ def test_private_access_client_fetches_normalized_private_series(monkeypatch) ->
         captured["api_key"] = kwargs.get("headers", {}).get("X-API-Key", "")
         return _StubResponse(
             payload={
-                "key": "fear-greed",
-                "name": "Fear & Greed",
-                "data": [{"time": "2026-01-01", "close": 42}],
-                "count": 1,
+                "series_name": "Fear & Greed",
+                "records": [{"time": "2026-01-01", "close": 42}],
             }
         )
 
@@ -126,7 +124,7 @@ def test_private_access_client_fetches_normalized_private_series(monkeypatch) ->
     assert payload == [{"time": "2026-01-01", "close": 42}]
 
 
-def test_private_access_client_fetches_top_companies(monkeypatch) -> None:
+def test_private_access_client_fetches_top_companies_panel(monkeypatch) -> None:
     captured: dict[str, str] = {}
 
     def _mock_get(url, **kwargs):
@@ -157,9 +155,9 @@ def test_private_access_client_fetches_top_companies(monkeypatch) -> None:
         )
     )
 
-    payload = client.fetch_top_companies()
+    payload = client.fetch_panel("top-companies?top_k=50")
 
     assert captured["url"] == "https://example.test/private/top-companies?top_k=50"
     assert captured["api_key"] == "secret"
-    assert payload.count == 1
-    assert payload.companies[0].ticker == "AAPL"
+    assert payload["count"] == 1
+    assert payload["companies"][0]["ticker"] == "AAPL"

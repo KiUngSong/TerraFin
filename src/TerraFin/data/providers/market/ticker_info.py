@@ -9,20 +9,56 @@ import math
 
 import yfinance as yf
 
-
-_INFO_CACHE: dict[str, dict] = {}
-_EARNINGS_CACHE: dict[str, list[dict]] = {}
-
-_NS_INFO = "ticker_info"
-_NS_EARNINGS = "ticker_earnings"
-_FILE_TTL = 86_400  # 24h
+from TerraFin.data.cache.policy import ttl_for
 
 
-def _file_cache():
+_NS_INFO = "market.ticker_info"
+_NS_EARNINGS = "market.earnings"
+_SOURCE_INFO_PREFIX = "market.ticker_info"
+_SOURCE_EARNINGS_PREFIX = "market.earnings"
+
+
+def _manager():
     """Lazy import to avoid circular dependency."""
-    from TerraFin.data.cache.manager import CacheManager
+    from TerraFin.data.cache.registry import get_cache_manager
 
-    return CacheManager
+    return get_cache_manager()
+
+
+def _ensure_info_source(ticker: str) -> str:
+    from TerraFin.data.cache.manager import CachePayloadSpec
+
+    source = f"{_SOURCE_INFO_PREFIX}.{ticker}"
+    manager = _manager()
+    if source not in manager._payload_specs:
+        manager.register_payload(
+            CachePayloadSpec(
+                source=source,
+                namespace=_NS_INFO,
+                key=ticker,
+                ttl_seconds=ttl_for("market.ticker_info"),
+                fetch_fn=lambda t=ticker: _fetch_info(t),
+            )
+        )
+    return source
+
+
+def _ensure_earnings_source(ticker: str) -> str:
+    from TerraFin.data.cache.manager import CachePayloadSpec
+
+    source = f"{_SOURCE_EARNINGS_PREFIX}.{ticker}"
+    manager = _manager()
+    if source not in manager._payload_specs:
+        manager.register_payload(
+            CachePayloadSpec(
+                source=source,
+                namespace=_NS_EARNINGS,
+                key=ticker,
+                ttl_seconds=ttl_for("market.earnings"),
+                fetch_fn=lambda t=ticker: _fetch_earnings(t),
+            )
+        )
+    return source
 
 
 def _safe_float(value) -> float | None:
@@ -137,18 +173,7 @@ def _fast_info_fallback(ticker_obj) -> dict:
     return fallback
 
 
-def get_ticker_info(ticker: str) -> dict:
-    """Return yf.Ticker().info for a ticker, cached in memory + file."""
-    ticker = ticker.upper()
-
-    if ticker in _INFO_CACHE:
-        return dict(_INFO_CACHE[ticker])
-
-    cached = _file_cache().file_cache_read(_NS_INFO, ticker, _FILE_TTL)
-    if cached is not None:
-        _INFO_CACHE[ticker] = cached
-        return dict(cached)
-
+def _fetch_info(ticker: str) -> dict:
     info: dict = {}
     ticker_obj = None
     try:
@@ -165,40 +190,28 @@ def get_ticker_info(ticker: str) -> dict:
             info = _mapping_from_object(info)
         info = _merge_missing(info, _fast_info_fallback(ticker_obj))
 
-    _INFO_CACHE[ticker] = info
+    return info
 
-    try:
-        _file_cache().file_cache_write(_NS_INFO, ticker, info)
-    except Exception:
-        pass
 
-    return dict(info)
+def get_ticker_info(ticker: str) -> dict:
+    """Return yf.Ticker().info for a ticker, cached via CacheManager."""
+    ticker = ticker.upper()
+    source = _ensure_info_source(ticker)
+    result = _manager().get_payload(source)
+    payload = result.payload if isinstance(result.payload, dict) else {}
+    return dict(payload)
 
 
 def get_ticker_earnings(ticker: str) -> list[dict]:
-    """Return earnings history for a ticker, cached in memory + file.
+    """Return earnings history for a ticker, cached via CacheManager.
 
     Each entry: {"date", "epsEstimate", "epsReported", "surprise", "surprisePercent"}.
     """
     ticker = ticker.upper()
-
-    if ticker in _EARNINGS_CACHE:
-        return list(_EARNINGS_CACHE[ticker])
-
-    cached = _file_cache().file_cache_read(_NS_EARNINGS, ticker, _FILE_TTL)
-    if cached is not None:
-        _EARNINGS_CACHE[ticker] = cached
-        return list(cached)
-
-    earnings = _fetch_earnings(ticker)
-    _EARNINGS_CACHE[ticker] = earnings
-
-    try:
-        _file_cache().file_cache_write(_NS_EARNINGS, ticker, earnings)
-    except Exception:
-        pass
-
-    return list(earnings)
+    source = _ensure_earnings_source(ticker)
+    result = _manager().get_payload(source)
+    payload = result.payload if isinstance(result.payload, list) else []
+    return list(payload)
 
 
 def _fetch_earnings(ticker: str) -> list[dict]:
@@ -248,8 +261,12 @@ def _fmt(val: float | None, suffix: str = "") -> str:
 
 
 def clear_ticker_info_cache() -> None:
-    """Clear both memory and file caches."""
-    _INFO_CACHE.clear()
-    _EARNINGS_CACHE.clear()
-    _file_cache().file_cache_clear(_NS_INFO)
-    _file_cache().file_cache_clear(_NS_EARNINGS)
+    """Clear all per-ticker info / earnings payloads via CacheManager."""
+    from TerraFin.data.cache.manager import CacheManager
+
+    manager = _manager()
+    for source in list(manager._payload_specs.keys()):
+        if source.startswith(_SOURCE_INFO_PREFIX + ".") or source.startswith(_SOURCE_EARNINGS_PREFIX + "."):
+            manager.clear_payload(source)
+    CacheManager.file_cache_clear(_NS_INFO)
+    CacheManager.file_cache_clear(_NS_EARNINGS)

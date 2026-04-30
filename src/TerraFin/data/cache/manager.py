@@ -1,19 +1,101 @@
 import copy
+import dataclasses
 import json
+import logging
 import shutil
+import sys
+import typing
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from threading import Event, Lock, Thread
 from time import sleep
-from typing import Callable
+from typing import Any, Callable, Protocol, runtime_checkable
 from zoneinfo import ZoneInfo
+
+_logger = logging.getLogger(__name__)
 
 
 RefreshFn = Callable[[], object]
-CachePayload = dict | list
+CachePayload = Any
 FetchPayloadFn = Callable[[], CachePayload]
 FallbackPayloadFn = Callable[[], CachePayload]
+
+
+@runtime_checkable
+class CacheSerializer(Protocol):
+    name: str
+
+    def write(self, path: Path, payload: Any) -> None: ...
+
+    def read(self, path: Path) -> Any: ...
+
+
+class JsonContractSerializer:
+    """Serializer for dataclass-based contracts.
+
+    Encodes via dataclasses.asdict (datetime -> ISO string), and rebuilds the
+    dataclass on read using type hints. Lists of dataclasses and nested
+    dataclass fields are handled recursively.
+    """
+
+    name = "json_contract"
+
+    def __init__(self, contract_cls: type) -> None:
+        self.contract_cls = contract_cls
+
+    def write(self, path: Path, payload: Any) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        data = {
+            "_cached_at": datetime.now(UTC).isoformat(),
+            "_serializer": self.name,
+            "_contract": self.contract_cls.__name__,
+            "_payload": _encode_dataclass(payload),
+        }
+        path.write_text(json.dumps(data, indent=2, default=str))
+
+    def read(self, path: Path) -> Any:
+        data = json.loads(path.read_text())
+        raw = data.get("_payload")
+        return _decode_dataclass(raw, self.contract_cls)
+
+
+def _encode_dataclass(value: Any) -> Any:
+    if dataclasses.is_dataclass(value) and not isinstance(value, type):
+        return {f.name: _encode_dataclass(getattr(value, f.name)) for f in dataclasses.fields(value)}
+    if isinstance(value, list):
+        return [_encode_dataclass(item) for item in value]
+    if isinstance(value, tuple):
+        return [_encode_dataclass(item) for item in value]
+    if isinstance(value, dict):
+        return {key: _encode_dataclass(val) for key, val in value.items()}
+    if isinstance(value, datetime):
+        return {"__datetime__": value.isoformat()}
+    return value
+
+
+def _decode_dataclass(raw: Any, target_type: Any) -> Any:
+    if raw is None:
+        return None
+    origin = typing.get_origin(target_type)
+    if isinstance(raw, dict) and "__datetime__" in raw and len(raw) == 1:
+        return datetime.fromisoformat(raw["__datetime__"])
+    if dataclasses.is_dataclass(target_type) and isinstance(raw, dict):
+        hints = typing.get_type_hints(target_type)
+        kwargs = {}
+        for f in dataclasses.fields(target_type):
+            if f.name not in raw:
+                continue
+            kwargs[f.name] = _decode_dataclass(raw[f.name], hints.get(f.name, Any))
+        return target_type(**kwargs)
+    if origin is list and isinstance(raw, list):
+        (inner,) = typing.get_args(target_type) or (Any,)
+        return [_decode_dataclass(item, inner) for item in raw]
+    if origin is dict and isinstance(raw, dict):
+        args = typing.get_args(target_type)
+        val_type = args[1] if len(args) == 2 else Any
+        return {key: _decode_dataclass(val, val_type) for key, val in raw.items()}
+    return raw
 
 _FILE_CACHE_DIR = Path.home() / ".terrafin" / "cache"
 _STATE_FILE_NAME = ".cache_manager_state.json"
@@ -39,6 +121,21 @@ class CachePayloadSpec:
     ttl_seconds: int
     fetch_fn: FetchPayloadFn
     fallback_fn: FallbackPayloadFn | None = None
+    frozen_payload: bool = False
+    expected_type: type | None = None
+    size_estimator: Callable[[Any], int] | None = None
+
+
+MEMORY_LRU_FROZEN_MAX_BYTES = 200 * 1024 * 1024
+
+
+@dataclass
+class _MemoryEntry:
+    payload: CachePayload
+    cached_at: datetime
+    last_accessed: datetime
+    frozen: bool
+    size: int
 
 
 @dataclass(frozen=True)
@@ -60,17 +157,29 @@ class CacheSourceState:
 
 
 class CacheManager:
+    _serializers: dict[type, CacheSerializer] = {}
+
     def __init__(self, poll_seconds: int = 30, timezone_name: str = "UTC") -> None:
         self._poll_seconds = max(1, poll_seconds)
         self._timezone_name = timezone_name
         self._timezone = ZoneInfo(timezone_name)
         self._sources: dict[str, CacheSourceState] = {}
         self._payload_specs: dict[str, CachePayloadSpec] = {}
-        self._memory_payloads: dict[str, tuple[CachePayload, datetime]] = {}
+        self._memory_payloads: dict[str, _MemoryEntry] = {}
         self._lock = Lock()
+        self._fetch_locks: dict[str, Lock] = {}
+        self._fetch_locks_mutex = Lock()
         self._runner: Thread | None = None
         self._stop_event = Event()
         self._persisted_state = self._load_persisted_state()
+
+    def _get_fetch_lock(self, source: str) -> Lock:
+        with self._fetch_locks_mutex:
+            lock = self._fetch_locks.get(source)
+            if lock is None:
+                lock = Lock()
+                self._fetch_locks[source] = lock
+            return lock
 
     def register(self, spec: CacheSourceSpec) -> None:
         with self._lock:
@@ -144,63 +253,93 @@ class CacheManager:
         if spec is None:
             raise KeyError(f"Unknown cache payload source: {source}")
 
-        if not force_refresh:
+        frozen = spec.frozen_payload
+
+        custom_serializer = self._serializer_for_cls(spec.expected_type) if spec.expected_type else None
+
+        def _try_cached() -> CachePayloadResult | None:
             memory = self._read_memory_payload(source, spec.ttl_seconds)
             if memory is not None:
                 return CachePayloadResult(payload=memory, freshness="fresh")
+            if not frozen:
+                if custom_serializer is not None:
+                    artifact = self._read_artifact(spec, custom_serializer)
+                    if artifact is not None:
+                        self._write_memory_payload(source, artifact, spec=spec, frozen=frozen)
+                        return CachePayloadResult(payload=_copy_payload(artifact, frozen=frozen), freshness="fresh")
+                else:
+                    cached = self.file_cache_read(spec.namespace, spec.key, spec.ttl_seconds)
+                    if isinstance(cached, (dict, list)):
+                        self._write_memory_payload(source, cached, spec=spec, frozen=frozen)
+                        return CachePayloadResult(payload=_copy_payload(cached, frozen=frozen), freshness="fresh")
+            return None
 
-            cached = self.file_cache_read(spec.namespace, spec.key, spec.ttl_seconds)
-            if isinstance(cached, (dict, list)):
-                self._write_memory_payload(source, cached)
-                return CachePayloadResult(payload=_copy_payload(cached), freshness="fresh")
+        if not force_refresh:
+            hit = _try_cached()
+            if hit is not None:
+                return hit
 
-        now = datetime.now(UTC)
-        try:
-            payload = spec.fetch_fn()
-            self.file_cache_write(spec.namespace, spec.key, payload)
-            self._write_memory_payload(source, payload)
-            self._record_source_state(
-                source,
-                now=now,
-                success=True,
-                error=None,
-                result_kind="fresh",
-            )
-            return CachePayloadResult(payload=_copy_payload(payload), freshness="fresh")
-        except Exception as exc:
-            error = str(exc)
-            if allow_stale:
-                stale = self.file_cache_read_stale(spec.namespace, spec.key)
-                if isinstance(stale, (dict, list)):
-                    self._write_memory_payload(source, stale, cached_at=now)
+        # Single-flight: serialize concurrent misses on the same source so
+        # only one thread runs fetch_fn. Other waiters re-check cache after
+        # the holder populates it.
+        fetch_lock = self._get_fetch_lock(source)
+        with fetch_lock:
+            if not force_refresh:
+                hit = _try_cached()
+                if hit is not None:
+                    return hit
+
+            now = datetime.now(UTC)
+            try:
+                payload = spec.fetch_fn()
+                if not frozen:
+                    if custom_serializer is not None:
+                        self._write_artifact(spec, custom_serializer, payload)
+                    else:
+                        self.file_cache_write(spec.namespace, spec.key, payload)
+                self._write_memory_payload(source, payload, spec=spec, frozen=frozen)
+                self._record_source_state(
+                    source,
+                    now=now,
+                    success=True,
+                    error=None,
+                    result_kind="fresh",
+                )
+                return CachePayloadResult(payload=_copy_payload(payload, frozen=frozen), freshness="fresh")
+            except Exception as exc:
+                error = str(exc)
+                if allow_stale and not frozen:
+                    stale = self.file_cache_read_stale(spec.namespace, spec.key)
+                    if isinstance(stale, (dict, list)):
+                        self._write_memory_payload(source, stale, cached_at=now, spec=spec, frozen=frozen)
+                        self._record_source_state(
+                            source,
+                            now=now,
+                            success=False,
+                            error=error,
+                            result_kind="stale",
+                        )
+                        return CachePayloadResult(payload=_copy_payload(stale, frozen=frozen), freshness="stale", error=error)
+
+                if allow_fallback and spec.fallback_fn is not None:
+                    payload = spec.fallback_fn()
                     self._record_source_state(
                         source,
                         now=now,
                         success=False,
                         error=error,
-                        result_kind="stale",
+                        result_kind="fallback",
                     )
-                    return CachePayloadResult(payload=_copy_payload(stale), freshness="stale", error=error)
+                    return CachePayloadResult(payload=_copy_payload(payload, frozen=frozen), freshness="fallback", error=error)
 
-            if allow_fallback and spec.fallback_fn is not None:
-                payload = spec.fallback_fn()
                 self._record_source_state(
                     source,
                     now=now,
                     success=False,
                     error=error,
-                    result_kind="fallback",
+                    result_kind="error",
                 )
-                return CachePayloadResult(payload=_copy_payload(payload), freshness="fallback", error=error)
-
-            self._record_source_state(
-                source,
-                now=now,
-                success=False,
-                error=error,
-                result_kind="error",
-            )
-            raise
+                raise
 
     def refresh_payload(
         self,
@@ -221,14 +360,71 @@ class CacheManager:
         if spec is None:
             return
         self._memory_payloads.pop(source, None)
-        self.file_cache_clear(spec.namespace, spec.key)
+        if not spec.frozen_payload:
+            if spec.expected_type is not None and self._serializer_for_cls(spec.expected_type) is not None:
+                target = self.artifact_path(spec.namespace, spec.key)
+                if target.exists():
+                    try:
+                        shutil.rmtree(target)
+                    except OSError:
+                        pass
+            else:
+                self.file_cache_clear(spec.namespace, spec.key)
+
+    def _read_artifact(self, spec: "CachePayloadSpec", serializer: CacheSerializer) -> Any:
+        path = self.artifact_path(spec.namespace, spec.key)
+        if not path.exists():
+            return None
+        meta_path = path / "meta.json"
+        if meta_path.exists():
+            try:
+                meta = json.loads(meta_path.read_text())
+                cached_at = meta.get("cached_at")
+                if cached_at:
+                    age = (datetime.now(UTC) - datetime.fromisoformat(cached_at)).total_seconds()
+                    if age > spec.ttl_seconds:
+                        return None
+            except Exception:
+                return None
+        try:
+            return serializer.read(path)
+        except Exception:
+            return None
+
+    def _write_artifact(self, spec: "CachePayloadSpec", serializer: CacheSerializer, payload: Any) -> None:
+        path = self.artifact_path(spec.namespace, spec.key)
+        try:
+            serializer.write(path, payload)
+        except Exception:
+            pass
 
     def set_payload(self, source: str, payload: CachePayload) -> None:
         spec = self._payload_specs.get(source)
         if spec is None:
             raise KeyError(f"Unknown cache payload source: {source}")
-        self.file_cache_write(spec.namespace, spec.key, payload)
-        self._write_memory_payload(source, payload)
+        if not spec.frozen_payload:
+            self.file_cache_write(spec.namespace, spec.key, payload)
+        self._write_memory_payload(source, payload, spec=spec, frozen=spec.frozen_payload)
+
+    @classmethod
+    def register_serializer(cls, contract_cls: type, serializer: CacheSerializer) -> None:
+        cls._serializers[contract_cls] = serializer
+
+    def serializer_for(self, payload_or_cls: Any) -> CacheSerializer | None:
+        cls = payload_or_cls if isinstance(payload_or_cls, type) else type(payload_or_cls)
+        serializer = type(self)._serializers.get(cls)
+        if serializer is not None:
+            return serializer
+        for registered_cls, registered_serializer in type(self)._serializers.items():
+            if isinstance(payload_or_cls, registered_cls):
+                return registered_serializer
+        return None
+
+    @classmethod
+    def _serializer_for_cls(cls, target_cls: type | None) -> CacheSerializer | None:
+        if target_cls is None:
+            return None
+        return cls._serializers.get(target_cls)
 
     def refresh_due_sources(self, force: bool = False, force_modes: set[str] | None = None) -> None:
         with self._lock:
@@ -340,17 +536,30 @@ class CacheManager:
         return _FILE_CACHE_DIR / namespace / f"{_safe_key(key)}.json"
 
     @staticmethod
-    def file_cache_read(namespace: str, key: str, max_age_seconds: int) -> dict | list | None:
-        """Read a JSON cache file if it exists and is fresh enough.
+    def artifact_path(namespace: str, key: str) -> Path:
+        """Directory path for serializer-managed artifacts.
 
-        Args:
-            namespace: Subdirectory under ~/.terrafin/cache/ (e.g., "guru_holdings")
-            key: Cache key (used as filename, sanitized)
-            max_age_seconds: Maximum age in seconds before stale
-
-        Returns:
-            Parsed JSON payload, or None if missing/stale.
+        Slashes in ``key`` are preserved as path separators (each segment is
+        independently sanitized) so callers can address legacy on-disk layouts
+        like ``yfinance_v2/<TICKER>/<variant>/``.
         """
+        segments = [_safe_key(seg) for seg in key.split("/") if seg]
+        return _FILE_CACHE_DIR.joinpath(namespace, *segments)
+
+    @staticmethod
+    def file_cache_read(
+        namespace: str,
+        key: str,
+        max_age_seconds: int,
+        *,
+        expected_type: type | None = None,
+    ) -> Any:
+        """Read a cache file if it exists and is fresh enough.
+
+        If a serializer is registered for ``expected_type``, dispatch to it;
+        otherwise fall back to the JSON envelope format.
+        """
+        serializer = CacheManager._serializer_for_cls(expected_type)
         path = CacheManager.cache_path(namespace, key)
         if not path.exists():
             return None
@@ -359,8 +568,11 @@ class CacheManager:
             cached_at = data.get("_cached_at", "")
             if cached_at:
                 age = (datetime.now(UTC) - datetime.fromisoformat(cached_at)).total_seconds()
-                if age <= max_age_seconds:
-                    return data.get("_payload")
+                if age > max_age_seconds:
+                    return None
+            if serializer is not None and data.get("_serializer") == getattr(serializer, "name", None):
+                return serializer.read(path)
+            return data.get("_payload")
         except Exception:
             pass
         return None
@@ -382,22 +594,25 @@ class CacheManager:
         return payload if isinstance(payload, (dict, list)) else None
 
     @staticmethod
-    def file_cache_write(namespace: str, key: str, payload: dict | list) -> None:
-        """Write data to a JSON cache file with timestamp.
+    def file_cache_write(namespace: str, key: str, payload: Any) -> None:
+        """Write data to a cache file with timestamp.
 
-        Args:
-            namespace: Subdirectory under ~/.terrafin/cache/
-            key: Cache key
-            payload: Data to cache
+        If a serializer is registered for ``type(payload)``, dispatch to it;
+        otherwise fall back to the JSON envelope format.
         """
+        serializer = CacheManager._serializer_for_cls(type(payload))
+        path = _FILE_CACHE_DIR / namespace / f"{_safe_key(key)}.json"
         try:
+            if serializer is not None:
+                serializer.write(path, payload)
+                return
             cache_dir = _FILE_CACHE_DIR / namespace
             cache_dir.mkdir(parents=True, exist_ok=True)
             data = {
                 "_cached_at": datetime.now(UTC).isoformat(),
                 "_payload": payload,
             }
-            (cache_dir / f"{_safe_key(key)}.json").write_text(json.dumps(data, indent=2, default=str))
+            path.write_text(json.dumps(data, indent=2, default=str))
         except OSError:
             pass
 
@@ -504,15 +719,16 @@ class CacheManager:
             pass
 
     def _read_memory_payload(self, source: str, ttl_seconds: int) -> CachePayload | None:
-        memory = self._memory_payloads.get(source)
-        if memory is None:
+        entry = self._memory_payloads.get(source)
+        if entry is None:
             return None
-        payload, cached_at = memory
-        age = (datetime.now(UTC) - cached_at).total_seconds()
+        now = datetime.now(UTC)
+        age = (now - entry.cached_at).total_seconds()
         if age > ttl_seconds:
             self._memory_payloads.pop(source, None)
             return None
-        return _copy_payload(payload)
+        entry.last_accessed = now
+        return _copy_payload(entry.payload, frozen=entry.frozen)
 
     def _write_memory_payload(
         self,
@@ -520,8 +736,35 @@ class CacheManager:
         payload: CachePayload,
         *,
         cached_at: datetime | None = None,
+        frozen: bool = False,
+        spec: "CachePayloadSpec | None" = None,
     ) -> None:
-        self._memory_payloads[source] = (_copy_payload(payload), cached_at or datetime.now(UTC))
+        now = cached_at or datetime.now(UTC)
+        stored = payload if frozen else _copy_payload(payload, frozen=False)
+        size = _estimate_size(stored, spec) if frozen else 0
+        self._memory_payloads[source] = _MemoryEntry(
+            payload=stored,
+            cached_at=now,
+            last_accessed=now,
+            frozen=frozen,
+            size=size,
+        )
+        if frozen:
+            self._evict_frozen_lru()
+
+    def _evict_frozen_lru(self) -> None:
+        total = sum(e.size for e in self._memory_payloads.values() if e.frozen)
+        if total <= MEMORY_LRU_FROZEN_MAX_BYTES:
+            return
+        frozen_items = [
+            (src, entry) for src, entry in self._memory_payloads.items() if entry.frozen
+        ]
+        frozen_items.sort(key=lambda kv: kv[1].last_accessed)
+        for src, entry in frozen_items:
+            if total <= MEMORY_LRU_FROZEN_MAX_BYTES:
+                break
+            self._memory_payloads.pop(src, None)
+            total -= entry.size
 
     def _record_source_state(
         self,
@@ -562,5 +805,48 @@ def _safe_key(key: str) -> str:
     return key.lower().replace(" ", "_").replace("/", "_")
 
 
-def _copy_payload(payload: CachePayload) -> CachePayload:
+def _copy_payload(payload: CachePayload, *, frozen: bool = False) -> CachePayload:
+    if frozen:
+        return payload
     return copy.deepcopy(payload)
+
+
+def _estimate_size(payload: Any, spec: "CachePayloadSpec | None" = None) -> int:
+    """Approximate in-memory size of a frozen payload, in bytes.
+
+    Estimates are approximate; complex object graphs are undercounted.
+    """
+    if spec is not None and spec.size_estimator is not None:
+        try:
+            return int(spec.size_estimator(payload))
+        except Exception:
+            pass
+    return _default_size_estimator(payload)
+
+
+def _default_size_estimator(payload: Any) -> int:
+    if payload is None:
+        return 0
+    if isinstance(payload, str):
+        return len(payload.encode("utf-8"))
+    if isinstance(payload, bytes):
+        return len(payload)
+    try:
+        import pandas as pd
+
+        if isinstance(payload, pd.DataFrame):
+            return int(payload.memory_usage(deep=True).sum())
+        if isinstance(payload, pd.Series):
+            return int(payload.memory_usage(deep=True))
+    except Exception:
+        pass
+    if dataclasses.is_dataclass(payload) and not isinstance(payload, type):
+        total = 0
+        for f in dataclasses.fields(payload):
+            total += _default_size_estimator(getattr(payload, f.name, None))
+        return total
+    if isinstance(payload, (list, tuple)):
+        return sum(_default_size_estimator(item) for item in payload)
+    if isinstance(payload, dict):
+        return sum(_default_size_estimator(k) + _default_size_estimator(v) for k, v in payload.items())
+    return sys.getsizeof(payload)

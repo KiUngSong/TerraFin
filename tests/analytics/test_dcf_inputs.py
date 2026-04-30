@@ -1,6 +1,19 @@
 import pandas as pd
 
+from TerraFin.data.contracts import FinancialStatementFrame
+
 import TerraFin.analytics.analysis.fundamental.dcf.inputs as inputs_module
+
+
+def _canon(legacy: pd.DataFrame, *, statement: str = "cashflow", period: str = "annual", ticker: str = "TEST") -> FinancialStatementFrame:
+    """Convert the legacy rows=periods+date layout used by these tests to a
+    canonical FinancialStatementFrame (cols=dates, rows=line items).
+    """
+    if legacy is None or legacy.empty or "date" not in legacy.columns:
+        return FinancialStatementFrame.make_empty(statement, period, ticker)
+    pivoted = legacy.set_index("date").transpose()
+    pivoted.columns = [str(c) for c in pivoted.columns]
+    return FinancialStatementFrame(pivoted, statement_type=statement, period=period, ticker=ticker)
 from TerraFin.analytics.analysis.fundamental.dcf.inputs import build_sp500_template, build_stock_template
 from TerraFin.analytics.analysis.fundamental.dcf.models import (
     RateCurvePoint,
@@ -244,7 +257,7 @@ def test_build_stock_template_prefers_3yr_avg_fcf_and_eps_growth(monkeypatch) ->
     monkeypatch.setattr(
         inputs_module,
         "get_corporate_data",
-        lambda ticker, statement_type, period="annual": quarterly_cashflow if period == "quarter" else annual_cashflow,
+        lambda ticker, statement_type, period="annual": _canon(quarterly_cashflow, statement=statement_type, period=("quarterly" if period == "quarter" else "annual"), ticker=ticker) if period == "quarter" else _canon(annual_cashflow, statement=statement_type, period="annual", ticker=ticker),
     )
 
     template = build_stock_template("AAPL", data_factory=_PriceFactory({"AAPL": 150.0}))
@@ -289,7 +302,7 @@ def test_build_stock_template_honors_fcf_base_source_ttm(monkeypatch) -> None:
     monkeypatch.setattr(
         inputs_module,
         "get_corporate_data",
-        lambda ticker, statement_type, period="annual": quarterly_cashflow if period == "quarter" else annual_cashflow,
+        lambda ticker, statement_type, period="annual": _canon(quarterly_cashflow, statement=statement_type, period=("quarterly" if period == "quarter" else "annual"), ticker=ticker) if period == "quarter" else _canon(annual_cashflow, statement=statement_type, period="annual", ticker=ticker),
     )
 
     template = build_stock_template(
@@ -313,7 +326,7 @@ def test_three_year_avg_requires_two_valid_years() -> None:
             "Capital Expenditure": [-200.0],
         }
     )
-    assert _three_year_avg_fcf(only_one) is None
+    assert _three_year_avg_fcf(_canon(only_one)) is None
 
     two_years = pd.DataFrame(
         {
@@ -322,7 +335,7 @@ def test_three_year_avg_requires_two_valid_years() -> None:
             "Capital Expenditure": [-200.0, -180.0],
         }
     )
-    avg = _three_year_avg_fcf(two_years)
+    avg = _three_year_avg_fcf(_canon(two_years))
     assert avg is not None
     assert round(avg, 2) == 560.0  # (600 + 520) / 2
 
@@ -353,7 +366,7 @@ def test_build_stock_template_auto_cascade_falls_back_to_ttm(monkeypatch) -> Non
     monkeypatch.setattr(
         inputs_module,
         "get_corporate_data",
-        lambda ticker, statement_type, period="annual": quarterly_cashflow if period == "quarter" else annual_cashflow,
+        lambda ticker, statement_type, period="annual": _canon(quarterly_cashflow, statement=statement_type, period=("quarterly" if period == "quarter" else "annual"), ticker=ticker) if period == "quarter" else _canon(annual_cashflow, statement=statement_type, period="annual", ticker=ticker),
     )
 
     template = build_stock_template("AAPL", data_factory=_PriceFactory({"AAPL": 150.0}))
@@ -398,13 +411,14 @@ def test_build_stock_template_falls_back_to_revenue_cagr_before_fcf_cagr(monkeyp
     )
 
     def _corporate_data(ticker, statement_type, period="annual"):
+        contract_period = "quarterly" if period == "quarter" else "annual"
         if statement_type == "cashflow" and period == "quarter":
-            return quarterly_cashflow
+            return _canon(quarterly_cashflow, statement="cashflow", period=contract_period, ticker=ticker)
         if statement_type == "cashflow" and period == "annual":
-            return annual_cashflow
+            return _canon(annual_cashflow, statement="cashflow", period="annual", ticker=ticker)
         if statement_type == "income" and period == "annual":
-            return annual_income
-        return pd.DataFrame()
+            return _canon(annual_income, statement="income", period="annual", ticker=ticker)
+        return FinancialStatementFrame.make_empty(statement_type, contract_period, ticker)
 
     monkeypatch.setattr(inputs_module, "get_corporate_data", _corporate_data)
 
@@ -430,7 +444,7 @@ def test_build_stock_template_supports_user_overrides(monkeypatch) -> None:
             "forwardEps": None,
         },
     )
-    monkeypatch.setattr(inputs_module, "get_corporate_data", lambda *args, **kwargs: pd.DataFrame())
+    monkeypatch.setattr(inputs_module, "get_corporate_data", lambda ticker, statement_type, period="annual": FinancialStatementFrame.make_empty(statement_type, "quarterly" if period == "quarter" else "annual", ticker))
 
     template = build_stock_template(
         "AAPL",
@@ -483,7 +497,7 @@ def test_build_stock_template_uses_computed_beta_when_provider_beta_is_missing(m
     monkeypatch.setattr(
         inputs_module,
         "get_corporate_data",
-        lambda ticker, statement_type, period="annual": quarterly_cashflow if period == "quarter" else annual_cashflow,
+        lambda ticker, statement_type, period="annual": _canon(quarterly_cashflow, statement=statement_type, period=("quarterly" if period == "quarter" else "annual"), ticker=ticker) if period == "quarter" else _canon(annual_cashflow, statement=statement_type, period="annual", ticker=ticker),
     )
     monkeypatch.setattr(
         inputs_module,
@@ -538,7 +552,7 @@ def test_build_stock_template_falls_back_to_fcf_cagr_and_marks_insufficient(monk
     monkeypatch.setattr(
         inputs_module,
         "get_corporate_data",
-        lambda ticker, statement_type, period="annual": annual_cashflow,
+        lambda ticker, statement_type, period="annual": _canon(annual_cashflow, statement=statement_type, period="annual", ticker=ticker),
     )
 
     template = build_stock_template("LOSS", data_factory=_PriceFactory({"LOSS": 25.0}))
@@ -564,9 +578,9 @@ def _patch_stock_env(monkeypatch, *, annual_cashflow=None, ticker_info=None) -> 
     monkeypatch.setattr(
         inputs_module,
         "get_corporate_data",
-        lambda ticker, statement_type, period="annual": annual_cashflow
+        lambda ticker, statement_type, period="annual": _canon(annual_cashflow, statement=statement_type, period="annual", ticker=ticker)
         if annual_cashflow is not None
-        else pd.DataFrame(),
+        else FinancialStatementFrame.make_empty(statement_type, "annual", ticker),
     )
 
 

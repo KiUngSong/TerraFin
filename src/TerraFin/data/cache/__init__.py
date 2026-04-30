@@ -1,5 +1,7 @@
 """Cache orchestration layer."""
 
+from TerraFin.data.contracts import HistoryChunk, TimeSeriesDataFrame
+
 from .manager import CacheManager, CacheSourceSpec
 from .policy import CachePolicy, get_default_cache_policies
 from .registry import (
@@ -8,6 +10,11 @@ from .registry import (
     reset_cache_manager,
     refresh_all_due,
 )
+from .serializers import ColumnarTimeSeriesSerializer, HistoryChunkSerializer
+
+
+CacheManager.register_serializer(TimeSeriesDataFrame, ColumnarTimeSeriesSerializer())
+CacheManager.register_serializer(HistoryChunk, HistoryChunkSerializer())
 
 
 __all__ = [
