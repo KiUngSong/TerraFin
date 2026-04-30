@@ -158,7 +158,7 @@ def _search_yahoo(q: str) -> list[dict[str, Any]]:
         # Drop derivatives / future / options noise
         if qtype in {"OPTION", "FUTURE", "MUTUALFUND"}:
             continue
-        if qtype == "EQUITY" and exch not in _PRIMARY_EXCHANGES:
+        if qtype in {"EQUITY", "ETF"} and exch not in _PRIMARY_EXCHANGES:
             continue
         out.append(
             {
