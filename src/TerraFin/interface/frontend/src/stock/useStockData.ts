@@ -20,6 +20,7 @@ interface CompanyInfo {
   changePercent: number | null;
   exchange: string | null;
   beta: number | null;
+  quoteType: string | null;
 }
 
 interface EarningsRecord {

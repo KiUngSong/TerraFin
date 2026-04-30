@@ -5,6 +5,7 @@ class WatchlistItem(BaseModel):
     symbol: str
     name: str
     move: str
+    tags: list[str] = []
 
 
 class WatchlistSnapshotResponse(BaseModel):

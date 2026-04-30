@@ -157,6 +157,9 @@ def build_multi_payload_from_items(source_items: list[dict]) -> dict:
         elif n_candlestick == 1 and n_line >= 1:
             if st == "candlestick":
                 item["priceScaleId"] = "right"
+            elif not primary_assigned:
+                item["priceScaleId"] = "left"
+                primary_assigned = True
             else:
                 item["priceScaleId"] = f"overlay-{overlay_idx}"
                 overlay_idx += 1

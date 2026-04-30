@@ -36,6 +36,15 @@ const WatchlistSnapshotCard: React.FC = () => {
                       {item.symbol}
                     </a>
                     <div className="tf-dashboard-watchlist__name">{item.name}</div>
+                    {item.tags && item.tags.length > 0 ? (
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 3, marginTop: 3 }}>
+                        {item.tags.map((tag) => (
+                          <span key={tag} style={{ fontSize: 10, fontWeight: 600, color: '#475569', background: '#e2e8f0', borderRadius: 999, padding: '1px 6px' }}>
+                            {tag}
+                          </span>
+                        ))}
+                      </div>
+                    ) : null}
                   </div>
                   <div
                     className={`tf-dashboard-watchlist__move ${

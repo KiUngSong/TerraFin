@@ -69,6 +69,7 @@ def build_company_info_payload(ticker: str) -> dict[str, Any]:
         "changePercent": change_pct,
         "exchange": info.get("exchange"),
         "beta": info.get("beta"),
+        "quoteType": info.get("quoteType"),
     }
 
 

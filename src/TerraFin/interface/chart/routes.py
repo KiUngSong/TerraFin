@@ -1,7 +1,7 @@
 import hashlib
 import uuid
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 import pandas as pd
 from fastapi import APIRouter, Body, Request
@@ -885,18 +885,53 @@ def create_chart_router(build_dir: Path) -> APIRouter:
 
     @router.get(f"{CHART_API_PATH}/chart-series/search")
     def api_search_series(request: Request, q: str = ""):
-        q = q.strip().lower()
-        if not q:
+        raw = q.strip()
+        if not raw:
             return {"suggestions": []}
         from TerraFin.data.providers.economic import indicator_registry
         from TerraFin.data.providers.market import INDEX_MAP, MARKET_INDICATOR_REGISTRY
+        from TerraFin.interface.ticker_search.aliases_kr import (
+            lookup_kr_alias,
+            prefix_match_kr_aliases,
+        )
+        from TerraFin.interface.ticker_search.routes import (
+            _is_korean,
+            _search_naver_kr,
+            _search_yahoo,
+        )
 
         all_names: list[str] = []
         all_names.extend(MARKET_INDICATOR_REGISTRY.keys())
         all_names.extend(INDEX_MAP.keys())
         all_names.extend(indicator_registry._indicators.keys())
-        matches = [n for n in all_names if q in n.lower()]
-        return {"suggestions": matches[:10]}
+
+        q_lower = raw.lower()
+        local = [n for n in all_names if q_lower in n.lower()]
+
+        external: list[dict[str, Any]] = []
+        if _is_korean(raw):
+            mapped = lookup_kr_alias(raw)
+            if mapped is not None:
+                external = _search_yahoo(mapped)
+            else:
+                matches = prefix_match_kr_aliases(raw)
+                external = [
+                    {"symbol": ticker, "name": display}
+                    for display, ticker in matches
+                ]
+                if not external:
+                    external = _search_naver_kr(raw)
+        else:
+            external = _search_yahoo(raw)
+
+        seen = set(local)
+        for hit in external:
+            sym = hit.get("symbol")
+            if sym and sym not in seen:
+                seen.add(sym)
+                local.append(sym)
+
+        return {"suggestions": local[:10]}
 
     @router.get(CHART_PATH)
     @router.get(f"{CHART_PATH}/")

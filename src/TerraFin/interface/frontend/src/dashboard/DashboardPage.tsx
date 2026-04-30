@@ -13,12 +13,7 @@ import WatchlistSnapshotCard from './widgets/WatchlistSnapshotCard';
 const DashboardPage: React.FC = () => {
   const [searchValue, setSearchValue] = useState('');
 
-  const headline = useMemo(() => {
-    if (searchValue.trim().length === 0) {
-      return 'Market dashboard overview';
-    }
-    return `Tracking: ${searchValue.trim().toUpperCase()}`;
-  }, [searchValue]);
+  const headline = 'Market dashboard overview';
 
   const widgets = useMemo<DashboardWidgetPlacement[]>(
     () => [

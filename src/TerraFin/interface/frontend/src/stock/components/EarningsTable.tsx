@@ -42,6 +42,7 @@ const EarningsTable: React.FC<{ earnings: EarningsRecord[] }> = ({ earnings }) =
         overflowY: 'auto',
         flex: 1,
         minHeight: 0,
+        maxHeight: 320,
         maxWidth: '100%',
         border: '1px solid #e2e8f0',
         borderRadius: 12,

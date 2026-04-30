@@ -63,6 +63,7 @@ from TerraFin.interface.market_insights.data_routes import create_market_insight
 from TerraFin.interface.market_insights.routes import create_market_insights_router
 from TerraFin.interface.stock.data_routes import create_stock_data_router
 from TerraFin.interface.stock.routes import create_stock_router
+from TerraFin.interface.ticker_search import create_ticker_search_router
 from TerraFin.interface.watchlist.routes import create_watchlist_router
 from TerraFin.interface.watchlist_service import get_watchlist_service
 
@@ -236,6 +237,7 @@ def create_app(initial_data: TimeSeriesDataFrame | None = None, base_path: str =
     app.include_router(create_stock_data_router(), prefix=prefix)
     app.include_router(create_stock_router(frontend_build.build_dir), prefix=prefix)
     app.include_router(create_alerting_router(), prefix=prefix)
+    app.include_router(create_ticker_search_router(), prefix=prefix)
 
     @app.get("/")
     def index():

@@ -7,6 +7,7 @@ import ReverseDcfPanel from '../dcf/ReverseDcfPanel';
 import ReverseDcfWorkbench from '../dcf/ReverseDcfWorkbench';
 import { DcfValuationPayload, ReverseDcfPayload } from '../dcf/types';
 import { useViewportTier } from '../shared/responsive';
+import TickerSearchInput from '../shared/TickerSearchInput';
 import { clearAgentViewContextSource, publishAgentViewContext } from '../agent/viewContext';
 import StockHeader from './components/StockHeader';
 import StockChart from './components/StockChart';
@@ -115,6 +116,9 @@ const StockPage: React.FC = () => {
   );
   const isNarrowLayout = isTabletOrBelow;
   const { data: companyInfo, loading: infoLoading, error: infoError } = useCompanyInfo(ticker);
+  // ETFs and indices don't have FCF/DCF/earnings/SEC filings — only equities do.
+  // Default to equity treatment until quoteType resolves so initial load isn't gated.
+  const isEquity = !companyInfo?.quoteType || companyInfo.quoteType === 'EQUITY';
   const { data: earnings, loading: earningsLoading } = useEarnings(ticker);
   const { data: fcfHistory, loading: fcfHistoryLoading, error: fcfHistoryError } = useFcfHistory(ticker, 10);
 
@@ -234,25 +238,30 @@ const StockPage: React.FC = () => {
               }}
               style={{ display: 'flex', gap: 8, justifyContent: 'center', flexWrap: 'wrap' }}
             >
-              <input
-                type="text"
-                placeholder="Enter ticker (e.g. AAPL, MSFT, TSLA)"
-                value={localTicker}
-                onChange={(e) => setLocalTicker(e.target.value)}
-                autoFocus
-                style={{
-                  width: 'min(100%, 320px)',
-                  maxWidth: 320,
-                  flex: '1 1 240px',
-                  height: 48,
-                  border: '2px solid #cbd5e1',
-                  borderRadius: 12,
-                  padding: '0 16px',
-                  fontSize: 16,
-                  color: '#0f172a',
-                  outline: 'none',
-                }}
-              />
+              <div style={{ width: 'min(100%, 320px)', maxWidth: 320, flex: '1 1 240px' }}>
+                <TickerSearchInput
+                  value={localTicker}
+                  onChange={setLocalTicker}
+                  onSelect={(hit) => { window.location.href = `/stock/${hit.symbol}`; }}
+                  onSubmit={() => {
+                    const t = localTicker.trim().toUpperCase();
+                    if (t) window.location.href = `/stock/${t}`;
+                  }}
+                  placeholder="Search ticker or company"
+                  ariaLabel="Search ticker or company"
+                  inputStyle={{
+                    width: '100%',
+                    boxSizing: 'border-box',
+                    height: 48,
+                    border: '2px solid #cbd5e1',
+                    borderRadius: 12,
+                    padding: '0 16px',
+                    fontSize: 16,
+                    color: '#0f172a',
+                    outline: 'none',
+                  }}
+                />
+              </div>
               <button
                 type="submit"
                 style={{
@@ -317,7 +326,7 @@ const StockPage: React.FC = () => {
         searchValue={searchValue}
         onSearchChange={setSearchValue}
         onSearchSubmit={handleSearchSubmit}
-        placeholder={`Search ticker, index, or indicator (currently viewing ${ticker})`}
+        placeholder={`Search ticker or company (currently viewing ${ticker})`}
       />
 
       <main style={mainStyle}>
@@ -352,6 +361,7 @@ const StockPage: React.FC = () => {
           </InsightCard>
         </section>
 
+        {isEquity ? (
         <section style={{ ...rowGridStyle(isNarrowLayout, 'minmax(0, 1.2fr) minmax(0, 1fr)'), height: isNarrowLayout ? undefined : 280 }}>
           <InsightCard
             title="Earnings History"
@@ -375,7 +385,9 @@ const StockPage: React.FC = () => {
             <FcfHistoryChart payload={fcfHistory} loading={fcfHistoryLoading} error={fcfHistoryError} />
           </InsightCard>
         </section>
+        ) : null}
 
+        {isEquity ? (
         <section style={rowGridStyle(isNarrowLayout, 'minmax(420px, 1.08fr) minmax(0, 1fr)')}>
           <InsightCard
             title="DCF Valuation"
@@ -415,7 +427,9 @@ const StockPage: React.FC = () => {
             />
           </InsightCard>
         </section>
+        ) : null}
 
+        {isEquity ? (
         <section style={reverseDcfToggleCardStyle}>
           <button
             type="button"
@@ -438,8 +452,9 @@ const StockPage: React.FC = () => {
             <span style={reverseDcfToggleChipStyle(isReverseDcfOpen)}>{isReverseDcfOpen ? 'Hide' : 'Show'}</span>
           </button>
         </section>
+        ) : null}
 
-        {isReverseDcfOpen ? (
+        {isEquity && isReverseDcfOpen ? (
           <section style={rowGridStyle(isNarrowLayout, 'minmax(420px, 1.08fr) minmax(0, 1fr)')}>
             <InsightCard
               title="Reverse DCF"
@@ -474,7 +489,7 @@ const StockPage: React.FC = () => {
           </section>
         ) : null}
 
-        {!hideSecFilings ? (
+        {isEquity && !hideSecFilings ? (
           <section>
             <InsightCard
               title="SEC Filings"

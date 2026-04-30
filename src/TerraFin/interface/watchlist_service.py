@@ -9,7 +9,7 @@ try:
 except ImportError:  # pragma: no cover - optional dependency at runtime
     MongoClient = None
 
-from TerraFin.data.providers.market.yfinance import get_yf_data
+from TerraFin.data import get_data_factory
 from TerraFin.data.providers.private_access.fallbacks import get_watchlist_fallback
 
 
@@ -33,14 +33,19 @@ class WatchlistNotFoundError(WatchlistError):
     """Raised when a symbol is missing from the watchlist."""
 
 
-@dataclass(frozen=True)
+@dataclass
 class WatchlistItemRecord:
     symbol: str
     name: str
     move: str
+    tags: list[str] = None  # type: ignore[assignment]
 
-    def to_dict(self) -> dict[str, str]:
-        return {"symbol": self.symbol, "name": self.name, "move": self.move}
+    def __post_init__(self) -> None:
+        if self.tags is None:
+            self.tags = []
+
+    def to_dict(self) -> dict:
+        return {"symbol": self.symbol, "name": self.name, "move": self.move, "tags": list(self.tags)}
 
 
 WatchlistMongoConfig = WatchlistConfig
@@ -48,6 +53,18 @@ WatchlistMongoConfig = WatchlistConfig
 
 def _load_watchlist_mongo_config() -> WatchlistMongoConfig:
     return load_terrafin_config().watchlist
+
+
+def _normalize_tags(tags: list) -> list[str]:
+    seen: set[str] = set()
+    result: list[str] = []
+    for t in tags:
+        text = str(t or "").strip()
+        key = text.lower()
+        if key and key not in seen:
+            seen.add(key)
+            result.append(text)
+    return result
 
 
 def _normalize_symbol(symbol: str) -> str:
@@ -73,7 +90,7 @@ def _resolve_company_name(symbol: str) -> str:
 
 
 def _format_move_from_history(symbol: str) -> str:
-    data = get_yf_data(symbol)
+    data = get_data_factory().get_market_data(symbol)
     closes = data["close"].dropna().tolist() if "close" in data.columns else []
     if len(closes) < 2:
         return "--"
@@ -90,13 +107,17 @@ class WatchlistService:
         self.config = config
         self._lock = Lock()
         self._client = None
-        self._items: list[dict[str, str]] | None = None
+        self._items: list[dict] | None = None
         self._backend_unavailable = False
 
-    def get_watchlist_snapshot(self) -> list[dict[str, str]]:
+    def get_watchlist_snapshot(self, group: str | None = None) -> list[dict]:
         if self._items is None:
             self.refresh_snapshot()
-        return [dict(item) for item in (self._items or [])]
+        items = [dict(item) for item in (self._items or [])]
+        if group:
+            tag = group.strip().lower()
+            items = [item for item in items if tag in [t.lower() for t in item.get("tags", [])]]
+        return items
 
     def is_backend_configured(self) -> bool:
         return self._is_backend_available()
@@ -109,13 +130,13 @@ class WatchlistService:
         with self._lock:
             self._items = None
 
-    def add_symbol(self, symbol: str) -> list[dict[str, str]]:
+    def add_symbol(self, symbol: str, tags: list[str] | None = None) -> list[dict]:
         normalized = _normalize_symbol(symbol)
         if not normalized:
             raise WatchlistValidationError("Ticker symbol is required.")
         self._require_backend_configured()
 
-        item = self._build_item(normalized)
+        item = self._build_item(normalized, tags=tags)
         with self._lock:
             items = self._load_items_locked()
             if any(existing["symbol"] == normalized for existing in items):
@@ -125,24 +146,29 @@ class WatchlistService:
             self._items = items
             return [dict(entry) for entry in items]
 
-    def replace_symbols(self, symbols: list[str]) -> list[dict[str, str]]:
+    def replace_symbols(self, symbols: list[str] | list[dict]) -> list[dict]:
         self._require_backend_configured()
-        normalized_symbols: list[str] = []
         seen: set[str] = set()
-        for symbol in symbols:
-            normalized = _normalize_symbol(symbol)
-            if not normalized or normalized in seen:
+        normalized_entries: list[tuple[str, list[str]]] = []
+        for entry in symbols:
+            if isinstance(entry, dict):
+                symbol = _normalize_symbol(str(entry.get("symbol") or ""))
+                tags = _normalize_tags(entry.get("tags") or [])
+            else:
+                symbol = _normalize_symbol(str(entry))
+                tags = []
+            if not symbol or symbol in seen:
                 continue
-            seen.add(normalized)
-            normalized_symbols.append(normalized)
+            seen.add(symbol)
+            normalized_entries.append((symbol, tags))
 
-        items = [self._build_item(symbol) for symbol in normalized_symbols]
+        items = [self._build_item(symbol, tags=tags) for symbol, tags in normalized_entries]
         with self._lock:
             self._write_items_locked(items)
             self._items = items
             return [dict(entry) for entry in items]
 
-    def remove_symbol(self, symbol: str) -> list[dict[str, str]]:
+    def remove_symbol(self, symbol: str) -> list[dict]:
         normalized = _normalize_symbol(symbol)
         if not normalized:
             raise WatchlistValidationError("Ticker symbol is required.")
@@ -157,7 +183,96 @@ class WatchlistService:
             self._items = filtered
             return [dict(entry) for entry in filtered]
 
-    def _build_item(self, symbol: str) -> dict[str, str]:
+    def set_tags(self, symbol: str, tags: list[str]) -> list[dict]:
+        normalized = _normalize_symbol(symbol)
+        if not normalized:
+            raise WatchlistValidationError("Ticker symbol is required.")
+        self._require_backend_configured()
+
+        normalized_tags = _normalize_tags(tags)
+        with self._lock:
+            items = self._load_items_locked()
+            found = False
+            for item in items:
+                if item["symbol"] == normalized:
+                    item["tags"] = normalized_tags
+                    found = True
+                    break
+            if not found:
+                raise WatchlistNotFoundError(f"{normalized} is not in the watchlist.")
+            self._write_items_locked(items)
+            self._items = items
+            return [dict(entry) for entry in items]
+
+    def add_tags(self, symbol: str, tags: list[str]) -> list[dict]:
+        normalized = _normalize_symbol(symbol)
+        if not normalized:
+            raise WatchlistValidationError("Ticker symbol is required.")
+        self._require_backend_configured()
+
+        with self._lock:
+            items = self._load_items_locked()
+            found = False
+            for item in items:
+                if item["symbol"] == normalized:
+                    existing = item.get("tags") or []
+                    item["tags"] = _normalize_tags(existing + list(tags))
+                    found = True
+                    break
+            if not found:
+                raise WatchlistNotFoundError(f"{normalized} is not in the watchlist.")
+            self._write_items_locked(items)
+            self._items = items
+            return [dict(entry) for entry in items]
+
+    def remove_tags(self, symbol: str, tags: list[str]) -> list[dict]:
+        normalized = _normalize_symbol(symbol)
+        if not normalized:
+            raise WatchlistValidationError("Ticker symbol is required.")
+        self._require_backend_configured()
+
+        drop = {t.strip().lower() for t in tags if t}
+        with self._lock:
+            items = self._load_items_locked()
+            found = False
+            for item in items:
+                if item["symbol"] == normalized:
+                    item["tags"] = [t for t in (item.get("tags") or []) if t.lower() not in drop]
+                    found = True
+                    break
+            if not found:
+                raise WatchlistNotFoundError(f"{normalized} is not in the watchlist.")
+            self._write_items_locked(items)
+            self._items = items
+            return [dict(entry) for entry in items]
+
+    def rename_group(self, old: str, new: str) -> list[dict]:
+        old_key = old.strip().lower()
+        new_tag = new.strip()
+        if not old_key or not new_tag:
+            raise WatchlistValidationError("Group name is required.")
+        self._require_backend_configured()
+
+        with self._lock:
+            items = self._load_items_locked()
+            for item in items:
+                existing = item.get("tags") or []
+                if old_key in [t.lower() for t in existing]:
+                    updated = [new_tag if t.lower() == old_key else t for t in existing]
+                    item["tags"] = _normalize_tags(updated)
+            self._write_items_locked(items)
+            self._items = items
+            return [dict(entry) for entry in items]
+
+    def list_groups(self) -> list[dict]:
+        items = self.get_watchlist_snapshot()
+        counts: dict[str, int] = {}
+        for item in items:
+            for tag in item.get("tags") or []:
+                counts[tag] = counts.get(tag, 0) + 1
+        return [{"tag": tag, "count": count} for tag, count in sorted(counts.items())]
+
+    def _build_item(self, symbol: str, tags: list[str] | None = None) -> dict:
         try:
             move = _format_move_from_history(symbol)
         except Exception as exc:
@@ -168,10 +283,11 @@ class WatchlistService:
             symbol=symbol,
             name=_normalize_name(name, symbol=symbol),
             move=_normalize_move(move),
+            tags=_normalize_tags(tags) if tags else [],
         )
         return record.to_dict()
 
-    def _load_items_locked(self) -> list[dict[str, str]]:
+    def _load_items_locked(self) -> list[dict]:
         document = self._read_document_locked()
         if document is None:
             if self.is_backend_configured():
@@ -212,7 +328,7 @@ class WatchlistService:
             self._backend_unavailable = True
             return None
 
-    def _write_items_locked(self, items: list[dict[str, str]]) -> None:
+    def _write_items_locked(self, items: list[dict]) -> None:
         collection = self._get_collection_locked()
         if collection is None:
             raise WatchlistConfigurationError("MongoDB watchlist backend is not configured.")
@@ -256,8 +372,8 @@ class WatchlistService:
             raise WatchlistConfigurationError("pymongo is required for TerraFin watchlist CRUD.")
 
     @staticmethod
-    def _normalize_items(raw_items: list[object]) -> list[dict[str, str]] | None:
-        normalized: list[dict[str, str]] = []
+    def _normalize_items(raw_items: list[object]) -> list[dict] | None:
+        normalized: list[dict] = []
         seen: set[str] = set()
         for raw_item in raw_items:
             if not isinstance(raw_item, dict):
@@ -271,6 +387,7 @@ class WatchlistService:
                     symbol=symbol,
                     name=_normalize_name(raw_item.get("name"), symbol=symbol),
                     move=_normalize_move(raw_item.get("move")),
+                    tags=_normalize_tags(raw_item.get("tags") or []),
                 ).to_dict()
             )
         return normalized
@@ -288,7 +405,7 @@ class WatchlistService:
         return symbols
 
     @staticmethod
-    def _fallback_items() -> list[dict[str, str]]:
+    def _fallback_items() -> list[dict]:
         return [item.model_dump() for item in get_watchlist_fallback().items]
 
 

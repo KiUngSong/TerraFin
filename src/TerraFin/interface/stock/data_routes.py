@@ -53,6 +53,7 @@ class CompanyInfoResponse(BaseModel):
     changePercent: float | None = None
     exchange: str | None = None
     beta: float | None = None
+    quoteType: str | None = None
 
 
 class EarningsRecord(BaseModel):

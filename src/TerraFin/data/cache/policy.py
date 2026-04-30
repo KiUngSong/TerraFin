@@ -23,7 +23,7 @@ CACHE_TTL_REGISTRY: dict[str, int] = {
     # 13F guru holdings
     "portfolio": 7 * 86_400,
     # Private-source panels
-    "private.market_breadth": 86_400,
+    "private.market_breadth": 21_600,
     "private.trailing_forward_pe": 86_400,
     "private.cape": 7 * 86_400,
     "private.calendar": 7 * 86_400,

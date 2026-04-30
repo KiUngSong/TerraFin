@@ -1,4 +1,5 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React from 'react';
+import TickerSearchInput from '../../shared/TickerSearchInput';
 
 interface DashboardHeaderProps {
   searchValue: string;
@@ -28,10 +29,6 @@ const DashboardHeader: React.FC<DashboardHeaderProps> = ({
   placeholder = 'Search ticker, index, or indicator',
   rightContent = null,
 }) => {
-  const [suggestions, setSuggestions] = useState<string[]>([]);
-  const [showSuggestions, setShowSuggestions] = useState(false);
-  const containerRef = useRef<HTMLDivElement>(null);
-  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const path = window.location.pathname;
   const links = [
     { href: '/dashboard', label: 'Market Overview', isActive: path.startsWith('/dashboard') },
@@ -40,57 +37,6 @@ const DashboardHeader: React.FC<DashboardHeaderProps> = ({
     { href: '/stock/', label: 'Stock Analysis', isActive: path.startsWith('/stock') },
     { href: '/watchlist', label: 'Watchlist', isActive: path.startsWith('/watchlist') },
   ];
-
-  useEffect(() => {
-    if (!showSuggestions) return;
-    const handleClickOutside = (event: MouseEvent) => {
-      if (containerRef.current && !containerRef.current.contains(event.target as Node)) {
-        setShowSuggestions(false);
-      }
-    };
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, [showSuggestions]);
-
-  useEffect(() => {
-    if (debounceRef.current) {
-      clearTimeout(debounceRef.current);
-      debounceRef.current = null;
-    }
-
-    const query = searchValue.trim();
-    if (!query) {
-      setSuggestions([]);
-      setShowSuggestions(false);
-      return;
-    }
-
-    debounceRef.current = setTimeout(() => {
-      fetch(`/chart/api/chart-series/search?q=${encodeURIComponent(query)}`)
-        .then((response) => (response.ok ? response.json() : Promise.reject(new Error(`${response.status}`))))
-        .then((payload: { suggestions?: string[] }) => {
-          const nextSuggestions = payload.suggestions || [];
-          setSuggestions(nextSuggestions);
-          setShowSuggestions(nextSuggestions.length > 0);
-        })
-        .catch(() => {
-          setSuggestions([]);
-          setShowSuggestions(false);
-        });
-    }, 200);
-
-    return () => {
-      if (debounceRef.current) {
-        clearTimeout(debounceRef.current);
-        debounceRef.current = null;
-      }
-    };
-  }, [searchValue]);
-
-  const submitSearch = (value: string) => {
-    setShowSuggestions(false);
-    onSearchSubmit(value);
-  };
 
   return (
     <header className="tf-dashboard-header">
@@ -139,25 +85,15 @@ const DashboardHeader: React.FC<DashboardHeaderProps> = ({
           </nav>
         </div>
 
-        <div ref={containerRef} className="tf-dashboard-header__search">
-          <input
-            type="search"
-            placeholder={placeholder}
-            aria-label={placeholder}
+        <div className="tf-dashboard-header__search">
+          <TickerSearchInput
             value={searchValue}
-            onChange={(event) => onSearchChange(event.target.value)}
-            onFocus={() => {
-              if (suggestions.length > 0) {
-                setShowSuggestions(true);
-              }
-            }}
-            onKeyDown={(event) => {
-              if (event.key === 'Enter') {
-                event.preventDefault();
-                submitSearch(searchValue);
-              }
-            }}
-            style={{
+            onChange={onSearchChange}
+            onSelect={(hit) => onSearchSubmit(hit.symbol)}
+            onSubmit={() => onSearchSubmit(searchValue)}
+            placeholder={placeholder}
+            ariaLabel={placeholder}
+            inputStyle={{
               width: '100%',
               height: 40,
               border: '1px solid #cbd5e1',
@@ -170,53 +106,6 @@ const DashboardHeader: React.FC<DashboardHeaderProps> = ({
               boxSizing: 'border-box',
             }}
           />
-          {showSuggestions && suggestions.length > 0 ? (
-            <div
-              style={{
-                position: 'absolute',
-                top: 'calc(100% + 6px)',
-                left: 0,
-                right: 0,
-                background: '#ffffff',
-                border: '1px solid #e2e8f0',
-                borderRadius: 12,
-                boxShadow: '0 12px 24px rgba(15, 23, 42, 0.12)',
-                overflow: 'hidden',
-                zIndex: 20,
-              }}
-            >
-              {suggestions.map((suggestion) => (
-                <button
-                  key={suggestion}
-                  type="button"
-                  onMouseDown={(event) => event.preventDefault()}
-                  onClick={() => {
-                    onSearchChange(suggestion);
-                    submitSearch(suggestion);
-                  }}
-                  style={{
-                    display: 'block',
-                    width: '100%',
-                    border: 'none',
-                    background: 'transparent',
-                    textAlign: 'left',
-                    padding: '10px 14px',
-                    fontSize: 13,
-                    color: '#0f172a',
-                    cursor: 'pointer',
-                  }}
-                  onMouseEnter={(event) => {
-                    event.currentTarget.style.background = '#f8fafc';
-                  }}
-                  onMouseLeave={(event) => {
-                    event.currentTarget.style.background = 'transparent';
-                  }}
-                >
-                  {suggestion}
-                </button>
-              ))}
-            </div>
-          ) : null}
         </div>
         <div className="tf-dashboard-header__external">
           <a
