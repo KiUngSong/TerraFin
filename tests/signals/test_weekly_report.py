@@ -10,6 +10,9 @@ from __future__ import annotations
 from datetime import date
 from unittest.mock import patch
 
+from datetime import datetime
+from zoneinfo import ZoneInfo
+
 from TerraFin.signals.reports.weekly import (
     TickerReport,
     _M7_FALLBACK,
@@ -17,6 +20,7 @@ from TerraFin.signals.reports.weekly import (
     _attribute,
     _compute_wow,
     _detect_events,
+    _last_completed_friday,
     _matches_relevance,
     _relevance_terms,
     _render,
@@ -253,3 +257,41 @@ def test_render_anomaly_flag_in_biggest_mover_line():
     assert "Biggest mover" in md
     # Anomaly flag must show in the footer summary (rendering uses ⚠)
     assert "⚠" in md
+
+
+# ---------------------------------------------------------------------------
+# _last_completed_friday — anchor must roll back when week not yet over
+# ---------------------------------------------------------------------------
+
+
+_TZ = ZoneInfo("America/New_York")
+
+
+def test_last_completed_friday_on_thursday_returns_prior_friday():
+    # Thu 2026-04-30 → prior Fri 2026-04-24
+    now = datetime(2026, 4, 30, 9, 0, tzinfo=_TZ)
+    assert _last_completed_friday(now) == date(2026, 4, 24)
+
+
+def test_last_completed_friday_on_friday_before_close_returns_prior_friday():
+    # Fri 2026-05-01 09:00 ET → prior Fri 2026-04-24 (close not yet hit)
+    now = datetime(2026, 5, 1, 9, 0, tzinfo=_TZ)
+    assert _last_completed_friday(now) == date(2026, 4, 24)
+
+
+def test_last_completed_friday_on_friday_after_close_returns_today():
+    # Fri 2026-05-01 17:00 ET → today (post-close)
+    now = datetime(2026, 5, 1, 17, 0, tzinfo=_TZ)
+    assert _last_completed_friday(now) == date(2026, 5, 1)
+
+
+def test_last_completed_friday_on_monday_returns_prior_friday():
+    # Mon 2026-05-04 → prior Fri 2026-05-01
+    now = datetime(2026, 5, 4, 9, 0, tzinfo=_TZ)
+    assert _last_completed_friday(now) == date(2026, 5, 1)
+
+
+def test_last_completed_friday_on_saturday_returns_yesterday():
+    # Sat 2026-05-02 → Fri 2026-05-01
+    now = datetime(2026, 5, 2, 9, 0, tzinfo=_TZ)
+    assert _last_completed_friday(now) == date(2026, 5, 1)

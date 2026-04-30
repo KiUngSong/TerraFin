@@ -89,6 +89,34 @@ def _today() -> date:
     return datetime.now(timezone.utc).date()
 
 
+def _last_completed_friday(now: datetime | None = None) -> date:
+    """Return the most recently *completed* Friday close (US/Eastern).
+
+    A weekly report anchored on a date `D` summarizes the trading week ending
+    at `D`'s close. We want the most recent Friday whose 16:30 ET close has
+    already happened. On any day Sat-Thu we take the prior Friday. On Friday
+    itself we take today only if it's past the 16:30 close, else last Friday.
+    """
+    try:
+        from zoneinfo import ZoneInfo
+        tz = ZoneInfo("America/New_York")
+    except Exception:
+        tz = timezone.utc
+    if now is None:
+        now = datetime.now(tz)
+    elif now.tzinfo is None:
+        now = now.replace(tzinfo=tz)
+    today = now.date()
+    # weekday(): Mon=0 ... Fri=4 ... Sun=6
+    days_since_fri = (today.weekday() - 4) % 7
+    candidate = today - timedelta(days=days_since_fri)
+    if candidate == today:
+        close_dt = now.replace(hour=16, minute=30, second=0, microsecond=0)
+        if now < close_dt:
+            candidate = candidate - timedelta(days=7)
+    return candidate
+
+
 def _relevance_terms(ticker: str, name: str) -> set[str]:
     out: set[str] = set()
     if ticker.upper() not in _ENGLISH_WORD_TICKERS:
@@ -463,7 +491,7 @@ def build_weekly_report(
     TerraFin agent runtime is configured, an additional enrichment section is
     appended (macro/index context with tool-call provenance).
     """
-    anchor = as_of or _today()
+    anchor = as_of or _last_completed_friday()
     items, is_sample = _resolve_universe()
     tickers = [_build_ticker(it, anchor) for it in items]
     md = _render(tickers, anchor, is_sample=is_sample)

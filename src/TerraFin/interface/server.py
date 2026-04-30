@@ -155,14 +155,20 @@ async def _weekly_report_loop() -> None:
 
 
 def _ensure_recent_report() -> None:
-    """Generate the report for the most recent Friday if not already on disk."""
-    from TerraFin.signals.reports import list_reports
-    from TerraFin.signals.reports.weekly import build_weekly_report
+    """Generate a report for the most recently completed Friday close.
 
-    existing = list_reports(limit=1)
-    if existing:
+    Skips if a report already exists for that exact anchor date — avoids
+    re-running the (sometimes slow) enrichment path on every restart.
+    Mid-week startups do not produce a stale report dated today.
+    """
+    from TerraFin.signals.reports import list_reports
+    from TerraFin.signals.reports.weekly import _last_completed_friday, build_weekly_report
+
+    target = _last_completed_friday()
+    existing = list_reports(limit=8)
+    if any(r.as_of == target.isoformat() for r in existing):
         return
-    build_weekly_report()
+    build_weekly_report(as_of=target)
 
 
 async def _alert_scanner_loop(interval: int, group: str | None) -> None:
