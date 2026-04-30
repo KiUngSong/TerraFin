@@ -590,9 +590,17 @@ npm run build
 Do not commit `node_modules/`. The built output is committed so the server can
 run in environments without a frontend toolchain.
 
-## Alerting
+## Signals
 
-Source: `src/TerraFin/interface/alerting/`, `src/TerraFin/alerting/`
+Source: `src/TerraFin/signals/` (umbrella for alerting + reports + channels), `src/TerraFin/interface/signals/` (HTTP routes for inbound webhook).
+
+The `signals/` module groups two related output paths:
+
+- **`signals/alerting/`** — real-time threshold alerts (RSI, breakout, etc.) pushed when an external monitoring service POSTs to TerraFin.
+- **`signals/reports/`** — scheduled narrative briefings (currently weekly) generated locally and surfaced on the dashboard.
+- **`signals/channels/`** — shared output sinks (Telegram, webhook, stdout) used by both.
+
+### Alerting
 
 TerraFin supports a push-model alert pipeline: an external real-time service monitors tickers and POSTs signals back to TerraFin, which forwards them to Telegram.
 
@@ -600,7 +608,7 @@ TerraFin supports a push-model alert pipeline: an external real-time service mon
 
 ```
 External alert API ──register tickers──▶ TerraFin (outbound)
-External alert API ──POST /alerting/api/signal──▶ TerraFin (inbound)
+External alert API ──POST /signals/api/signal──▶ TerraFin (inbound)
 TerraFin ──sendMessage──▶ Telegram Bot API ──▶ User
 ```
 
@@ -610,13 +618,14 @@ TerraFin never handles real-time tick data. Signal computation stays in the exte
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `POST` | `/alerting/api/signal` | Receive signal from external API → forward to Telegram |
+| `POST` | `/signals/api/signal` | Receive signal from external API → forward to Telegram |
+| `POST` | `/alerting/api/signal` | Legacy alias for the above (kept for existing senders) |
 
 Request body (`InboundSignal`):
 ```json
 {
   "ticker": "AAPL",
-  "signal": "20일 이평선 터치",
+  "signal": "20-day MA touch",
   "severity": "high",
   "signal_id": "uuid-from-sender",
   "fired_at": "2026-04-30T09:00:00"
@@ -625,6 +634,8 @@ Request body (`InboundSignal`):
 
 - `signal_id` is optional but required for deduplication (sender-provided UUID, not TerraFin-generated)
 - `X-Signature` header: HMAC-SHA256 of request body, keyed with `TERRAFIN_ALERT_WEBHOOK_SECRET`
+- If `TERRAFIN_ALERT_WEBHOOK_SECRET` is unset, the endpoint returns `503` and refuses all signals — the secret is required, not optional
+- Per-IP rate limit: 60 requests / 60 seconds; excess returns `429`
 
 ### Env vars
 
@@ -632,7 +643,7 @@ Request body (`InboundSignal`):
 |----------|---------|----------|
 | `TERRAFIN_ALERT_PROVIDER_URL` | External alert API base URL | To enable outbound registration |
 | `TERRAFIN_ALERT_PROVIDER_KEY` | Bearer token for external API | If API requires auth |
-| `TERRAFIN_ALERT_WEBHOOK_SECRET` | HMAC secret for inbound verification | Strongly recommended |
+| `TERRAFIN_ALERT_WEBHOOK_SECRET` | HMAC secret for inbound verification | Required (endpoint returns 503 if unset) |
 | `TERRAFIN_ALERT_CHANNEL` | `telegram` to forward via Telegram Bot | To enable Telegram |
 
 ### Telegram setup
@@ -641,18 +652,18 @@ Request body (`InboundSignal`):
 
 2. Save token:
 ```bash
-terrafin-alerting telegram setup 123456789:AAHfiq...
+terrafin-signals telegram setup 123456789:AAHfiq...
 ```
 
 3. Pair — run the command, then DM your bot on Telegram:
 ```bash
-terrafin-alerting telegram pair
+terrafin-signals telegram pair
 ```
 Chat ID is captured automatically and saved to `~/.terrafin/telegram.json`.
 
 4. Test:
 ```bash
-terrafin-alerting telegram test
+terrafin-signals telegram test
 ```
 
 5. Add to `.env`:
@@ -661,6 +672,45 @@ TERRAFIN_ALERT_CHANNEL=telegram
 TERRAFIN_ALERT_PROVIDER_URL=https://your-alert-api.com
 TERRAFIN_ALERT_WEBHOOK_SECRET=your-hmac-secret
 ```
+
+### Reports
+
+Source: `src/TerraFin/signals/reports/`
+
+The dashboard auto-generates a weekly markdown report every Friday at 16:30 ET (`TERRAFIN_CACHE_TIMEZONE`). Reports persist under `~/.terrafin/reports/weekly/<as_of>.{md,json}` indefinitely — disk cost is negligible and trend stacking is the value.
+
+#### Pipeline
+
+1. Universe: `watchlist_service.get_watchlist_snapshot()`. Falls back to Magnificent 7 (AAPL/MSFT/NVDA/GOOGL/AMZN/META/TSLA) when the watchlist is empty / MongoDB unavailable. M7 reports are explicitly labeled "Sample" in the title and footer CTA.
+2. Per-ticker: yfinance close + volume → 5-trading-day WoW; intra-week ≥4% moves; volume ratio vs 20-day avg; ticker-relevant Google News headlines (date-ranged via `after:`/`before:`); upcoming earnings (yfinance).
+3. Action wording driven by `(anomaly_flag, has_headline, vol_ratio)` decision tree.
+4. Optional **agent enrichment** (when TerraFin agent runtime is configured): index context paragraph (vs ^GSPC/^SOX/^RUT), SEC 8-K drill on unattributed events, macro calendar context. Each section independently optional; failures don't block the deterministic core.
+
+#### Dashboard surface
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/dashboard/api/reports/weekly` | List most recent reports (max 12) |
+| `GET` | `/dashboard/api/reports/weekly/{as_of}` | Fetch markdown for a specific report |
+| `POST` | `/dashboard/api/reports/weekly/run` | Manually trigger generation (CLI/cron) |
+
+The dashboard top bar shows a 🔔 bell that opens a panel rendering report markdown. A red dot on the bell indicates an unread report (compared against `localStorage["tf-weekly-report-seen"]`).
+
+#### CLI
+
+```bash
+# Generate the current week's report (writes to disk + sends to channel if TERRAFIN_ALERT_CHANNEL set)
+terrafin-signals weekly
+
+# Backtest: anchor to a historical date — useful for verifying pipeline determinism
+terrafin-signals weekly --as-of 2026-03-13 --out /tmp/backtest.md
+```
+
+#### Telegram delivery
+
+When `TERRAFIN_ALERT_CHANNEL=telegram`, the Friday scheduler also pushes the report. Markdown is converted to Telegram-flavored HTML (`<b>`, `<i>`, bullets, code) and chunked under the 4096-char per-message limit.
+
+### Outbound alert provider
 
 Server startup registers current watchlist with the external API and starts a 60-second heartbeat to re-register on provider restart.
 

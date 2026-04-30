@@ -9,6 +9,7 @@ import subprocess
 import sys
 import time
 from contextlib import asynccontextmanager
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -46,9 +47,9 @@ from TerraFin.data.cache.registry import get_cache_manager
 from TerraFin.data.contracts.dataframes import TimeSeriesDataFrame
 from TerraFin.env import load_entrypoint_dotenv
 from TerraFin.interface.agent.data_routes import create_agent_data_router
-from TerraFin.interface.alerting.heartbeat import registration_heartbeat
-from TerraFin.interface.alerting.http_provider import get_alert_provider_from_env
-from TerraFin.interface.alerting.routes import create_alerting_router
+from TerraFin.interface.signals.heartbeat import registration_heartbeat
+from TerraFin.interface.signals.http_provider import get_alert_provider_from_env
+from TerraFin.interface.signals.routes import create_alerting_router
 from TerraFin.interface.calendar.routes import create_calendar_router
 from TerraFin.interface.calendar.state import reset_calendar_state
 from TerraFin.interface.chart.formatters import format_dataframe
@@ -98,13 +99,79 @@ def _maybe_start_alert_scanner() -> "asyncio.Task | None":
     return asyncio.create_task(_alert_scanner_loop(interval, group))
 
 
+def _start_weekly_report() -> "asyncio.Task | None":
+    """Always run the weekly report scheduler — generation is universal,
+    Telegram dispatch is optional. Disable with TERRAFIN_WEEKLY_REPORT_ENABLED=0."""
+    if os.environ.get("TERRAFIN_WEEKLY_REPORT_ENABLED", "1") in ("0", "false", "False"):
+        return None
+    _log.info("Weekly report scheduler enabled (Fri 16:30 ET)")
+    return asyncio.create_task(_weekly_report_loop())
+
+
+async def _weekly_report_loop() -> None:
+    """Generate on startup if no recent report; then on every Friday 16:30 ET."""
+    from zoneinfo import ZoneInfo
+    tz_name = os.environ.get("TERRAFIN_CACHE_TIMEZONE", "America/New_York")
+    tz = ZoneInfo(tz_name)
+    loop = asyncio.get_running_loop()
+
+    # Onboarding: ensure a report exists for the latest Friday on startup so
+    # the dashboard always has something to show, even before the next tick.
+    try:
+        await loop.run_in_executor(None, _ensure_recent_report)
+    except Exception:
+        _log.exception("Initial weekly report generation failed")
+
+    while True:
+        now = datetime.now(tz)
+        days_ahead = (4 - now.weekday()) % 7
+        target = now.replace(hour=16, minute=30, second=0, microsecond=0)
+        if days_ahead == 0 and now >= target:
+            days_ahead = 7
+        target = target + timedelta(days=days_ahead)
+        sleep_seconds = (target - now).total_seconds()
+        _log.info("Weekly report: next run at %s (%.0fs)", target.isoformat(), sleep_seconds)
+        try:
+            await asyncio.sleep(sleep_seconds)
+        except asyncio.CancelledError:
+            return
+        try:
+            from TerraFin.signals.reports.weekly import build_weekly_report
+            md = await loop.run_in_executor(None, build_weekly_report)
+            _log.info("Weekly report generated")
+            # Optional push to channel if configured
+            channel_type = os.environ.get("TERRAFIN_ALERT_CHANNEL", "stdout")
+            if channel_type not in ("stdout", ""):
+                try:
+                    from TerraFin.signals.alerting.notify import get_channel_from_env
+                    channel = get_channel_from_env()
+                    title = f"TerraFin Weekly — {datetime.now(tz).date().isoformat()}"
+                    await loop.run_in_executor(None, channel.send, title, md, {"markdown": md})
+                    _log.info("Weekly report pushed to channel %s", channel_type)
+                except Exception:
+                    _log.exception("Weekly report channel push failed")
+        except Exception:
+            _log.exception("Weekly report generation failed")
+
+
+def _ensure_recent_report() -> None:
+    """Generate the report for the most recent Friday if not already on disk."""
+    from TerraFin.signals.reports import list_reports
+    from TerraFin.signals.reports.weekly import build_weekly_report
+
+    existing = list_reports(limit=1)
+    if existing:
+        return
+    build_weekly_report()
+
+
 async def _alert_scanner_loop(interval: int, group: str | None) -> None:
     loop = asyncio.get_running_loop()
     while True:
         try:
-            from TerraFin.alerting.dedup import deduplicate
-            from TerraFin.alerting.notify import get_channel_from_env
-            from TerraFin.alerting.scanner import scan
+            from TerraFin.signals.alerting.dedup import deduplicate
+            from TerraFin.signals.alerting.notify import get_channel_from_env
+            from TerraFin.signals.alerting.scanner import scan
 
             signals = await loop.run_in_executor(None, scan, group)
             fired = deduplicate(signals)
@@ -162,6 +229,8 @@ def create_app(initial_data: TimeSeriesDataFrame | None = None, base_path: str =
         cache_manager.start()
         background_tasks: list[asyncio.Task] = []
         if t := _maybe_start_alert_scanner():
+            background_tasks.append(t)
+        if t := _start_weekly_report():
             background_tasks.append(t)
         alert_provider = get_alert_provider_from_env()
         if alert_provider is not None:

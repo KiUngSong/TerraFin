@@ -196,6 +196,28 @@ def create_dashboard_data_router() -> APIRouter:
         except WatchlistValidationError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
+    @router.get(f"{DASHBOARD_API_PREFIX}/reports/weekly")
+    def api_list_weekly_reports():
+        from TerraFin.signals.reports import list_reports
+        reports = list_reports(limit=12)
+        return {"reports": [r.summary() for r in reports]}
+
+    @router.get(f"{DASHBOARD_API_PREFIX}/reports/weekly/{{as_of}}")
+    def api_get_weekly_report(as_of: str):
+        from TerraFin.signals.reports import load_report
+        rec = load_report(as_of)
+        if rec is None:
+            raise HTTPException(status_code=404, detail=f"No report for {as_of}")
+        return {**rec.summary(), "markdown": rec.markdown}
+
+    @router.post(f"{DASHBOARD_API_PREFIX}/reports/weekly/run")
+    def api_run_weekly_report():
+        from TerraFin.signals.reports import list_reports
+        from TerraFin.signals.reports.weekly import build_weekly_report
+        build_weekly_report()
+        latest = list_reports(limit=1)
+        return {"reports": [r.summary() for r in latest]}
+
     @router.get(f"{DASHBOARD_API_PREFIX}/market-breadth", response_model=MarketBreadthResponse)
     def api_get_market_breadth():
         metrics = data_factory.get_panel_data("market_breadth")

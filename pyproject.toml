@@ -74,6 +74,11 @@ notebooks = [
 
 [project.scripts]
 terrafin-agent = "TerraFin.agent.cli:main"
+terrafin-signals = "TerraFin.signals.alerting.cli:main"
+# Legacy alias — `terrafin-alerting` predates the signals/ rename. New
+# usage should prefer `terrafin-signals`; this stays so existing scripts
+# still run.
+terrafin-alerting = "TerraFin.signals.alerting.cli:main"
 
 [build-system]
 requires = ["setuptools>=61.0.0", "wheel"] # Pinning setuptools for robustness
