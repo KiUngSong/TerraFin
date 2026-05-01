@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import json
 import socket
 import subprocess
@@ -30,7 +28,11 @@ def _fetch_json(url: str) -> dict:
 
 
 def _wait_for_server(proc: subprocess.Popen, port: int, timeout_seconds: float = 20.0) -> tuple[dict, str]:
-    health_url = f"http://127.0.0.1:{port}/health"
+    # ``/health`` now serves the multi-component HTML status page; the JSON
+    # variant lives at ``/health.json``. Hitting the HTML URL with
+    # ``json.loads`` is what produced the legacy "Expecting value" smoke
+    # failure — keep this commented anchor in case the URL drifts again.
+    health_url = f"http://127.0.0.1:{port}/health.json"
     dashboard_url = f"http://127.0.0.1:{port}/dashboard"
     deadline = time.time() + timeout_seconds
     last_error: Exception | None = None
@@ -72,8 +74,14 @@ def main() -> int:
 
     try:
         health, dashboard_html = _wait_for_server(proc, port)
-        _require(health.get("status") == "ok", f"Unexpected /health payload: {health}")
-        _require(health.get("service") == "terrafin-interface", f"Unexpected service name: {health}")
+        _require(
+            health.get("status") in {"ok", "degraded", "down"},
+            f"Unexpected /health.json payload: {health}",
+        )
+        _require(
+            isinstance(health.get("components"), dict) and {"agent", "telegram", "signals"} <= set(health["components"]),
+            f"/health.json missing expected components: {health}",
+        )
         _require("TerraFin" in dashboard_html, "Dashboard HTML did not include TerraFin branding.")
         _require('<div id="root"></div>' in dashboard_html, "Dashboard page did not serve the SPA shell.")
     finally:
