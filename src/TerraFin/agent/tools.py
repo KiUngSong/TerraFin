@@ -395,9 +395,14 @@ class TerraFinHostedToolAdapter:
             name="current_view_context",
             capability_name="current_view_context",
             description=(
-                "Read the user's current TerraFin page/view context when the request depends on "
-                "what they are looking at right now (pronouns like 'this', 'their', 'it', or implicit "
-                "subjects).\n"
+                "Read the user's current TerraFin page/view context. This is your ground-truth "
+                "channel for what the user is actually looking at — the UI publishes the live "
+                "ticker, filing, chart selection, and other on-screen entities here. Call this "
+                "tool BEFORE asking the user to name a ticker or filing whenever their message "
+                "refers to an entity deictically or implicitly (in any language) instead of "
+                "naming it. Assume the user has a relevant page open until the tool tells you "
+                "otherwise; asking 'which ticker?' when the answer is already in the view is a "
+                "failure mode.\n"
                 "If the user is viewing a SEC filing, `selection` will carry "
                 "`{ticker, form, accession, primaryDocument, sectionSlug, sectionTitle, "
                 "sectionExcerpt, documentUrl, indexUrl}`. Key rules:\n"

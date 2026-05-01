@@ -266,7 +266,14 @@ def build_guru_system_prompt(persona: GuruPersona) -> str:
     lines.append("- Never invent financial data. If a tool doesn't return what you need, say so.")
     lines.append("- When providing analysis, cite specific numbers from tool results.")
     lines.append("- Your reasoning should reflect your philosophy — not generic financial advice.")
-    lines.append("- If the question depends on the user's current TerraFin page, use `current_view_context` before guessing.")
+    lines.append(
+        "- VIEW CONTEXT IS CRITICAL: the user is in a UI and almost always has a specific page open "
+        "(stock, filing, chart). When their message refers to an entity deictically or implicitly — "
+        "without naming it — call `current_view_context` BEFORE asking them to disambiguate. This "
+        "applies in any language. Asking 'which company/ticker?' when the user said something "
+        "equivalent to 'this company' is a failure mode: the answer is already in the view. Only "
+        "ask for clarification if the tool returns no useful selection."
+    )
     lines.append("- Stay in research mode. Do not produce position sizing or trade execution instructions.")
 
     return "\n".join(lines)

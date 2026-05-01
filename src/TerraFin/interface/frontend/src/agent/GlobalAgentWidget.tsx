@@ -142,7 +142,8 @@ interface HostedTaskListResponse {
 }
 
 const REQUEST_TIMEOUT_MS = 12000;
-const SEND_REQUEST_TIMEOUT_MS = 45000;
+const SEND_REQUEST_TIMEOUT_MS = 240000;
+const SEND_TOOL_POLL_INTERVAL_MS = 1500;
 const SEND_RECONCILE_POLL_MS = 1500;
 const SEND_RECONCILE_WINDOW_MS = 8000;
 const TASK_POLL_INTERVAL_MS = 1500;
@@ -1079,6 +1080,65 @@ const GlobalAgentWidget: React.FC = () => {
       createdAt: new Date(Date.now() + 1).toISOString(),
     });
     const baselineVisibleCount = visibleMessages.length;
+    let toolPollTimer: number | null = null;
+    let pollingSessionId: string | null = null;
+    let baselineCallCount = 0;
+    const startedAt = Date.now();
+    const startToolPolling = (sessionId: string, baseline: number) => {
+      pollingSessionId = sessionId;
+      baselineCallCount = baseline;
+      const tick = async () => {
+        if (pollingSessionId !== sessionId) {
+          return;
+        }
+        let detail: (HostedAgentSession & {
+          capabilityCalls?: Array<{ capabilityName: string; calledAt: string; inputs?: Record<string, unknown> }>;
+        }) | null = null;
+        try {
+          detail = await fetchRuntimeJson<HostedAgentSession & {
+            capabilityCalls?: Array<{ capabilityName: string; calledAt: string; inputs?: Record<string, unknown> }>;
+          }>(
+            `/agent/api/runtime/sessions/${encodeURIComponent(sessionId)}`,
+            {},
+            'Polling assistant progress'
+          );
+        } catch {
+          return;
+        }
+        if (pollingSessionId !== sessionId) {
+          return;
+        }
+        const calls = detail?.capabilityCalls || [];
+        const newCalls = calls.slice(baselineCallCount);
+        const elapsed = Math.max(0, Math.floor((Date.now() - startedAt) / 1000));
+        let content: string;
+        if (newCalls.length === 0) {
+          content = `Thinking… (${elapsed}s)`;
+        } else {
+          const latest = newCalls[newCalls.length - 1];
+          const focus = latest.inputs && (latest.inputs.ticker || latest.inputs.name);
+          const label = focus ? `${latest.capabilityName} · ${focus}` : latest.capabilityName;
+          const suffix = newCalls.length > 1 ? ` · ${newCalls.length} tools` : '';
+          content = `Running ${label}…${suffix} (${elapsed}s)`;
+        }
+        setSendStatus({
+          kind: 'working',
+          content,
+          createdAt: new Date().toISOString(),
+        });
+      };
+      void tick();
+      toolPollTimer = window.setInterval(() => {
+        void tick();
+      }, SEND_TOOL_POLL_INTERVAL_MS);
+    };
+    const stopToolPolling = () => {
+      pollingSessionId = null;
+      if (toolPollTimer !== null) {
+        window.clearInterval(toolPollTimer);
+        toolPollTimer = null;
+      }
+    };
     try {
       const session = activeSession ?? (await ensureSession({ preserveTransientState: true }));
       if (!session) {
@@ -1086,6 +1146,20 @@ const GlobalAgentWidget: React.FC = () => {
         setSendStatus(null);
         return;
       }
+      let baseline = 0;
+      try {
+        const initial = await fetchRuntimeJson<HostedAgentSession & {
+          capabilityCalls?: unknown[];
+        }>(
+          `/agent/api/runtime/sessions/${encodeURIComponent(session.sessionId)}`,
+          {},
+          'Reading session baseline'
+        );
+        baseline = (initial.capabilityCalls || []).length;
+      } catch {
+        baseline = 0;
+      }
+      startToolPolling(session.sessionId, baseline);
       const run = (await fetchRuntimeJson<HostedRunResponse>(
         `/agent/api/runtime/sessions/${encodeURIComponent(session.sessionId)}/messages`,
         {
@@ -1099,6 +1173,7 @@ const GlobalAgentWidget: React.FC = () => {
         'Running assistant request',
         SEND_REQUEST_TIMEOUT_MS
       )) as HostedRunResponse;
+      stopToolPolling();
       const nextSession = mergeSessionFromRun(session, run);
       const previousMessageCount = session.messages.length;
       const nextVisibleMessages = nextSession.messages
@@ -1151,6 +1226,7 @@ const GlobalAgentWidget: React.FC = () => {
         });
       }
     } finally {
+      stopToolPolling();
       setSending(false);
     }
   };
