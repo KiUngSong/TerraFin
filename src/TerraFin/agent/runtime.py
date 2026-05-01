@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
@@ -21,9 +19,21 @@ ArtifactKind = Literal[
 ]
 TaskStatus = Literal["pending", "running", "completed", "failed", "cancelled"]
 
+
+@dataclass(frozen=True, slots=True)
+class TerraFinArtifact:
+    artifact_id: str
+    kind: ArtifactKind
+    title: str
+    session_id: str
+    capability_name: str
+    created_at: datetime
+    payload: dict[str, Any] = field(default_factory=dict)
+
+
 CapabilityHandler = Callable[..., dict[str, Any]]
 FocusExtractor = Callable[[Mapping[str, Any], Mapping[str, Any]], tuple[str, ...]]
-ArtifactBuilder = Callable[[str, str, Mapping[str, Any], Mapping[str, Any]], "TerraFinArtifact | None"]
+ArtifactBuilder = Callable[[str, str, Mapping[str, Any], Mapping[str, Any]], TerraFinArtifact | None]
 
 
 def _utc_now() -> datetime:
@@ -129,17 +139,6 @@ def _chart_artifact(
 
 
 @dataclass(frozen=True, slots=True)
-class TerraFinArtifact:
-    artifact_id: str
-    kind: ArtifactKind
-    title: str
-    session_id: str
-    capability_name: str
-    created_at: datetime
-    payload: dict[str, Any] = field(default_factory=dict)
-
-
-@dataclass(frozen=True, slots=True)
 class TerraFinCapabilityCall:
     capability_name: str
     called_at: datetime
@@ -242,7 +241,7 @@ class TerraFinCapabilityRegistry:
         self,
         capability_name: str,
         *,
-        context: TerraFinAgentContext | None = None,
+        context: "TerraFinAgentContext | None" = None,
         **kwargs: Any,
     ) -> dict[str, Any]:
         capability = self.get(capability_name)

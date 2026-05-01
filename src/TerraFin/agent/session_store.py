@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import json
 import sqlite3
 from dataclasses import dataclass, field, replace
@@ -103,7 +101,7 @@ class TerraFinHostedSessionRecord:
     created_at: datetime = field(default_factory=_utc_now)
     updated_at: datetime = field(default_factory=_utc_now)
     last_accessed_at: datetime = field(default_factory=_utc_now)
-    conversation: TerraFinHostedConversation | None = None
+    conversation: "TerraFinHostedConversation | None" = None
     audit_log: list[TerraFinHostedPermissionEvent] = field(default_factory=list)
     approval_requests: list[TerraFinHostedApprovalRequest] = field(default_factory=list)
 
@@ -127,7 +125,7 @@ class HostedSessionStore:
     def attach_conversation(
         self,
         session_id: str,
-        conversation: TerraFinHostedConversation,
+        conversation: "TerraFinHostedConversation",
     ) -> TerraFinHostedSessionRecord:
         raise NotImplementedError
 
@@ -190,7 +188,7 @@ class HostedSessionStore:
         title: str | None = None,
         summary: str | None = None,
         selection: dict[str, Any] | None = None,
-        entities: list[dict[str, Any]] | None = None,
+        entities: "list[dict[str, Any]] | None" = None,
         metadata: dict[str, Any] | None = None,
     ) -> TerraFinHostedViewContextRecord:
         raise NotImplementedError
@@ -437,8 +435,8 @@ def _serialize_record(record: TerraFinHostedSessionRecord) -> dict[str, Any]:
 def _deserialize_record(
     payload: dict[str, Any],
     *,
-    service: TerraFinAgentService,
-    registry: TerraFinCapabilityRegistry,
+    service: "TerraFinAgentService",
+    registry: "TerraFinCapabilityRegistry",
 ) -> TerraFinHostedSessionRecord:
     session = TerraFinAgentSession(
         session_id=str(payload["sessionId"]),
@@ -495,7 +493,7 @@ class InMemoryHostedSessionStore(HostedSessionStore):
     def attach_conversation(
         self,
         session_id: str,
-        conversation: TerraFinHostedConversation,
+        conversation: "TerraFinHostedConversation",
     ) -> TerraFinHostedSessionRecord:
         with self._lock:
             record = self._records[session_id]
@@ -620,7 +618,7 @@ class InMemoryHostedSessionStore(HostedSessionStore):
         title: str | None = None,
         summary: str | None = None,
         selection: dict[str, Any] | None = None,
-        entities: list[dict[str, Any]] | None = None,
+        entities: "list[dict[str, Any]] | None" = None,
         metadata: dict[str, Any] | None = None,
     ) -> TerraFinHostedViewContextRecord:
         with self._lock:
@@ -699,8 +697,8 @@ class SQLiteHostedSessionStore(HostedSessionStore):
         self,
         *,
         db_path: str | Path,
-        service: TerraFinAgentService,
-        registry: TerraFinCapabilityRegistry,
+        service: "TerraFinAgentService",
+        registry: "TerraFinCapabilityRegistry",
     ) -> None:
         self.db_path = Path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -873,7 +871,7 @@ class SQLiteHostedSessionStore(HostedSessionStore):
     def attach_conversation(
         self,
         session_id: str,
-        conversation: TerraFinHostedConversation,
+        conversation: "TerraFinHostedConversation",
     ) -> TerraFinHostedSessionRecord:
         with self._lock:
             record = self.get(session_id)
@@ -1006,7 +1004,7 @@ class SQLiteHostedSessionStore(HostedSessionStore):
         title: str | None = None,
         summary: str | None = None,
         selection: dict[str, Any] | None = None,
-        entities: list[dict[str, Any]] | None = None,
+        entities: "list[dict[str, Any]] | None" = None,
         metadata: dict[str, Any] | None = None,
     ) -> TerraFinHostedViewContextRecord:
         with self._lock:
