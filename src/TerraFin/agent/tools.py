@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal
@@ -83,7 +81,7 @@ class TerraFinHostedToolAdapter:
         # (persona subagents are full model loops, which the top-level loop
         # runs). Plain session-scoped capability calls don't need the loop —
         # they go through `runtime.invoke`.
-        self._loop: "TerraFinHostedAgentLoop" | None = None
+        self._loop: "TerraFinHostedAgentLoop | None" = None
 
     def attach_loop(self, loop: "TerraFinHostedAgentLoop") -> None:
         self._loop = loop

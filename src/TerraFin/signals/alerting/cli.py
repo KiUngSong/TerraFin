@@ -5,8 +5,6 @@ Usage:
     terrafin-signals weekly [--group GROUP] [--out PATH]
     terrafin-signals run [--group GROUP] [--interval SECONDS]
 """
-from __future__ import annotations
-
 import argparse
 import json
 import sys

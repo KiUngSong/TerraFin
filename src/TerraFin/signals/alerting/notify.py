@@ -9,8 +9,6 @@ Env vars:
 
 Legacy ``TERRAFIN_ALERT_CHANNEL`` is honored with a deprecation log.
 """
-from __future__ import annotations
-
 import json
 import logging
 import os

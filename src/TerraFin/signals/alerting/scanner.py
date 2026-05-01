@@ -1,6 +1,4 @@
 """Scan all watchlist tickers for technical signals."""
-from __future__ import annotations
-
 import logging
 from typing import Sequence
 

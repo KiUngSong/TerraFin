@@ -3,8 +3,6 @@
 Single-worker only: in-memory dedup and rate-limit state are per-process. If you
 run uvicorn with --workers > 1, deploy a shared store before relying on these.
 """
-from __future__ import annotations
-
 import hashlib
 import hmac
 import logging

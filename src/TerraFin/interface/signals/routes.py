@@ -3,8 +3,6 @@
 Primary path: POST /signals/api/signal
 Legacy alias: POST /alerting/api/signal  (kept so existing senders keep working)
 """
-from __future__ import annotations
-
 import logging
 import os
 

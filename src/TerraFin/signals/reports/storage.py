@@ -5,8 +5,6 @@ plus a sidecar JSON with metadata. Disk cost is negligible (KB-scale per
 report) so we keep them indefinitely — multi-week stacking is the actual
 product.
 """
-from __future__ import annotations
-
 import json
 import logging
 from dataclasses import asdict, dataclass

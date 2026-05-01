@@ -11,8 +11,6 @@ Pipeline:
 
 Anchors to a configurable as_of date so backtests reproduce exactly.
 """
-from __future__ import annotations
-
 import logging
 import re
 import urllib.parse

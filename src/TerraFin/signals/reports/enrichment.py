@@ -24,8 +24,6 @@ intact):
 Disabled silently when the agent runtime is unavailable (no API key, etc.)
 so the basic report still ships.
 """
-from __future__ import annotations
-
 import json
 import logging
 import urllib.parse

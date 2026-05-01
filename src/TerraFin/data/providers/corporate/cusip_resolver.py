@@ -16,8 +16,6 @@ worst case is one quarter of stale data, which is acceptable for a 13F flow
 that itself only updates quarterly.
 """
 
-from __future__ import annotations
-
 import logging
 import re
 from typing import Any

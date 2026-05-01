@@ -3,8 +3,6 @@
 State file: ~/.terrafin/alert_state.json
 Format: {"AAPL:RSI_OVERBOUGHT": "2026-04-30", ...}
 """
-from __future__ import annotations
-
 import json
 import logging
 from datetime import date

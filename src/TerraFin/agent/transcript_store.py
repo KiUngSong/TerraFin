@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import json
 from contextlib import contextmanager
 from dataclasses import dataclass, replace

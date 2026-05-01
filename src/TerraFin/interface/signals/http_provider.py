@@ -5,8 +5,6 @@ Env vars:
   TERRAFIN_SIGNALS_PROVIDER_KEY   — Bearer token for the external API
   (legacy ``TERRAFIN_ALERT_PROVIDER_*`` still honored with a deprecation log)
 """
-from __future__ import annotations
-
 import logging
 
 from TerraFin.signals.env import signals_env

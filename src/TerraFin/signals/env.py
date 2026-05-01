@@ -6,8 +6,6 @@ vars now use the ``TERRAFIN_SIGNALS_*`` prefix. Keep reading the legacy
 one-time deprecation warning per variable so operators can migrate.
 """
 
-from __future__ import annotations
-
 import logging
 import os
 

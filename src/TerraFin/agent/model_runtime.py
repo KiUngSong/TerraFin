@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import os
 import re
 from collections.abc import Mapping
@@ -170,7 +168,7 @@ class TerraFinProviderRoutedModelClient:
         self.registry = registry
         self.default_model = default_model
 
-    def describe_runtime_model(self, *, session: "TerraFinAgentSession" | None = None) -> TerraFinRuntimeModel:
+    def describe_runtime_model(self, *, session: "TerraFinAgentSession | None" = None) -> TerraFinRuntimeModel:
         if session is None:
             return self.default_model
         payload = session.metadata.get(RUNTIME_MODEL_METADATA_KEY)
@@ -178,7 +176,7 @@ class TerraFinProviderRoutedModelClient:
             return self.default_model
         return self.registry.coerce_runtime_model(payload)
 
-    def describe_runtime_status(self, *, session: "TerraFinAgentSession" | None = None) -> dict[str, Any]:
+    def describe_runtime_status(self, *, session: "TerraFinAgentSession | None" = None) -> dict[str, Any]:
         runtime_model = self.describe_runtime_model(session=session)
         provider = self.registry.get(runtime_model.provider_id)
         try:

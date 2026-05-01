@@ -16,8 +16,6 @@ artifacts so both the legacy yfinance code path and the managed-cache code path
 read/write the same bytes.
 """
 
-from __future__ import annotations
-
 import json
 import logging
 import os

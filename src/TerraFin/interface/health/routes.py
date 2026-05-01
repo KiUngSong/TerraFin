@@ -19,8 +19,6 @@ Renders a small self-contained HTML page (no JS, no external CSS). Visit
 JSON for scripting.
 """
 
-from __future__ import annotations
-
 import asyncio
 import json
 import logging

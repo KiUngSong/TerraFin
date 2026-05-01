@@ -13,8 +13,6 @@ actual subscribed set against it.
 
 Providers should treat both calls as idempotent.
 """
-from __future__ import annotations
-
 import asyncio
 import logging
 
