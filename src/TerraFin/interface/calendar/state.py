@@ -1,5 +1,5 @@
 from copy import deepcopy
-from datetime import datetime
+from datetime import UTC, datetime
 
 
 DEFAULT_SESSION_ID = "default"
@@ -9,7 +9,7 @@ _calendar_selection_by_session: dict[str, dict | None] = {}
 
 
 def _sample_events(now: datetime | None = None) -> list[dict]:
-    base = now or datetime.utcnow()
+    base = now or datetime.now(UTC)
     month = base.month
     year = base.year
     return [

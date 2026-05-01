@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Callable
+from collections.abc import Callable
 
 import numpy as np
 import pandas as pd

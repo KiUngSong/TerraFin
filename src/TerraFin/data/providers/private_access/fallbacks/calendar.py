@@ -1,11 +1,11 @@
-from datetime import datetime
+from datetime import UTC, datetime
 
 from TerraFin.data.providers.private_access.fallbacks._loader import load_fallback_section
 from TerraFin.data.providers.private_access.models import CalendarResponse
 
 
 def get_calendar_fallback(now: datetime | None = None) -> CalendarResponse:
-    base = now or datetime.utcnow()
+    base = now or datetime.now(UTC)
     substitutions = {"year": f"{base.year}", "month": f"{base.month:02d}"}
     payload = load_fallback_section("calendar")
     templated_events: list[dict] = []

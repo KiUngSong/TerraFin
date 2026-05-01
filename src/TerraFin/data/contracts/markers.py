@@ -1,6 +1,7 @@
 import logging
 from functools import wraps
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 from .dataframes import TimeSeriesDataFrame
 

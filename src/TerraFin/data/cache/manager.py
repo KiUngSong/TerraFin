@@ -10,7 +10,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from threading import Event, Lock, Thread
 from time import sleep
-from typing import Any, Callable, Protocol, runtime_checkable
+from collections.abc import Callable
+from typing import Any, Protocol, runtime_checkable
 from zoneinfo import ZoneInfo
 
 _logger = logging.getLogger(__name__)
