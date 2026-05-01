@@ -7,6 +7,13 @@ import { WatchlistItem, useWatchlist } from './useWatchlist';
 
 const NARROW_LAYOUT_BREAKPOINT = BREAKPOINTS.TABLET_MAX + 157; // 1180
 
+// Reserved tag — drives realtime monitor registration on the backend, not a
+// user-managed group. Hidden from group lists / cross-group pill display.
+const MONITOR_TAG = 'monitor';
+const RESERVED_TAGS = new Set([MONITOR_TAG]);
+
+const isReservedTag = (tag: string): boolean => RESERVED_TAGS.has(tag.toLowerCase());
+
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 function nextDefaultGroupName(existingNames: string[]): string {
@@ -294,6 +301,7 @@ const WatchlistPage: React.FC = () => {
     deleteGroup,
     promoteGroup,
     backendConfigured,
+    monitorEnabled,
   } = useWatchlist();
 
   const groupTags = useMemo(() => {
@@ -406,12 +414,19 @@ const WatchlistPage: React.FC = () => {
     setIsManagePanelOpen(false);
   };
 
+  const monitoredCount = useMemo(
+    () => items.filter((it) => it.tags.some((t) => t.toLowerCase() === MONITOR_TAG)).length,
+    [items],
+  );
+
   const subtitle = useMemo(() => {
     if (items.length === 0) return 'Build a TerraFin watchlist and keep your core tickers in one place.';
     const total = items.length;
     const gc = displayGroups.length;
-    return `${total} ticker${total !== 1 ? 's' : ''} across ${gc} group${gc !== 1 ? 's' : ''}.`;
-  }, [items.length, displayGroups.length]);
+    const base = `${total} ticker${total !== 1 ? 's' : ''} across ${gc} group${gc !== 1 ? 's' : ''}.`;
+    if (!monitorEnabled) return base;
+    return `${base} ${monitoredCount} monitored.`;
+  }, [items.length, displayGroups.length, monitorEnabled, monitoredCount]);
 
   useEffect(() => {
     const update = () => setIsNarrowLayout(window.innerWidth < NARROW_LAYOUT_BREAKPOINT);
@@ -547,15 +562,32 @@ const WatchlistPage: React.FC = () => {
                   </div>
                 ) : (
                   visibleItems.map((item) => {
-                    const otherGroupTags = item.tags.filter((t) => t !== activeGroup);
-                    const availableGroups = groupTags.filter((g) => !item.tags.includes(g));
+                    const otherGroupTags = item.tags.filter(
+                      (t) => t !== activeGroup && !isReservedTag(t),
+                    );
+                    const availableGroups = groupTags.filter(
+                      (g) => !item.tags.includes(g) && !isReservedTag(g),
+                    );
+                    const isMonitored = item.tags.some((t) => t.toLowerCase() === MONITOR_TAG);
                     return (
-                      <div key={item.symbol} style={tickerRowStyle}>
+                      <div key={item.symbol} style={tickerRowStyle(isNarrowLayout)}>
                         {/* Symbol + name + cross-group pills */}
                         <div style={{ minWidth: 0 }}>
                           <a href={`/stock/${item.symbol}`} style={symbolLinkStyle}>{item.symbol}</a>
                           {item.name && item.name !== item.symbol ? (
-                            <div style={{ fontSize: 12, color: '#64748b', marginTop: 1 }}>{item.name}</div>
+                            <div
+                              style={{
+                                fontSize: 12,
+                                color: '#64748b',
+                                marginTop: 1,
+                                whiteSpace: 'nowrap',
+                                overflow: 'hidden',
+                                textOverflow: 'ellipsis',
+                              }}
+                              title={item.name}
+                            >
+                              {item.name}
+                            </div>
                           ) : null}
                           {(otherGroupTags.length > 0 || (backendConfigured && availableGroups.length > 0)) && (
                             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 3, marginTop: 5, alignItems: 'center' }}>
@@ -603,10 +635,37 @@ const WatchlistPage: React.FC = () => {
                         </div>
 
                         {/* Move % + remove */}
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0 }}>
+                        <div
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: 10,
+                            flexShrink: 0,
+                            // On narrow row layout the cluster sits on its
+                            // own line — keep it left-aligned so it doesn't
+                            // float far from the symbol it describes.
+                            justifyContent: isNarrowLayout ? 'flex-start' : 'flex-end',
+                            flexWrap: 'wrap',
+                          }}
+                        >
                           <span style={{ fontSize: 13, fontWeight: 700, color: moveColor(item.move) }}>
                             {item.move}
                           </span>
+                          {backendConfigured && monitorEnabled ? (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                void setTags(item.symbol, [MONITOR_TAG], isMonitored ? 'remove' : 'add');
+                              }}
+                              disabled={busy}
+                              title={isMonitored ? 'Stop realtime monitoring' : 'Start realtime monitoring'}
+                              aria-pressed={isMonitored}
+                              style={monitorToggleStyle(isMonitored, busy)}
+                            >
+                              <span aria-hidden="true">{isMonitored ? '🔔' : '🔕'}</span>
+                              <span>{isMonitored ? 'Monitoring' : 'Monitor'}</span>
+                            </button>
+                          ) : null}
                           {backendConfigured ? (
                             <button
                               type="button"
@@ -753,16 +812,20 @@ const panelActionBtnStyle: React.CSSProperties = {
   whiteSpace: 'nowrap',
 };
 
-const tickerRowStyle: React.CSSProperties = {
+const tickerRowStyle = (isNarrow: boolean): React.CSSProperties => ({
   display: 'grid',
-  gridTemplateColumns: 'minmax(0, 1fr) auto',
-  alignItems: 'center',
-  gap: 12,
+  // Narrow viewports: stack vertically. The action cluster (move % +
+  // Monitor + Remove) gets crowded against the company name/pill block at
+  // ≤1180px, especially on phones where the auto-sized right column was
+  // wide enough to push into the truncated left content.
+  gridTemplateColumns: isNarrow ? '1fr' : 'minmax(0, 1fr) auto',
+  alignItems: isNarrow ? 'stretch' : 'center',
+  gap: isNarrow ? 8 : 12,
   border: '1px solid #e2e8f0',
   borderRadius: 12,
   padding: '10px 14px',
   background: '#f8fafc',
-};
+});
 
 const symbolLinkStyle: React.CSSProperties = {
   fontSize: 14,
@@ -857,6 +920,20 @@ const secondaryButtonStyle = (disabled: boolean): React.CSSProperties => ({
   color: '#475569',
   background: '#ffffff',
   cursor: disabled ? 'not-allowed' : 'pointer',
+});
+
+const monitorToggleStyle = (active: boolean, disabled: boolean): React.CSSProperties => ({
+  border: `1px solid ${active ? '#10b981' : '#cbd5e1'}`,
+  borderRadius: 999,
+  padding: '5px 10px',
+  fontSize: 11,
+  fontWeight: 700,
+  color: active ? '#065f46' : '#475569',
+  background: active ? '#ecfdf5' : '#ffffff',
+  cursor: disabled ? 'not-allowed' : 'pointer',
+  display: 'inline-flex',
+  alignItems: 'center',
+  gap: 4,
 });
 
 export default WatchlistPage;

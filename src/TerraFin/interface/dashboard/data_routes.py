@@ -28,6 +28,9 @@ class WatchlistSnapshotResponse(BaseModel):
     items: list[WatchlistItemResponse]
     backendConfigured: bool
     mode: str
+    # True iff TERRAFIN_SIGNALS_PROVIDER_URL is set — frontend hides the
+    # per-row monitor toggle when no provider is configured.
+    monitorEnabled: bool = False
 
 
 class WatchlistGroupResponse(BaseModel):
@@ -118,12 +121,87 @@ def create_dashboard_data_router() -> APIRouter:
     cache_manager = get_cache_manager()
 
     def _watchlist_response(items: list[dict]) -> WatchlistSnapshotResponse:
+        from TerraFin.interface.signals.http_provider import is_alert_provider_configured
+
         backend_configured = watchlist_service.is_backend_configured()
         return WatchlistSnapshotResponse(
             items=[WatchlistItemResponse.model_validate(item) for item in items],
             backendConfigured=backend_configured,
             mode="mongo" if backend_configured else "fallback",
+            monitorEnabled=is_alert_provider_configured(),
         )
+
+    def _is_monitored(item: dict | None) -> bool:
+        if not item:
+            return False
+        return any(
+            str(t).strip().lower() == "monitor" for t in (item.get("tags") or [])
+        )
+
+    def _find_item(items: list[dict], symbol: str) -> dict | None:
+        target = (symbol or "").strip().upper()
+        for entry in items:
+            if str(entry.get("symbol") or "").upper() == target:
+                return entry
+        return None
+
+    async def _push_monitor_change(symbol: str, is_now_monitored: bool) -> None:
+        """Push immediate register/unregister to the alert provider, then send
+        a Telegram confirmation (or failure notice) so the user always learns
+        the round-trip result and silent fails are surfaced.
+
+        Logged-and-swallowed: provider downtime should not break the watchlist
+        UI. The heartbeat reconciles within ~60s anyway.
+        """
+        from TerraFin.interface.signals.http_provider import get_alert_provider_from_env
+
+        provider = get_alert_provider_from_env()
+        if provider is None:
+            return
+
+        action = "registered to monitor list" if is_now_monitored else "removed from monitor list"
+        try:
+            if is_now_monitored:
+                await provider.register([symbol])
+            else:
+                await provider.unregister([symbol])
+        except Exception as exc:
+            import logging
+            logging.getLogger(__name__).warning(
+                "Immediate monitor push failed for %s (heartbeat will retry)",
+                symbol, exc_info=True,
+            )
+            await _notify_monitor_change(symbol, ok=False, action=action, error=str(exc))
+            return
+        await _notify_monitor_change(symbol, ok=True, action=action, error=None)
+
+    async def _notify_monitor_change(
+        symbol: str, *, ok: bool, action: str, error: str | None
+    ) -> None:
+        """Best-effort Telegram confirmation for the monitor toggle round-trip."""
+        import asyncio
+        import logging
+        try:
+            from TerraFin.signals.channels.telegram import TelegramChannel
+            ch = TelegramChannel.from_config()
+        except Exception:
+            return  # Telegram not configured — silently skip
+        if ok:
+            emoji = "✅"
+            msg = f"{emoji} <b>{symbol}</b> {action}"
+        else:
+            emoji = "⚠️"
+            msg = (
+                f"{emoji} <b>{symbol}</b> {action} — <b>FAILED</b>\n"
+                f"<i>{error or 'unknown error'}</i>\n"
+                f"Heartbeat will retry within 60s."
+            )
+        try:
+            await asyncio.get_running_loop().run_in_executor(None, ch.send_text, msg)
+        except Exception:
+            logging.getLogger(__name__).warning(
+                "Failed to send monitor-toggle Telegram notice for %s", symbol, exc_info=True
+            )
 
     @router.get(f"{DASHBOARD_API_PREFIX}/watchlist", response_model=WatchlistSnapshotResponse)
     def api_get_watchlist_snapshot(group: str | None = Query(default=None)):
@@ -145,14 +223,21 @@ def create_dashboard_data_router() -> APIRouter:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
 
     @router.patch(f"{DASHBOARD_API_PREFIX}/watchlist/{{symbol}}/tags", response_model=WatchlistSnapshotResponse)
-    def api_patch_watchlist_tags(symbol: str, body: WatchlistTagsRequest = Body(...)):
+    async def api_patch_watchlist_tags(symbol: str, body: WatchlistTagsRequest = Body(...)):
         try:
+            pre = _is_monitored(_find_item(watchlist_service.get_watchlist_snapshot(), symbol))
             if body.mode == "set":
                 items = watchlist_service.set_tags(symbol, body.tags)
             elif body.mode == "add":
                 items = watchlist_service.add_tags(symbol, body.tags)
             else:
                 items = watchlist_service.remove_tags(symbol, body.tags)
+            post = _is_monitored(_find_item(items, symbol))
+            # Don't wait the next heartbeat (60s) — push monitor flag changes
+            # to the provider immediately. Provider failure is non-fatal: the
+            # toggle is already persisted and the heartbeat will reconcile.
+            if pre != post:
+                await _push_monitor_change(symbol, post)
             return _watchlist_response(items)
         except WatchlistNotFoundError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -186,9 +271,15 @@ def create_dashboard_data_router() -> APIRouter:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     @router.delete(f"{DASHBOARD_API_PREFIX}/watchlist/{{symbol}}", response_model=WatchlistSnapshotResponse)
-    def api_remove_watchlist_symbol(symbol: str):
+    async def api_remove_watchlist_symbol(symbol: str):
         try:
-            return _watchlist_response(watchlist_service.remove_symbol(symbol))
+            was_monitored = _is_monitored(
+                _find_item(watchlist_service.get_watchlist_snapshot(), symbol)
+            )
+            items = watchlist_service.remove_symbol(symbol)
+            if was_monitored:
+                await _push_monitor_change(symbol, is_now_monitored=False)
+            return _watchlist_response(items)
         except WatchlistNotFoundError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         except WatchlistConfigurationError as exc:

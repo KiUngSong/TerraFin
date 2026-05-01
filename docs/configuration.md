@@ -32,7 +32,7 @@ state.
 |----------|---------|-------|
 | `TERRAFIN_HOST` | FastAPI bind host | Defaults to `127.0.0.1` |
 | `TERRAFIN_PORT` | FastAPI bind port | Defaults to `8001` |
-| `TERRAFIN_BASE_PATH` | Prefix for feature routes | Root `/health` and `/ready` stay unprefixed |
+| `TERRAFIN_BASE_PATH` | Prefix for feature routes | Root `/health`, `/health.json`, and `/ready` stay unprefixed |
 | `TERRAFIN_CACHE_TIMEZONE` | IANA timezone for cache scheduling | Defaults to `UTC` |
 | `TERRAFIN_DISABLE_DOTENV` | Disable lazy dotenv loading | Useful for stricter production environments |
 

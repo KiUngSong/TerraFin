@@ -55,6 +55,16 @@ def _load_watchlist_mongo_config() -> WatchlistMongoConfig:
     return load_terrafin_config().watchlist
 
 
+# Reserved tags carry behavior, not group membership. They are stored as
+# regular tag strings so we don't add a new schema field, but the groups
+# API filters them out so they never appear as user-managed groups.
+_RESERVED_TAGS: set[str] = {"monitor"}
+
+
+def is_reserved_tag(tag: str) -> bool:
+    return str(tag or "").strip().lower() in _RESERVED_TAGS
+
+
 def _normalize_tags(tags: list) -> list[str]:
     seen: set[str] = set()
     result: list[str] = []
@@ -269,6 +279,8 @@ class WatchlistService:
         counts: dict[str, int] = {}
         for item in items:
             for tag in item.get("tags") or []:
+                if is_reserved_tag(tag):
+                    continue
                 counts[tag] = counts.get(tag, 0) + 1
         return [{"tag": tag, "count": count} for tag, count in sorted(counts.items())]
 

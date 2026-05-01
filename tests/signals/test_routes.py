@@ -17,6 +17,7 @@ from TerraFin.interface.signals.routes import _client_id, create_alerting_router
 def _reset(monkeypatch):
     wh._seen_signal_ids.clear()
     wh._rate_buckets.clear()
+    monkeypatch.delenv("TERRAFIN_SIGNALS_WEBHOOK_SECRET", raising=False)
     monkeypatch.delenv("TERRAFIN_ALERT_WEBHOOK_SECRET", raising=False)
     monkeypatch.delenv("TERRAFIN_TRUST_PROXY_HEADERS", raising=False)
 
@@ -73,7 +74,7 @@ def test_endpoint_503_when_secret_unset():
 
 
 def test_endpoint_401_on_bad_signature(monkeypatch):
-    monkeypatch.setenv("TERRAFIN_ALERT_WEBHOOK_SECRET", "s3cret")
+    monkeypatch.setenv("TERRAFIN_SIGNALS_WEBHOOK_SECRET", "s3cret")
     client = _client_with_router()
     resp = client.post(
         "/signals/api/signal",
@@ -84,7 +85,7 @@ def test_endpoint_401_on_bad_signature(monkeypatch):
 
 
 def test_oversized_body_rejected_413(monkeypatch):
-    monkeypatch.setenv("TERRAFIN_ALERT_WEBHOOK_SECRET", "s3cret")
+    monkeypatch.setenv("TERRAFIN_SIGNALS_WEBHOOK_SECRET", "s3cret")
     client = _client_with_router()
     huge = b'{"ticker":"AAPL","signal":"' + b"x" * (70 * 1024) + b'"}'
     resp = client.post(
@@ -96,7 +97,7 @@ def test_oversized_body_rejected_413(monkeypatch):
 
 
 def test_unauth_requests_do_not_pollute_rate_bucket(monkeypatch):
-    monkeypatch.setenv("TERRAFIN_ALERT_WEBHOOK_SECRET", "s3cret")
+    monkeypatch.setenv("TERRAFIN_SIGNALS_WEBHOOK_SECRET", "s3cret")
     monkeypatch.setattr(wh, "_RATE_MAX", 3)
     client = _client_with_router()
     # 10 unsigned requests → all 401, none should consume the rate budget
@@ -112,7 +113,7 @@ def test_unauth_requests_do_not_pollute_rate_bucket(monkeypatch):
 
 
 def test_legacy_alerting_path_still_routes(monkeypatch):
-    monkeypatch.setenv("TERRAFIN_ALERT_WEBHOOK_SECRET", "s3cret")
+    monkeypatch.setenv("TERRAFIN_SIGNALS_WEBHOOK_SECRET", "s3cret")
     sent: list = []
     monkeypatch.setattr(
         "TerraFin.interface.signals.routes.forward_to_telegram",

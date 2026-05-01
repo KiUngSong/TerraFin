@@ -74,11 +74,19 @@ Runtime config comes from `src/TerraFin/interface/config.py`.
 | Method | Path | Behaviour |
 |--------|------|-----------|
 | `GET` | `/` | Redirect to the dashboard page, respecting `base_path` |
-| `GET` | `/health` | Liveness endpoint |
+| `GET` | `/health` | Multi-component status page (HTML) |
+| `GET` | `/health.json` | Same data as JSON for scripting |
 | `GET` | `/ready` | Readiness endpoint with cache-manager and private-data checks |
 
-`/health` and `/ready` stay at the root even when `TERRAFIN_BASE_PATH` is set.
-Feature routes are prefixed by the base path.
+`/health`, `/health.json`, and `/ready` stay at the root even when
+`TERRAFIN_BASE_PATH` is set. Feature routes are prefixed by the base path.
+
+`/health` runs active probes on each request (no background polling) for
+three components — **Agent** (provider auth env vars set), **Telegram**
+(`getMe` against the configured bot token), and **Signals Provider**
+(proxies the upstream monitor's `/health`, surfacing per-broker WS state
+and last-tick age). Each probe has a 2 s timeout; results are cached
+in-process for 30 s. Append `?refresh=1` to force a fresh probe.
 
 ### Error handling
 
@@ -633,18 +641,18 @@ Request body (`InboundSignal`):
 ```
 
 - `signal_id` is optional but required for deduplication (sender-provided UUID, not TerraFin-generated)
-- `X-Signature` header: HMAC-SHA256 of request body, keyed with `TERRAFIN_ALERT_WEBHOOK_SECRET`
-- If `TERRAFIN_ALERT_WEBHOOK_SECRET` is unset, the endpoint returns `503` and refuses all signals — the secret is required, not optional
+- `X-Signature` header: HMAC-SHA256 of request body, keyed with `TERRAFIN_SIGNALS_WEBHOOK_SECRET`
+- If `TERRAFIN_SIGNALS_WEBHOOK_SECRET` is unset, the endpoint returns `503` and refuses all signals — the secret is required, not optional
 - Per-IP rate limit: 60 requests / 60 seconds; excess returns `429`
 
 ### Env vars
 
 | Variable | Purpose | Required |
 |----------|---------|----------|
-| `TERRAFIN_ALERT_PROVIDER_URL` | External alert API base URL | To enable outbound registration |
-| `TERRAFIN_ALERT_PROVIDER_KEY` | Bearer token for external API | If API requires auth |
-| `TERRAFIN_ALERT_WEBHOOK_SECRET` | HMAC secret for inbound verification | Required (endpoint returns 503 if unset) |
-| `TERRAFIN_ALERT_CHANNEL` | `telegram` to forward via Telegram Bot | To enable Telegram |
+| `TERRAFIN_SIGNALS_PROVIDER_URL` | External alert API base URL | To enable outbound registration |
+| `TERRAFIN_SIGNALS_PROVIDER_KEY` | Bearer token for external API | If API requires auth |
+| `TERRAFIN_SIGNALS_WEBHOOK_SECRET` | HMAC secret for inbound verification | Required (endpoint returns 503 if unset) |
+| `TERRAFIN_SIGNALS_CHANNEL` | `telegram` to forward via Telegram Bot | To enable Telegram |
 
 ### Telegram setup
 
@@ -668,9 +676,9 @@ terrafin-signals telegram test
 
 5. Add to `.env`:
 ```bash
-TERRAFIN_ALERT_CHANNEL=telegram
-TERRAFIN_ALERT_PROVIDER_URL=https://your-alert-api.com
-TERRAFIN_ALERT_WEBHOOK_SECRET=your-hmac-secret
+TERRAFIN_SIGNALS_CHANNEL=telegram
+TERRAFIN_SIGNALS_PROVIDER_URL=https://your-alert-api.com
+TERRAFIN_SIGNALS_WEBHOOK_SECRET=your-hmac-secret
 ```
 
 ### Reports
@@ -699,7 +707,7 @@ The dashboard top bar shows a 🔔 bell that opens a panel rendering report mark
 #### CLI
 
 ```bash
-# Generate the current week's report (writes to disk + sends to channel if TERRAFIN_ALERT_CHANNEL set)
+# Generate the current week's report (writes to disk + sends to channel if TERRAFIN_SIGNALS_CHANNEL set)
 terrafin-signals weekly
 
 # Backtest: anchor to a historical date — useful for verifying pipeline determinism
@@ -708,7 +716,7 @@ terrafin-signals weekly --as-of 2026-03-13 --out /tmp/backtest.md
 
 #### Telegram delivery
 
-When `TERRAFIN_ALERT_CHANNEL=telegram`, the Friday scheduler also pushes the report. Markdown is converted to Telegram-flavored HTML (`<b>`, `<i>`, bullets, code) and chunked under the 4096-char per-message limit.
+When `TERRAFIN_SIGNALS_CHANNEL=telegram`, the Friday scheduler also pushes the report. Markdown is converted to Telegram-flavored HTML (`<b>`, `<i>`, bullets, code) and chunked under the 4096-char per-message limit.
 
 ### Outbound alert provider
 

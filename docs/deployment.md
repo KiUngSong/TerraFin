@@ -34,11 +34,14 @@ These endpoints stay at the root even when `TERRAFIN_BASE_PATH` is set:
 
 | Path | Purpose |
 |------|---------|
-| `/health` | Liveness check |
+| `/health` | Multi-component status page (HTML). Active probes for Agent / Telegram / Signals Provider with 30 s in-process cache and 2 s per-probe timeout. Append `?refresh=1` to bypass the cache. |
+| `/health.json` | Same data as JSON for scripts and uptime checks |
 | `/ready` | Readiness check with cache-manager and private-data validation |
 
-Use `/ready` for orchestration and smoke checks when the deployment depends on
-private-access features or cache startup.
+Use `/ready` for orchestration startup gating; use `/health.json` for
+periodic uptime probes (scrape interval should be ≥ the 30 s cache TTL to
+avoid wasted upstream calls). The HTML `/health` is meant for humans
+opening the page in a browser.
 
 ## Base Paths
 

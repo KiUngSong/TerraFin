@@ -16,7 +16,8 @@ OpenAPI is available at `/openapi.json`.
 | Method | Path | Purpose |
 |--------|------|---------|
 | `GET` | `/` | Redirect to the dashboard page |
-| `GET` | `/health` | Liveness endpoint |
+| `GET` | `/health` | Multi-component status page (HTML, 30 s in-process cache, `?refresh=1` to force) |
+| `GET` | `/health.json` | Same data as JSON |
 | `GET` | `/ready` | Readiness endpoint |
 
 ## Chart

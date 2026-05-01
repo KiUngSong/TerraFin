@@ -1,11 +1,13 @@
 """Channel adapter protocol + implementations.
 
 Env vars:
-  TERRAFIN_ALERT_CHANNEL=stdout        → print to terminal (default)
-  TERRAFIN_ALERT_CHANNEL=file:<path>   → write JSON artifact
-  TERRAFIN_ALERT_CHANNEL=webhook       → POST to external API
-  TERRAFIN_WEBHOOK_URL                 → required when channel=webhook
-  TERRAFIN_WEBHOOK_KEY                 → Bearer token for webhook
+  TERRAFIN_SIGNALS_CHANNEL=stdout        → print to terminal (default)
+  TERRAFIN_SIGNALS_CHANNEL=file:<path>   → write JSON artifact
+  TERRAFIN_SIGNALS_CHANNEL=webhook       → POST to external API
+  TERRAFIN_WEBHOOK_URL                   → required when channel=webhook
+  TERRAFIN_WEBHOOK_KEY                   → Bearer token for webhook
+
+Legacy ``TERRAFIN_ALERT_CHANNEL`` is honored with a deprecation log.
 """
 from __future__ import annotations
 
@@ -77,13 +79,19 @@ class WebhookChannel:
 
 def get_channel_from_env() -> Channel:
     """Return the configured channel from environment variables."""
-    channel_type = os.environ.get("TERRAFIN_ALERT_CHANNEL", "stdout")
+    from TerraFin.signals.env import signals_env
+
+    channel_type = signals_env(
+        "TERRAFIN_SIGNALS_CHANNEL", "TERRAFIN_ALERT_CHANNEL", default="stdout"
+    )
     if channel_type.startswith("file:"):
         return FileArtifactChannel(channel_type.removeprefix("file:"))
     if channel_type == "webhook":
         url = os.environ.get("TERRAFIN_WEBHOOK_URL", "")
         if not url:
-            raise RuntimeError("TERRAFIN_WEBHOOK_URL must be set when TERRAFIN_ALERT_CHANNEL=webhook")
+            raise RuntimeError(
+                "TERRAFIN_WEBHOOK_URL must be set when TERRAFIN_SIGNALS_CHANNEL=webhook"
+            )
         key = os.environ.get("TERRAFIN_WEBHOOK_KEY", "")
         return WebhookChannel(url, key)
     if channel_type == "telegram":

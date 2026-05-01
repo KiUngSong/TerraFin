@@ -48,6 +48,7 @@ from TerraFin.data.contracts.dataframes import TimeSeriesDataFrame
 from TerraFin.env import load_entrypoint_dotenv
 from TerraFin.interface.agent.data_routes import create_agent_data_router
 from TerraFin.interface.signals.heartbeat import registration_heartbeat
+from TerraFin.interface.health import create_health_router
 from TerraFin.interface.signals.http_provider import get_alert_provider_from_env
 from TerraFin.interface.signals.routes import create_alerting_router
 from TerraFin.interface.calendar.routes import create_calendar_router
@@ -75,26 +76,19 @@ PID_FILE = ROOT_DIR / ".interface_server.pid"
 SERVER_LOG_FILE = ROOT_DIR / "interface_server.log"
 
 
-def _service_version() -> str:
-    from importlib.metadata import PackageNotFoundError, version
-
-    try:
-        return version("TerraFin")
-    except PackageNotFoundError:
-        return "unknown"
-
-
 def get_runtime_config():
     return load_runtime_config()
 
 
 def _maybe_start_alert_scanner() -> "asyncio.Task | None":
-    """Start background alert scanner if TERRAFIN_ALERT_CHANNEL is set to a non-stdout channel."""
-    channel_type = os.environ.get("TERRAFIN_ALERT_CHANNEL", "stdout")
+    """Start background alert scanner if TERRAFIN_SIGNALS_CHANNEL is set to a non-stdout channel."""
+    from TerraFin.signals.env import signals_env
+
+    channel_type = signals_env("TERRAFIN_SIGNALS_CHANNEL", "TERRAFIN_ALERT_CHANNEL", default="stdout")
     if channel_type in ("stdout", ""):
         return None
-    interval = int(os.environ.get("TERRAFIN_ALERT_INTERVAL", "300"))
-    group = os.environ.get("TERRAFIN_ALERT_GROUP") or None
+    interval = int(signals_env("TERRAFIN_SIGNALS_INTERVAL", "TERRAFIN_ALERT_INTERVAL", default="300"))
+    group = signals_env("TERRAFIN_SIGNALS_GROUP", "TERRAFIN_ALERT_GROUP") or None
     _log.info("Alert scanner enabled (channel=%s, interval=%ds, group=%s)", channel_type, interval, group or "all")
     return asyncio.create_task(_alert_scanner_loop(interval, group))
 
@@ -140,7 +134,8 @@ async def _weekly_report_loop() -> None:
             md = await loop.run_in_executor(None, build_weekly_report)
             _log.info("Weekly report generated")
             # Optional push to channel if configured
-            channel_type = os.environ.get("TERRAFIN_ALERT_CHANNEL", "stdout")
+            from TerraFin.signals.env import signals_env as _sig_env
+            channel_type = _sig_env("TERRAFIN_SIGNALS_CHANNEL", "TERRAFIN_ALERT_CHANNEL", default="stdout")
             if channel_type not in ("stdout", ""):
                 try:
                     from TerraFin.signals.alerting.notify import get_channel_from_env
@@ -313,19 +308,11 @@ def create_app(initial_data: TimeSeriesDataFrame | None = None, base_path: str =
     app.include_router(create_stock_router(frontend_build.build_dir), prefix=prefix)
     app.include_router(create_alerting_router(), prefix=prefix)
     app.include_router(create_ticker_search_router(), prefix=prefix)
+    app.include_router(create_health_router())
 
     @app.get("/")
     def index():
         return RedirectResponse(url=f"{prefix}{DASHBOARD_PATH}")
-
-    @app.get("/health")
-    def health():
-        return {
-            "status": "ok",
-            "alive": True,
-            "service": "terrafin-interface",
-            "version": _service_version(),
-        }
 
     @app.get("/ready")
     def ready():

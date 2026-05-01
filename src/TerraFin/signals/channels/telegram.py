@@ -59,17 +59,15 @@ class TelegramChannel:
                 md = f"# {title}\n\n{md}"
             chunks = _markdown_to_telegram_html(md)
         else:
-            lines = [f"*{title}*", ""]
-            for s in payload.get("signals", []):
-                sev = (s.get("severity") or "").upper()
-                ticker = s.get("ticker") or ""
-                msg = s.get("message") or s.get("signal") or ""
-                prefix = f"[{sev}] " if sev else ""
-                lines.append(f"{prefix}{ticker}: {msg}")
-            text = "\n".join(lines)
+            text = _format_alert(title, payload.get("signals", []))
             httpx.post(
                 _api_url(self.token, "sendMessage"),
-                json={"chat_id": self.chat_id, "text": text, "parse_mode": "Markdown"},
+                json={
+                    "chat_id": self.chat_id,
+                    "text": text,
+                    "parse_mode": "HTML",
+                    "disable_web_page_preview": True,
+                },
                 timeout=10,
             ).raise_for_status()
             return
@@ -86,6 +84,27 @@ class TelegramChannel:
                 timeout=10,
             ).raise_for_status()
 
+    def send_text(self, text: str, parse_mode: str = "HTML") -> None:
+        """Send a single pre-formatted message. Bypasses the alert formatter.
+
+        Use for one-off operational notices (e.g. monitor toggle confirmation)
+        where the full alert grouping/severity rendering is not appropriate.
+        """
+        try:
+            import httpx
+        except ImportError as exc:
+            raise RuntimeError("httpx is required: pip install httpx") from exc
+        httpx.post(
+            _api_url(self.token, "sendMessage"),
+            json={
+                "chat_id": self.chat_id,
+                "text": text,
+                "parse_mode": parse_mode,
+                "disable_web_page_preview": True,
+            },
+            timeout=10,
+        ).raise_for_status()
+
     @classmethod
     def from_config(cls, path: Path = _CONFIG_PATH) -> "TelegramChannel":
         cfg = load_config(path)
@@ -100,6 +119,34 @@ class TelegramChannel:
 
 def _html_escape(s: str) -> str:
     return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
+# Severity → emoji. Wire still carries 3 levels (low/med/high) for downstream
+# consumers; rendering is bucketed because most signals fire as "high" anyway.
+_SEVERITY_EMOJI = {"high": "🔴", "med": "🟡", "medium": "🟡", "low": "🟢"}
+
+
+def _format_alert(title: str, signals: list[dict]) -> str:
+    """Group signals by ticker, render as ticker-led bullet list with emoji severity.
+
+    Wire shape per signal: ``{"ticker": str, "severity"?: str, "message"|"signal"?: str}``.
+    """
+    ts = time.strftime("%H:%M %Z", time.localtime())
+    lines = [f"<b>{_html_escape(title)}</b>  <i>{_html_escape(ts)}</i>", ""]
+
+    by_ticker: dict[str, list[dict]] = {}
+    for s in signals:
+        by_ticker.setdefault(s.get("ticker") or "?", []).append(s)
+
+    for ticker, group in by_ticker.items():
+        lines.append(f"<b>{_html_escape(ticker)}</b>")
+        for s in group:
+            sev = (s.get("severity") or "").lower()
+            emoji = _SEVERITY_EMOJI.get(sev, "⚪")
+            msg = s.get("message") or s.get("signal") or ""
+            lines.append(f"  • {_html_escape(msg)} {emoji}")
+        lines.append("")
+    return "\n".join(lines).rstrip()
 
 
 def _markdown_to_telegram_html(md: str) -> list[str]:

@@ -71,7 +71,7 @@ async def _handle_signal(request: Request, x_signature: str):
         log.error("Inbound signal rejected: webhook secret not configured")
         raise HTTPException(
             status_code=503,
-            detail="Inbound signal endpoint disabled: TERRAFIN_ALERT_WEBHOOK_SECRET not set",
+            detail="Inbound signal endpoint disabled: TERRAFIN_SIGNALS_WEBHOOK_SECRET not set",
         )
     if not ok:
         raise HTTPException(status_code=401, detail="Invalid signature")

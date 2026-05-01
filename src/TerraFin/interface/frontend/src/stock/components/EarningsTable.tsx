@@ -33,6 +33,7 @@ const EarningsTable: React.FC<{ earnings: EarningsRecord[] }> = ({ earnings }) =
     position: 'sticky',
     top: 0,
     zIndex: 1,
+    whiteSpace: 'nowrap',
   };
   const tdRight: React.CSSProperties = { ...cellBase, textAlign: 'right', fontVariantNumeric: 'tabular-nums' };
 

@@ -17,6 +17,7 @@ interface WatchlistResponse {
   detail?: string;
   backendConfigured?: boolean;
   mode?: string;
+  monitorEnabled?: boolean;
 }
 
 const WATCHLIST_ENDPOINT = '/dashboard/api/watchlist';
@@ -25,6 +26,7 @@ interface ParsedWatchlistResponse {
   items: WatchlistItem[];
   backendConfigured: boolean;
   mode: string;
+  monitorEnabled: boolean;
 }
 
 async function parseWatchlistResponse(response: Response): Promise<ParsedWatchlistResponse> {
@@ -36,6 +38,7 @@ async function parseWatchlistResponse(response: Response): Promise<ParsedWatchli
     items: (payload.items || []).map((item) => ({ ...item, tags: item.tags || [] })),
     backendConfigured: Boolean(payload.backendConfigured),
     mode: payload.mode || 'fallback',
+    monitorEnabled: Boolean(payload.monitorEnabled),
   };
 }
 
@@ -48,6 +51,7 @@ export function useWatchlist() {
   const [error, setError] = useState<string | null>(null);
   const [backendConfigured, setBackendConfigured] = useState(false);
   const [mode, setMode] = useState('fallback');
+  const [monitorEnabled, setMonitorEnabled] = useState(false);
 
   const fetchGroups = useCallback(async () => {
     try {
@@ -73,10 +77,12 @@ export function useWatchlist() {
       setItems(payload.items);
       setBackendConfigured(payload.backendConfigured);
       setMode(payload.mode);
+      setMonitorEnabled(payload.monitorEnabled);
     } catch (fetchError) {
       setItems([]);
       setBackendConfigured(false);
       setMode('fallback');
+      setMonitorEnabled(false);
       setError(fetchError instanceof Error ? fetchError.message : 'Unable to load the TerraFin watchlist right now.');
     } finally {
       setLoading(false);
@@ -101,6 +107,7 @@ export function useWatchlist() {
       setItems(payload.items);
       setBackendConfigured(payload.backendConfigured);
       setMode(payload.mode);
+      setMonitorEnabled(payload.monitorEnabled);
       await fetchGroups();
     } catch (mutationError) {
       setError(mutationError instanceof Error ? mutationError.message : 'Unable to add that ticker right now.');
@@ -121,6 +128,7 @@ export function useWatchlist() {
       setItems(payload.items);
       setBackendConfigured(payload.backendConfigured);
       setMode(payload.mode);
+      setMonitorEnabled(payload.monitorEnabled);
       await fetchGroups();
     } catch (mutationError) {
       setError(mutationError instanceof Error ? mutationError.message : 'Unable to remove that ticker right now.');
@@ -143,6 +151,7 @@ export function useWatchlist() {
       setItems(payload.items);
       setBackendConfigured(payload.backendConfigured);
       setMode(payload.mode);
+      setMonitorEnabled(payload.monitorEnabled);
       await fetchGroups();
     } catch (mutationError) {
       setError(mutationError instanceof Error ? mutationError.message : 'Unable to update tags right now.');
@@ -165,6 +174,7 @@ export function useWatchlist() {
       setItems(payload.items);
       setBackendConfigured(payload.backendConfigured);
       setMode(payload.mode);
+      setMonitorEnabled(payload.monitorEnabled);
       await fetchGroups();
     } catch (mutationError) {
       setError(mutationError instanceof Error ? mutationError.message : 'Unable to rename group right now.');
@@ -192,6 +202,7 @@ export function useWatchlist() {
       setItems(payload.items);
       setBackendConfigured(payload.backendConfigured);
       setMode(payload.mode);
+      setMonitorEnabled(payload.monitorEnabled);
       await fetchGroups();
     } catch (mutationError) {
       setError(mutationError instanceof Error ? mutationError.message : 'Unable to rename group right now.');
@@ -218,6 +229,7 @@ export function useWatchlist() {
       setItems(payload.items);
       setBackendConfigured(payload.backendConfigured);
       setMode(payload.mode);
+      setMonitorEnabled(payload.monitorEnabled);
       await fetchGroups();
     } catch (mutationError) {
       setError(mutationError instanceof Error ? mutationError.message : 'Unable to delete group right now.');
@@ -237,6 +249,7 @@ export function useWatchlist() {
     error,
     backendConfigured,
     mode,
+    monitorEnabled,
     refresh,
     addSymbol,
     removeSymbol,

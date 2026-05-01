@@ -14,6 +14,7 @@ from TerraFin.interface.signals import webhook as wh
 def _reset_state(monkeypatch):
     wh._seen_signal_ids.clear()
     wh._rate_buckets.clear()
+    monkeypatch.delenv("TERRAFIN_SIGNALS_WEBHOOK_SECRET", raising=False)
     monkeypatch.delenv("TERRAFIN_ALERT_WEBHOOK_SECRET", raising=False)
 
 
@@ -23,19 +24,19 @@ def test_verify_signature_raises_when_secret_unset():
 
 
 def test_verify_signature_rejects_empty_header(monkeypatch):
-    monkeypatch.setenv("TERRAFIN_ALERT_WEBHOOK_SECRET", "s3cret")
+    monkeypatch.setenv("TERRAFIN_SIGNALS_WEBHOOK_SECRET", "s3cret")
     assert wh.verify_signature(b"{}", "") is False
 
 
 def test_verify_signature_accepts_valid_hmac(monkeypatch):
-    monkeypatch.setenv("TERRAFIN_ALERT_WEBHOOK_SECRET", "s3cret")
+    monkeypatch.setenv("TERRAFIN_SIGNALS_WEBHOOK_SECRET", "s3cret")
     body = b'{"ticker":"AAPL","signal":"x"}'
     sig = hmac.new(b"s3cret", body, hashlib.sha256).hexdigest()
     assert wh.verify_signature(body, sig) is True
 
 
 def test_verify_signature_rejects_wrong_hmac(monkeypatch):
-    monkeypatch.setenv("TERRAFIN_ALERT_WEBHOOK_SECRET", "s3cret")
+    monkeypatch.setenv("TERRAFIN_SIGNALS_WEBHOOK_SECRET", "s3cret")
     assert wh.verify_signature(b"x", "deadbeef") is False
 
 

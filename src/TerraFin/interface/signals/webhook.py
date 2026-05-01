@@ -8,12 +8,12 @@ from __future__ import annotations
 import hashlib
 import hmac
 import logging
-import os
 import time
 from collections import OrderedDict, deque
 from threading import Lock
 
 from TerraFin.data.contracts.alert_provider import InboundSignal
+from TerraFin.signals.env import signals_env
 
 log = logging.getLogger(__name__)
 
@@ -33,7 +33,7 @@ class WebhookSecretMissing(RuntimeError):
 
 
 def get_webhook_secret() -> str:
-    return os.environ.get("TERRAFIN_ALERT_WEBHOOK_SECRET", "")
+    return signals_env("TERRAFIN_SIGNALS_WEBHOOK_SECRET", "TERRAFIN_ALERT_WEBHOOK_SECRET")
 
 
 def verify_signature(body: bytes, header_sig: str) -> bool:
@@ -45,7 +45,7 @@ def verify_signature(body: bytes, header_sig: str) -> bool:
     secret = get_webhook_secret()
     if not secret:
         raise WebhookSecretMissing(
-            "TERRAFIN_ALERT_WEBHOOK_SECRET is not set. Inbound signal endpoint disabled."
+            "TERRAFIN_SIGNALS_WEBHOOK_SECRET is not set. Inbound signal endpoint disabled."
         )
     if not header_sig:
         return False
