@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useRef } from 'react';
 import { createChart, ColorType, PriceScaleMode, type UTCTimestamp } from 'lightweight-charts';
 import { DEFAULT_PRICE_SCALE_MARGINS, FONT_FAMILY, type ChartScaleMargins } from './constants';
 import type { RangeId } from './constants';
-import type { ChartPayload, LinePoint } from './types';
+import type { CandlestickPoint, ChartPayload, ChartSeries, LinePoint } from './types';
 import type { DateSelectionRequest } from './utils/DateSelector';
 import {
   getVisibleRange,
@@ -33,7 +33,14 @@ interface ChartCanvasProps {
   onUserScroll?: () => void;
   selectedIndicatorsSig: string;
   onVisibleRangeChange?: (range: { from: string; to: string } | null) => void;
+  showVolume?: boolean;
+  onVolumeAvailableChange?: (available: boolean) => void;
 }
+
+const VOLUME_SERIES_KEY = '__volume_overlay__';
+const VOLUME_PRICE_SCALE_ID = 'volume';
+const VOLUME_UP_COLOR = 'rgba(38, 166, 154, 0.5)';
+const VOLUME_DOWN_COLOR = 'rgba(239, 83, 80, 0.5)';
 
 function toUtcSeconds(date: string): UTCTimestamp {
   return Math.floor(new Date(date).getTime() / 1000) as UTCTimestamp;
@@ -54,6 +61,8 @@ const ChartCanvas: React.FC<ChartCanvasProps> = ({
   onUserScroll,
   selectedIndicatorsSig,
   onVisibleRangeChange,
+  showVolume = false,
+  onVolumeAvailableChange,
 }) => {
   const chartContainerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<ReturnType<typeof createChart> | null>(null);
@@ -134,9 +143,46 @@ const ChartCanvas: React.FC<ChartCanvasProps> = ({
   allPointsRef.current = allPoints;
   returnModeRef.current = returnMode;
 
+  const baseCandlesticks = useMemo(
+    () => activeSeries.filter((series) => series.seriesType === 'candlestick' && !series.indicator),
+    [activeSeries]
+  );
+  const volumeCandle = baseCandlesticks.length === 1 ? baseCandlesticks[0] : null;
+  const volumeAvailable = useMemo(() => {
+    if (!volumeCandle) return false;
+    return (volumeCandle.data as CandlestickPoint[]).some(
+      (point) => typeof point.volume === 'number' && point.volume > 0
+    );
+  }, [volumeCandle]);
+  useEffect(() => {
+    onVolumeAvailableChange?.(volumeAvailable);
+  }, [volumeAvailable, onVolumeAvailableChange]);
+
+  const augmentedSeries = useMemo<ChartSeries[]>(() => {
+    if (!showVolume || !volumeCandle || !volumeAvailable || returnMode) {
+      return activeSeries;
+    }
+    const candleData = volumeCandle.data as CandlestickPoint[];
+    const volumeData = candleData
+      .filter((p) => typeof p.volume === 'number' && p.volume! >= 0)
+      .map((p) => ({
+        time: p.time,
+        value: p.volume as number,
+        color: p.close >= p.open ? VOLUME_UP_COLOR : VOLUME_DOWN_COLOR,
+      })) as unknown as LinePoint[];
+    if (volumeData.length === 0) return activeSeries;
+    const volumeSeries: ChartSeries = {
+      id: VOLUME_SERIES_KEY,
+      seriesType: 'histogram',
+      data: volumeData,
+      priceScaleId: VOLUME_PRICE_SCALE_ID,
+    };
+    return [...activeSeries, volumeSeries];
+  }, [activeSeries, showVolume, volumeAvailable, volumeCandle, returnMode]);
+
   const seriesSpecs = useMemo(
-    () => buildSeriesSpecs(activeSeries, { hasCandlestick, returnMode }),
-    [activeSeries, hasCandlestick, returnMode]
+    () => buildSeriesSpecs(augmentedSeries, { hasCandlestick, returnMode }),
+    [augmentedSeries, hasCandlestick, returnMode]
   );
   const hasRenderableSeries = seriesSpecs.length > 0;
   const returnComputationSignature = useMemo(
@@ -284,7 +330,19 @@ const ChartCanvas: React.FC<ChartCanvasProps> = ({
         scaleMargins: priceScaleMargins,
       },
     });
-  }, [activeSeries, priceScaleMargins, priceScaleMode, returnMode]);
+    if (showVolume && volumeAvailable) {
+      try {
+        chartRef.current
+          .priceScale(VOLUME_PRICE_SCALE_ID)
+          .applyOptions({
+            scaleMargins: { top: 0.8, bottom: 0 },
+            visible: false,
+          });
+      } catch {
+        // Volume scale may not exist yet on first run; useEffect re-runs after series mount.
+      }
+    }
+  }, [activeSeries, priceScaleMargins, priceScaleMode, returnMode, showVolume, volumeAvailable]);
 
   useEffect(() => {
     if (!chartRef.current) return;

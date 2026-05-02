@@ -30,6 +30,7 @@ def _resample_candlestick(data: list[dict], view: str) -> list[dict]:
     for p in data:
         t = p.get("time", "")
         key = _period_key(t, view)
+        vol = p.get("volume")
         if key not in buckets:
             buckets[key] = {
                 "time": t,
@@ -38,6 +39,8 @@ def _resample_candlestick(data: list[dict], view: str) -> list[dict]:
                 "low": float(p["low"]),
                 "close": float(p["close"]),
             }
+            if vol is not None:
+                buckets[key]["volume"] = float(vol)
             order.append(key)
         else:
             b = buckets[key]
@@ -49,6 +52,8 @@ def _resample_candlestick(data: list[dict], view: str) -> list[dict]:
             if lo < b["low"]:
                 b["low"] = lo
             b["close"] = float(p["close"])
+            if vol is not None:
+                b["volume"] = b.get("volume", 0.0) + float(vol)
     return [buckets[k] for k in order]
 
 

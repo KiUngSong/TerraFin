@@ -23,6 +23,9 @@ interface BottomBarProps {
   selectedIndicators?: Set<string>;
   onSelectedIndicatorsChange?: (next: Set<string>) => void;
   onReset?: () => void;
+  volumeAvailable?: boolean;
+  showVolume?: boolean;
+  onShowVolumeChange?: (next: boolean) => void;
 }
 
 const SeriesTags: React.FC<{ tags: SeriesTag[]; onRemove: (name: string) => void; compact?: boolean }> = ({
@@ -175,6 +178,59 @@ const PriceScaleControls: React.FC<{
   );
 };
 
+const VolumeToggle: React.FC<{
+  available: boolean;
+  active: boolean;
+  onToggle: () => void;
+  compact?: boolean;
+}> = ({ available, active, onToggle, compact = false }) => {
+  const [hovered, setHovered] = useState(false);
+  const buttonPadding = compact ? '4px 8px' : '6px 10px';
+  const buttonFontSize = compact ? 12 : 13;
+  const disabled = !available;
+  return (
+    <>
+      <button
+        type="button"
+        onMouseEnter={() => setHovered(true)}
+        onMouseLeave={() => setHovered(false)}
+        onClick={() => {
+          if (!disabled) onToggle();
+        }}
+        title={
+          disabled
+            ? 'Volume available only for a single candlestick chart'
+            : active ? 'Hide volume' : 'Show volume'
+        }
+        disabled={disabled}
+        style={{
+          fontFamily: FONT_FAMILY,
+          padding: buttonPadding,
+          minHeight: compact ? 28 : undefined,
+          fontSize: buttonFontSize,
+          fontWeight: 500,
+          border: 'none',
+          borderRadius: 6,
+          background: disabled
+            ? 'transparent'
+            : active
+              ? '#e8e8e8'
+              : hovered
+                ? '#f0f0f0'
+                : 'transparent',
+          color: disabled ? '#bbb' : active ? '#1976d2' : '#444',
+          cursor: disabled ? 'default' : 'pointer',
+          lineHeight: 1,
+          whiteSpace: 'nowrap',
+        }}
+      >
+        Vol
+      </button>
+      <Divider compact={compact} />
+    </>
+  );
+};
+
 const BottomBar: React.FC<BottomBarProps> = ({
   isEmpty,
   priceScaleMode,
@@ -187,6 +243,9 @@ const BottomBar: React.FC<BottomBarProps> = ({
   selectedIndicators,
   onSelectedIndicatorsChange,
   onReset,
+  volumeAvailable = false,
+  showVolume = false,
+  onShowVolumeChange,
 }) => {
   if (compact) {
     const compactRowStyle: React.CSSProperties = {
@@ -235,6 +294,14 @@ const BottomBar: React.FC<BottomBarProps> = ({
 
           {!isEmpty ? (
             <div style={{ display: 'flex', alignItems: 'center', flexShrink: 0 }}>
+              {onShowVolumeChange ? (
+                <VolumeToggle
+                  available={volumeAvailable}
+                  active={showVolume}
+                  onToggle={() => onShowVolumeChange(!showVolume)}
+                  compact
+                />
+              ) : null}
               <PriceScaleControls
                 mode={priceScaleMode}
                 onChange={onPriceScaleModeChange}
@@ -260,6 +327,13 @@ const BottomBar: React.FC<BottomBarProps> = ({
         <SeriesTags tags={seriesTags} onRemove={onRemoveTag} />
         {!isEmpty ? (
           <div style={{ display: 'flex', alignItems: 'center', flexShrink: 0 }}>
+            {onShowVolumeChange ? (
+              <VolumeToggle
+                available={volumeAvailable}
+                active={showVolume}
+                onToggle={() => onShowVolumeChange(!showVolume)}
+              />
+            ) : null}
             <PriceScaleControls
               mode={priceScaleMode}
               onChange={onPriceScaleModeChange}

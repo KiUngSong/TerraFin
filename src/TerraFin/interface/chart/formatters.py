@@ -57,17 +57,40 @@ def format_series_item(df: TimeSeriesDataFrame | None, default_id: str = "Primar
     )
 
     if has_ohlc:
-        rows = zip(
-            times,
-            frame["open"].astype(float).tolist(),
-            frame["high"].astype(float).tolist(),
-            frame["low"].astype(float).tolist(),
-            frame["close"].astype(float).tolist(),
-        )
-        data = [
-            {"time": time_str, "open": open_, "high": high, "low": low, "close": close}
-            for time_str, open_, high, low, close in rows
-        ]
+        has_volume = "volume" in frame.columns and frame["volume"].notna().any()
+        if has_volume:
+            volumes = frame["volume"].astype(float).tolist()
+            rows = zip(
+                times,
+                frame["open"].astype(float).tolist(),
+                frame["high"].astype(float).tolist(),
+                frame["low"].astype(float).tolist(),
+                frame["close"].astype(float).tolist(),
+                volumes,
+            )
+            data = [
+                {
+                    "time": time_str,
+                    "open": open_,
+                    "high": high,
+                    "low": low,
+                    "close": close,
+                    "volume": volume,
+                }
+                for time_str, open_, high, low, close, volume in rows
+            ]
+        else:
+            rows = zip(
+                times,
+                frame["open"].astype(float).tolist(),
+                frame["high"].astype(float).tolist(),
+                frame["low"].astype(float).tolist(),
+                frame["close"].astype(float).tolist(),
+            )
+            data = [
+                {"time": time_str, "open": open_, "high": high, "low": low, "close": close}
+                for time_str, open_, high, low, close in rows
+            ]
         series_type = "candlestick"
     else:
         rows = zip(times, frame["close"].astype(float).tolist())

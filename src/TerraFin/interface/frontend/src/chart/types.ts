@@ -1,5 +1,12 @@
 export type LinePoint = { time: string; value: number };
-export type CandlestickPoint = { time: string; open: number; high: number; low: number; close: number };
+export type CandlestickPoint = {
+  time: string;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  volume?: number;
+};
 export type ChartZone = { from: number; to: number; color: string };
 
 export interface ChartSeries {

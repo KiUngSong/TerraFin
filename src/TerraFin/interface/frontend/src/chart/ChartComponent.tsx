@@ -145,6 +145,8 @@ const ChartComponentInner = React.forwardRef<ChartComponentHandle, ChartComponen
   const [activeView, setActiveView] = useState<string>('daily');
   const [selectedRange, setSelectedRange] = useState<RangeId | null>('1Y');
   const [priceScaleMode, setPriceScaleMode] = useState<number>(0);
+  const [showVolume, setShowVolume] = useState<boolean>(false);
+  const [volumeAvailable, setVolumeAvailable] = useState<boolean>(false);
   const [dateSelectorOpen, setDateSelectorOpen] = useState(false);
   const [dateSelectionRequest, setDateSelectionRequest] = useState<DateSelectionRequest>(null);
   const [selectedIndicators, setSelectedIndicators] = useState<Set<string>>(DEFAULT_INDICATORS);
@@ -806,6 +808,8 @@ const ChartComponentInner = React.forwardRef<ChartComponentHandle, ChartComponen
               }}
               selectedIndicatorsSig={selectedIndicatorsSig}
               onVisibleRangeChange={setVisibleRange}
+              showVolume={showVolume}
+              onVolumeAvailableChange={setVolumeAvailable}
             />
             <RiskAnalyticsPanel
               visible={riskAnalyticsOpen}
@@ -828,6 +832,9 @@ const ChartComponentInner = React.forwardRef<ChartComponentHandle, ChartComponen
         selectedIndicators={selectedIndicators}
         onSelectedIndicatorsChange={setSelectedIndicators}
         onReset={handleResetIndicators}
+        volumeAvailable={volumeAvailable}
+        showVolume={showVolume}
+        onShowVolumeChange={setShowVolume}
       />
       <DateSelector isOpen={dateSelectorOpen} onClose={() => setDateSelectorOpen(false)} onSelect={handleDateSelect} />
     </div>

@@ -6,6 +6,15 @@ import type { LinePoint } from '../types';
 
 type SeriesRef = unknown;
 
+
+function formatMagnitude(value: number): string {
+  const abs = Math.abs(value);
+  if (abs >= 1_000_000_000) return (value / 1_000_000_000).toFixed(2) + 'B';
+  if (abs >= 1_000_000) return (value / 1_000_000).toFixed(2) + 'M';
+  if (abs >= 1_000) return (value / 1_000).toFixed(2) + 'K';
+  return value.toLocaleString(undefined, { maximumFractionDigits: 0 });
+}
+
 interface TooltipContext {
   el: HTMLElement;
   seriesToId: Map<SeriesRef, string>;
@@ -58,17 +67,25 @@ export function createTooltip(ctx: TooltipContext): {
       if (id == null) return;
       const d = data as { value?: number; close?: number };
       const value = d.value !== undefined ? d.value : d.close;
-      if (value !== undefined) {
-        const isReturn = originalDataMap.has(s);
-        const formatted =
-          typeof value === 'number' && Number.isFinite(value)
-            ? isReturn
-              ? value.toFixed(2) + '%'
-              : value.toLocaleString(undefined, { maximumFractionDigits: 4 })
-            : String(value);
-        const color = seriesToColor.get(s) ?? '#888';
-        rows.push({ id, formatted, color });
+      if (value === undefined) return;
+      const color = seriesToColor.get(s) ?? '#888';
+      // Auxiliary overlay series use ids prefixed with `__` (e.g. the volume
+      // histogram). Show with a friendly label + magnitude suffix instead
+      // of leaking the synthetic id as a symbol name.
+      if (id.startsWith('__')) {
+        if (id === '__volume_overlay__' && typeof value === 'number') {
+          rows.push({ id: 'Volume', formatted: formatMagnitude(value), color });
+        }
+        return;
       }
+      const isReturn = originalDataMap.has(s);
+      const formatted =
+        typeof value === 'number' && Number.isFinite(value)
+          ? isReturn
+            ? value.toFixed(2) + '%'
+            : value.toLocaleString(undefined, { maximumFractionDigits: 4 })
+          : String(value);
+      rows.push({ id, formatted, color });
     });
 
     if (rows.length === 0) {
