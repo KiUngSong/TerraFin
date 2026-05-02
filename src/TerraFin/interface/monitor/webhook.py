@@ -95,6 +95,20 @@ def check_rate_limit(client_id: str) -> bool:
 def forward_to_telegram(signal: InboundSignal) -> None:
     from TerraFin.interface.channels.telegram import TelegramChannel
 
+    # Severity gate: only ``high`` and ``med`` reach Telegram. ``low``
+    # (and unknown) are still dedup'd + persisted on the inbound path
+    # but not pushed to the user channel — keeps the noise floor off
+    # the phone. Accepted vocabulary on the wire is ``high|med|low``;
+    # senders are responsible for normalizing whatever upstream alias
+    # they used (e.g. ``medium`` → ``med``) before POSTing.
+    sev_norm = (signal.severity or "").lower()
+    if sev_norm not in {"high", "med"}:
+        log.debug(
+            "Telegram forward skipped for %s (%s) — severity=%r below threshold",
+            signal.ticker, signal.signal, signal.severity,
+        )
+        return
+
     try:
         ch = TelegramChannel.from_config()
     except (FileNotFoundError, RuntimeError) as exc:
