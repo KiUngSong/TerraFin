@@ -40,33 +40,36 @@ def _is_korean(q: str) -> bool:
     return bool(_KOREAN_RE.search(q))
 
 
-def _search_indicators(q: str) -> list[dict[str, Any]]:
-    """Match local indicator registries by substring (case-insensitive)."""
+def _build_indicator_entries() -> list[dict[str, Any]]:
+    """The canonical user-facing indicator catalog.
+
+    PRIVATE_SERIES is the data-source layer (cache namespaces + fetcher
+    bindings) — it is NOT a UI surface. Market and Economic registries
+    wrap it where appropriate (e.g. ``MARKET_INDICATOR_REGISTRY["CAPE"]``
+    fetches via the private cape series). The wrappers are the canonical
+    chart-UI entry points; the underlying source layer is not surfaced.
+    """
     from TerraFin.data.providers.economic import indicator_registry
     from TerraFin.data.providers.market import MARKET_INDICATOR_REGISTRY
-    from TerraFin.data.providers.private_access import PRIVATE_SERIES
 
+    out: list[dict[str, Any]] = []
+    for name, ind in MARKET_INDICATOR_REGISTRY.items():
+        out.append({"symbol": name, "name": ind.description or name, "group": "Market"})
+    for name, ind in indicator_registry._indicators.items():
+        out.append({"symbol": name, "name": ind.description or name, "group": "Economic"})
+    return out
+
+
+def _search_indicators(q: str) -> list[dict[str, Any]]:
+    """Substring match across the indicator catalog."""
     q_lower = q.strip().lower()
     if not q_lower:
         return []
-
-    out: list[dict[str, Any]] = []
-
-    for name, ind in MARKET_INDICATOR_REGISTRY.items():
-        hay = f"{name} {ind.description}".lower()
-        if q_lower in hay:
-            out.append({"symbol": name, "name": ind.description or name, "group": "Market"})
-
-    for name, ind in indicator_registry._indicators.items():
-        hay = f"{name} {ind.description}".lower()
-        if q_lower in hay:
-            out.append({"symbol": name, "name": ind.description or name, "group": "Economic"})
-
-    for _, spec in PRIVATE_SERIES.items():
-        if q_lower in spec.display_name.lower():
-            out.append({"symbol": spec.display_name, "name": spec.display_name, "group": "Sentiment"})
-
-    return out[:10]
+    matches = [
+        entry for entry in _build_indicator_entries()
+        if q_lower in f"{entry['symbol']} {entry['name']}".lower()
+    ]
+    return matches[:10]
 
 
 def _search_naver_kr(q: str) -> list[dict[str, Any]]:
@@ -181,19 +184,9 @@ def create_ticker_search_router() -> APIRouter:
         Frontend fetches once at app load, then does local prefix matching
         without round-tripping to the server for every keystroke.
         """
-        from TerraFin.data.providers.economic import indicator_registry
-        from TerraFin.data.providers.market import MARKET_INDICATOR_REGISTRY
-        from TerraFin.data.providers.private_access import PRIVATE_SERIES
-
         from .aliases_kr import KR_ALIASES
 
-        indicators: list[dict[str, str]] = []
-        for name, ind in MARKET_INDICATOR_REGISTRY.items():
-            indicators.append({"symbol": name, "name": ind.description or name, "group": "Market"})
-        for name, ind in indicator_registry._indicators.items():
-            indicators.append({"symbol": name, "name": ind.description or name, "group": "Economic"})
-        for _, spec in PRIVATE_SERIES.items():
-            indicators.append({"symbol": spec.display_name, "name": spec.display_name, "group": "Sentiment"})
+        indicators = _build_indicator_entries()
 
         # Curated US/intl aliases first (so a hand-picked entry like
         # 애플 → AAPL wins over an accidental KRX collision); then the

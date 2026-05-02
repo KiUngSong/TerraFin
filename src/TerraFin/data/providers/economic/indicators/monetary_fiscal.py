@@ -44,10 +44,17 @@ def cape_ratio(*args, **kwargs):
     if frame is None or frame.empty:
         return pd.DataFrame(columns=["Close"])
 
-    df = pd.DataFrame({
-        "Date": pd.to_datetime(frame["time"]),
-        "Close": pd.to_numeric(frame["close"], errors="coerce"),
-    }).dropna().set_index("Date").sort_index()
+    df = (
+        pd.DataFrame(
+            {
+                "Date": pd.to_datetime(frame["time"]),
+                "Close": pd.to_numeric(frame["close"], errors="coerce"),
+            }
+        )
+        .dropna()
+        .set_index("Date")
+        .sort_index()
+    )
     return df
 
 
@@ -63,9 +70,7 @@ def buffett_indicator(*args, **kwargs):
     mc_min, mc_max = mktcap.index.min(), mktcap.index.max()
 
     common_start = max(gdp_min.to_period("Q"), mc_min.to_period("Q")).to_timestamp()
-    common_end = (
-        min(gdp_max.to_period("Q"), mc_max.to_period("Q")).to_timestamp("Q").to_period("Q").to_timestamp("Q")
-    )
+    common_end = min(gdp_max.to_period("Q"), mc_max.to_period("Q")).to_timestamp("Q").to_period("Q").to_timestamp("Q")
 
     gdp = gdp.loc[common_start:common_end]
     mktcap = mktcap.loc[common_start:common_end]
@@ -109,10 +114,6 @@ INDICATORS = {
     "Buffett Indicator": EconomicIndicator(
         description="Buffett Indicator: Total US equity market cap as a percentage of GDP. Values above 100% suggest overvaluation.",
         get_data=buffett_indicator,
-    ),
-    "CAPE Index": EconomicIndicator(
-        description="CAPE Index (Shiller PE10): Cyclically Adjusted Price-to-Earnings Ratio. 10-year inflation-adjusted P/E for the S&P 500.",
-        get_data=cape_ratio,
     ),
     "M2 Velocity": EconomicIndicator(
         description="Velocity of M2 Money Stock: GDP divided by M2 money supply. Measures how quickly money circulates in the economy.",

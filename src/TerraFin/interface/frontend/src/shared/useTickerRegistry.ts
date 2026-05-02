@@ -11,7 +11,9 @@ export interface TickerRegistry {
   indicators: IndicatorEntry[];
 }
 
-const CACHE_KEY = 'tf-ticker-registry-v1';
+// Bump version when the server-side indicator catalog shape changes so old
+// sessionStorage caches don't keep showing removed/duplicated entries.
+const CACHE_KEY = 'tf-ticker-registry-v2';
 let inflight: Promise<TickerRegistry> | null = null;
 let memo: TickerRegistry | null = null;
 

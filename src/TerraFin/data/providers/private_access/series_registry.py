@@ -16,7 +16,7 @@ PRIVATE_SERIES: dict[str, PrivateSeriesSpec] = {
     ),
     "net_breadth": PrivateSeriesSpec(
         key="net-breadth",
-        display_name="Advance %",
+        display_name="Net Breadth",
         history_cache_namespace="private_net_breadth_history",
     ),
     "trailing_forward_pe": PrivateSeriesSpec(
