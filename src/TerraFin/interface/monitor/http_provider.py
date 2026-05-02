@@ -1,19 +1,21 @@
-"""HTTP implementation of AlertProvider.
+"""HTTP implementation of SignalProvider.
 
 Env vars:
-  TERRAFIN_SIGNALS_PROVIDER_URL   — base URL of external alert API (required)
+  TERRAFIN_SIGNALS_PROVIDER_URL   — base URL of external signal API (required)
   TERRAFIN_SIGNALS_PROVIDER_KEY   — Bearer token for the external API
-  (legacy ``TERRAFIN_ALERT_PROVIDER_*`` still honored with a deprecation log)
+  (Configure these via env; no legacy fallbacks.)
 """
+
 import logging
 
-from TerraFin.signals.env import signals_env
+from TerraFin.interface.channels.env import signals_env
+
 
 log = logging.getLogger(__name__)
 
 
-class HttpAlertProvider:
-    """Posts ticker registrations to an external real-time alert service."""
+class HttpSignalProvider:
+    """Posts ticker registrations to an external real-time signal service."""
 
     def __init__(self, base_url: str, api_key: str = "") -> None:
         self.base_url = base_url.rstrip("/")
@@ -63,16 +65,16 @@ class HttpAlertProvider:
             resp.raise_for_status()
 
 
-def get_alert_provider_from_env() -> HttpAlertProvider | None:
+def get_signal_provider_from_env() -> HttpSignalProvider | None:
     """Return configured provider, or None if not set."""
-    url = signals_env("TERRAFIN_SIGNALS_PROVIDER_URL", "TERRAFIN_ALERT_PROVIDER_URL")
+    url = signals_env("TERRAFIN_SIGNALS_PROVIDER_URL")
     if not url:
         return None
-    key = signals_env("TERRAFIN_SIGNALS_PROVIDER_KEY", "TERRAFIN_ALERT_PROVIDER_KEY")
-    return HttpAlertProvider(base_url=url, api_key=key)
+    key = signals_env("TERRAFIN_SIGNALS_PROVIDER_KEY")
+    return HttpSignalProvider(base_url=url, api_key=key)
 
 
-def is_alert_provider_configured() -> bool:
+def is_signal_provider_configured() -> bool:
     """True iff the env carries a provider URL — used by the watchlist UI to
     decide whether to surface the per-row monitor toggle."""
-    return bool(signals_env("TERRAFIN_SIGNALS_PROVIDER_URL", "TERRAFIN_ALERT_PROVIDER_URL"))
+    return bool(signals_env("TERRAFIN_SIGNALS_PROVIDER_URL"))

@@ -28,6 +28,18 @@ Routes / Agent / Frontend
    └── corporate       (yfinance fundamentals)
 ```
 
+## Signal pipeline
+
+Signals (`name`, `ticker`, `severity`, `message`, `snapshot`) flow into
+TerraFin from two directions, sharing one dataclass. The **pull side** is
+`analytics/analysis/patterns/` — call `evaluate(ticker, ohlc)` and get
+back any patterns that match the latest bar (used by the agent flow,
+weekly reports, ad-hoc backtests). The **push side** is
+`interface/monitor/` — an external realtime monitor service (DataFactory)
+holds a broker WebSocket open, runs intraday detectors, and POSTs each
+fired event to `/signals/api/signal`, where it is HMAC-verified, deduped,
+and forwarded to the user's Telegram via `interface/channels/`.
+
 ## Components
 
 - [Data Layer](./data-layer.md) — providers, contracts, `DataFactory`, caching

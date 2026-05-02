@@ -1,5 +1,5 @@
 """Periodic synchronization of monitor-flagged watchlist tickers with the
-external alert provider.
+external signal provider.
 
 Tickers are flagged for monitoring by carrying the ``"monitor"`` tag in
 the watchlist (case-insensitive). The watchlist's monitored set is the
@@ -13,8 +13,10 @@ actual subscribed set against it.
 
 Providers should treat both calls as idempotent.
 """
+
 import asyncio
 import logging
+
 
 log = logging.getLogger(__name__)
 
@@ -46,8 +48,7 @@ async def registration_heartbeat(provider, interval: int = 60) -> None:
                 # idempotent re-register only (no orphan eviction).
                 actual = set()
             except Exception:
-                log.exception("Failed to read provider's subscribed set; "
-                              "will re-register desired only")
+                log.exception("Failed to read provider's subscribed set; will re-register desired only")
                 actual = set()
 
             to_register = sorted(desired - actual)
@@ -55,12 +56,10 @@ async def registration_heartbeat(provider, interval: int = 60) -> None:
 
             if to_unregister:
                 await provider.unregister(to_unregister)
-                log.info("Evicted %d orphan ticker(s) from alert provider: %s",
-                         len(to_unregister), to_unregister)
+                log.info("Evicted %d orphan ticker(s) from signal provider: %s", len(to_unregister), to_unregister)
             if to_register:
                 await provider.register(to_register)
-                log.info("Registered %d ticker(s) with alert provider: %s",
-                         len(to_register), to_register)
+                log.info("Registered %d ticker(s) with signal provider: %s", len(to_register), to_register)
         except asyncio.CancelledError:
             return
         except Exception:

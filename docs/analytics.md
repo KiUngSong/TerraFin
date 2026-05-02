@@ -153,6 +153,65 @@ Portfolio optimization lives under `src/TerraFin/analytics/analysis/portfolio/`.
 
 This is implemented as a standalone computation module rather than a UI feature.
 
+## Pattern signals
+
+`src/TerraFin/analytics/analysis/patterns/` is the systematic, rules-based
+pattern catalog — the "do any of these named market conditions match the
+latest bar?" surface. Where `technical/` exposes primitives (RSI value, MACD
+line), `patterns/` evaluates whether a *named pattern* fires:
+`CAPITULATION_BOTTOM`, `MA_GOLDEN_CROSS`, `WYCKOFF_SPRING`,
+`52W_NEW_HIGH`, etc. Each pattern returns zero or more `Signal` objects
+(`name`, `ticker`, `severity`, `message`, `snapshot`) and is stateless —
+same input frame, same verdict.
+
+This is the quantitative-investing layer of TerraFin: pattern-as-hypothesis,
+backtested for forward-return edge, then wired into agent reports or pushed
+through the realtime monitor.
+
+### Pattern schools
+
+Modules are split by methodology so a new pattern lands in an obvious file.
+
+| School | Patterns |
+|--------|----------|
+| `trend` | 50/200 MA cross, MA50 cross, Minervini trend template, Faber 10-month TAA |
+| `breakout` | Bollinger / Donchian (50, weekly 52) breakout, BB squeeze release, swing-pivot break, Darvas box, NR7 / Inside Bar, Keltner channel, 52-week high proximity, Wyckoff Spring / Upthrust |
+| `meanrev` | RSI overbought / oversold, Connors RSI(2) dip in uptrend |
+| `momentum` | MACD signal-line cross, Coppock curve (monthly) |
+| `reversal` | Bull / bear engulfing at extreme, RSI ↔ price divergence |
+| `volume` | Capitulation bottom (Wyckoff selling climax), OBV divergence, Chaikin Money Flow, Money Flow Index |
+
+### Public API
+
+```python
+from TerraFin.analytics.analysis.patterns import evaluate, Signal
+
+signals = evaluate("MOH", ohlc_df)  # list[Signal]
+```
+
+Every school module also exports its own `evaluate(ticker, ohlc)` if the
+caller wants a narrower scan.
+
+### Regime gates
+
+A few patterns consult `spy_trend_ok(50)` from `patterns/_base.py` — a
+day-cached "is SPY above its 50-day SMA" flag. Bullish-entry patterns
+(`MINERVINI_TEMPLATE`, `52W_NEW_HIGH`) suppress fires when the broad
+market is in primary downtrend. This was added after bear-period backtests
+showed those patterns producing negative-edge fires across GFC 2008,
+COVID 2020, and the 2022 bear.
+
+### Pull vs push: same `Signal`, different trigger
+
+`patterns/` is the **pull-driven** side: the agent flow, weekly reports,
+or an ad-hoc backtest asks "evaluate every pattern on this frame now."
+The **push-driven** flavor lives at `interface/monitor/`: an external
+realtime monitor service holds a broker WebSocket open, runs its own
+intraday detectors, and POSTs each fired event to TerraFin. Both sides
+emit the same `Signal` dataclass — only the trigger differs. See
+[architecture.md](./architecture.md#signal-pipeline) for the pipeline
+shape.
+
 ## Simulation
 
 Simulation lives under `src/TerraFin/analytics/simulation/`.

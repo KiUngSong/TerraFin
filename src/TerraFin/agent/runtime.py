@@ -563,6 +563,17 @@ def build_default_capability_registry(
                 response_model_name="IndicatorsResponse",
             ),
             TerraFinCapability(
+                name="patterns",
+                description="Evaluate every named market pattern (CAPITULATION_BOTTOM, MA_GOLDEN_CROSS, WYCKOFF_SPRING, etc.) against the latest bar of a single asset and return whichever patterns currently match.",
+                handler=resolved_service.patterns,
+                focus_extractor=_focus_from_input_keys("name"),
+                backgroundable=True,
+                summary="Named market patterns matching the latest bar for one asset.",
+                cli_subcommand_name="patterns",
+                http_route_path="/agent/api/patterns",
+                response_model_name="PatternsResponse",
+            ),
+            TerraFinCapability(
                 name="market_snapshot",
                 description="Fetch a compact market snapshot for a single asset.",
                 handler=resolved_service.market_snapshot,

@@ -31,7 +31,8 @@ from typing import Any
 from fastapi import APIRouter, Response
 from fastapi.responses import HTMLResponse, JSONResponse
 
-from TerraFin.signals.env import signals_env
+from TerraFin.interface.channels.env import signals_env
+
 
 log = logging.getLogger(__name__)
 
@@ -45,6 +46,7 @@ _cache_lock = asyncio.Lock()
 
 # --- Probes ----------------------------------------------------------------
 
+
 def _probe_agent() -> dict[str, Any]:
     """Static: at least one provider has its auth env var set."""
     try:
@@ -52,10 +54,10 @@ def _probe_agent() -> dict[str, Any]:
     except Exception:
         # Fallback: hard-code the well-known env vars.
         env_groups = [
-            ("OpenAI",        ("OPENAI_API_KEY",)),
-            ("Anthropic",     ("ANTHROPIC_API_KEY",)),
-            ("Gemini",        ("GEMINI_API_KEY", "GOOGLE_API_KEY")),
-            ("GitHub Copilot",("COPILOT_GITHUB_TOKEN", "GH_TOKEN", "GITHUB_TOKEN")),
+            ("OpenAI", ("OPENAI_API_KEY",)),
+            ("Anthropic", ("ANTHROPIC_API_KEY",)),
+            ("Gemini", ("GEMINI_API_KEY", "GOOGLE_API_KEY")),
+            ("GitHub Copilot", ("COPILOT_GITHUB_TOKEN", "GH_TOKEN", "GITHUB_TOKEN")),
         ]
     else:
         env_groups = [(c.label if hasattr(c, "label") else c.id, c.auth_env_vars) for c in _CATALOGS]
@@ -81,6 +83,7 @@ async def _probe_telegram() -> dict[str, Any]:
         return {"status": "down", "detail": "config missing token"}
     try:
         import httpx
+
         async with httpx.AsyncClient(timeout=_PROBE_TIMEOUT) as client:
             r = await client.get(f"https://api.telegram.org/bot{token}/getMe")
         if r.status_code != 200:
@@ -97,13 +100,14 @@ async def _probe_telegram() -> dict[str, Any]:
 
 
 async def _probe_signals_provider() -> dict[str, Any]:
-    url = signals_env("TERRAFIN_SIGNALS_PROVIDER_URL", "TERRAFIN_ALERT_PROVIDER_URL")
+    url = signals_env("TERRAFIN_SIGNALS_PROVIDER_URL")
     if not url:
         return {"status": "down", "detail": "TERRAFIN_SIGNALS_PROVIDER_URL not set"}
-    key = signals_env("TERRAFIN_SIGNALS_PROVIDER_KEY", "TERRAFIN_ALERT_PROVIDER_KEY")
+    key = signals_env("TERRAFIN_SIGNALS_PROVIDER_KEY")
     headers = {"Authorization": f"Bearer {key}"} if key else {}
     try:
         import httpx
+
         async with httpx.AsyncClient(timeout=_PROBE_TIMEOUT) as client:
             r = await client.get(url.rstrip("/") + "/health", headers=headers)
         if r.status_code != 200:
@@ -122,11 +126,10 @@ async def _probe_signals_provider() -> dict[str, Any]:
 
 # --- Aggregation + caching -------------------------------------------------
 
+
 async def _gather_snapshot() -> dict[str, Any]:
     agent = _probe_agent()
-    telegram, signals = await asyncio.gather(
-        _probe_telegram(), _probe_signals_provider()
-    )
+    telegram, signals = await asyncio.gather(_probe_telegram(), _probe_signals_provider())
     rank = {"ok": 0, "starting": 0, "degraded": 1, "down": 2}
     overall = max(
         rank.get(agent["status"], 2),
@@ -161,9 +164,9 @@ async def _get_snapshot(force: bool = False) -> dict[str, Any]:
 # --- HTML rendering --------------------------------------------------------
 
 _STATUS_COLORS = {
-    "ok":       ("#047857", "#d1fae5"),  # text, bg
+    "ok": ("#047857", "#d1fae5"),  # text, bg
     "degraded": ("#b45309", "#fef3c7"),
-    "down":     ("#b91c1c", "#fee2e2"),
+    "down": ("#b91c1c", "#fee2e2"),
     "starting": ("#1d4ed8", "#dbeafe"),
 }
 
@@ -172,7 +175,7 @@ def _badge(status: str) -> str:
     fg, bg = _STATUS_COLORS.get(status, ("#334155", "#e2e8f0"))
     return (
         f'<span style="display:inline-block;padding:2px 10px;border-radius:999px;'
-        f'background:{bg};color:{fg};font-weight:600;font-size:12px;'
+        f"background:{bg};color:{fg};font-weight:600;font-size:12px;"
         f'text-transform:uppercase;letter-spacing:.5px;">{escape(status)}</span>'
     )
 
@@ -185,32 +188,31 @@ def _component_card(name: str, comp: dict[str, Any]) -> str:
         rows = []
         for bname, b in brokers.items():
             rows.append(
-                f'<tr>'
+                f"<tr>"
                 f'<td style="padding:4px 10px;color:#475569;">{escape(bname)}</td>'
-                f'<td style="padding:4px 10px;">{_badge(str(b.get("status","?")))}</td>'
-                f'<td style="padding:4px 10px;color:#475569;">{escape(str(b.get("detail","")))}</td>'
+                f'<td style="padding:4px 10px;">{_badge(str(b.get("status", "?")))}</td>'
+                f'<td style="padding:4px 10px;color:#475569;">{escape(str(b.get("detail", "")))}</td>'
                 f'<td style="padding:4px 10px;color:#475569;text-align:right;">'
-                f'subs={b.get("subs",0)} '
-                f'last_tick={b.get("last_tick_age_sec") if b.get("last_tick_age_sec") is not None else "—"}s'
-                f'</td>'
-                f'</tr>'
+                f"subs={b.get('subs', 0)} "
+                f"last_tick={b.get('last_tick_age_sec') if b.get('last_tick_age_sec') is not None else '—'}s"
+                f"</td>"
+                f"</tr>"
             )
         if rows:
             extra = (
                 '<table style="width:100%;border-collapse:collapse;margin-top:10px;'
-                'font-size:13px;background:#f8fafc;border-radius:8px;overflow:hidden;">'
-                + "".join(rows) + "</table>"
+                'font-size:13px;background:#f8fafc;border-radius:8px;overflow:hidden;">' + "".join(rows) + "</table>"
             )
     return (
         '<div style="border:1px solid #e2e8f0;border-radius:12px;padding:16px 20px;'
         'background:#fff;box-shadow:0 1px 3px rgba(0,0,0,0.04);">'
         f'<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;">'
         f'<div style="font-weight:600;font-size:15px;color:#0f172a;">{escape(name)}</div>'
-        f'{_badge(str(comp.get("status","?")))}'
-        '</div>'
-        f'<div style="margin-top:6px;color:#475569;font-size:13px;">{escape(str(comp.get("detail","")))}</div>'
-        f'{extra}'
-        '</div>'
+        f"{_badge(str(comp.get('status', '?')))}"
+        "</div>"
+        f'<div style="margin-top:6px;color:#475569;font-size:13px;">{escape(str(comp.get("detail", "")))}</div>'
+        f"{extra}"
+        "</div>"
     )
 
 

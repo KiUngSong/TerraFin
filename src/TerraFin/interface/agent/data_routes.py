@@ -47,6 +47,7 @@ from TerraFin.agent.models import (
     MacroFocusResponse,
     MarketDataResponse,
     MarketSnapshotResponse,
+    PatternsResponse,
     PortfolioResponse,
     ResolveResponse,
 )
@@ -755,6 +756,17 @@ def create_agent_data_router() -> APIRouter:
     ):
         try:
             return IndicatorsResponse(**service.indicators(ticker, indicators, depth=depth, view=view))
+        except Exception as exc:
+            _raise_http_error(exc)
+
+    @router.get(f"{AGENT_API_PREFIX}/patterns", response_model=PatternsResponse)
+    def api_agent_patterns(
+        ticker: str = Query(..., min_length=1),
+        depth: str = Query(default="auto", pattern="^(auto|recent|full)$"),
+        view: str = Query(default="daily", pattern="^(daily|weekly|monthly|yearly)$"),
+    ):
+        try:
+            return PatternsResponse(**service.patterns(ticker, depth=depth, view=view))
         except Exception as exc:
             _raise_http_error(exc)
 

@@ -1,4 +1,4 @@
-"""Telegram channel for TerraFin alerts.
+"""Telegram channel for TerraFin signals.
 
 Config stored at ~/.terrafin/telegram.json:
   {"token": "123:AAH...", "chat_id": "987654321"}
@@ -8,10 +8,12 @@ Setup flow:
   terrafin-signals telegram pair
   terrafin-signals telegram test
 """
+
 import json
 import logging
 import time
 from pathlib import Path
+
 
 log = logging.getLogger(__name__)
 
@@ -25,10 +27,7 @@ def _api_url(token: str, method: str) -> str:
 
 def load_config(path: Path = _CONFIG_PATH) -> dict:
     if not path.exists():
-        raise FileNotFoundError(
-            f"Telegram config not found at {path}.\n"
-            "Run: terrafin-signals telegram setup <token>"
-        )
+        raise FileNotFoundError(f"Telegram config not found at {path}.\nRun: terrafin-signals telegram setup <token>")
     return json.loads(path.read_text())
 
 
@@ -48,7 +47,7 @@ class TelegramChannel:
         except ImportError as exc:
             raise RuntimeError("httpx is required: pip install httpx") from exc
 
-        # Reports carry a `markdown` key — render styled. Alerts use the
+        # Reports carry a `markdown` key — render styled. Signals use the
         # `signals` shape and stay on the legacy plain Markdown path.
         if payload.get("markdown") or body_md and "##" in body_md:
             md = payload.get("markdown") or body_md
@@ -57,7 +56,7 @@ class TelegramChannel:
                 md = f"# {title}\n\n{md}"
             chunks = _markdown_to_telegram_html(md)
         else:
-            text = _format_alert(title, payload.get("signals", []))
+            text = _format_signal_payload(title, payload.get("signals", []))
             httpx.post(
                 _api_url(self.token, "sendMessage"),
                 json={
@@ -83,10 +82,10 @@ class TelegramChannel:
             ).raise_for_status()
 
     def send_text(self, text: str, parse_mode: str = "HTML") -> None:
-        """Send a single pre-formatted message. Bypasses the alert formatter.
+        """Send a single pre-formatted message. Bypasses the signal formatter.
 
         Use for one-off operational notices (e.g. monitor toggle confirmation)
-        where the full alert grouping/severity rendering is not appropriate.
+        where the full signal grouping/severity rendering is not appropriate.
         """
         try:
             import httpx
@@ -124,7 +123,7 @@ def _html_escape(s: str) -> str:
 _SEVERITY_EMOJI = {"high": "🔴", "med": "🟡", "medium": "🟡", "low": "🟢"}
 
 
-def _format_alert(title: str, signals: list[dict]) -> str:
+def _format_signal_payload(title: str, signals: list[dict]) -> str:
     """Group signals by ticker, render as ticker-led bullet list with emoji severity.
 
     Wire shape per signal: ``{"ticker": str, "severity"?: str, "message"|"signal"?: str}``.
@@ -201,7 +200,7 @@ def _markdown_to_telegram_html(md: str) -> list[str]:
                     out.append("\n".join(cur_lines))
                     cur_lines, cur_len = [], 0
                 for i in range(0, len(line), LIMIT):
-                    out.append(line[i:i + LIMIT])
+                    out.append(line[i : i + LIMIT])
                 continue
             cur_lines.append(line)
             cur_len += llen
@@ -253,6 +252,7 @@ def _inline_md(text: str) -> str:
     text = _BOLD_RE.sub(r"<b>\1</b>", text)
     text = _ITALIC_RE.sub(r"<i>\1</i>", text)
     text = _LINK_RE.sub(r'<a href="\2">\1</a>', text)
+
     # Restore code placeholders
     def _restore(m):
         return placeholders[int(m.group(1))]
@@ -322,11 +322,11 @@ def cmd_pair(timeout: int = 60) -> None:
 
 
 def cmd_test() -> None:
-    """Send a test alert to verify the setup."""
+    """Send a test signal to verify the setup."""
     ch = TelegramChannel.from_config()
     ch.send(
-        title="TerraFin Alert Test",
-        body_md="Test message from TerraFin alerting.",
+        title="TerraFin Signal Test",
+        body_md="Test message from TerraFin signals.",
         payload={"signals": [{"severity": "low", "ticker": "TEST", "message": "Setup is working."}]},
     )
     print("Test message sent.")

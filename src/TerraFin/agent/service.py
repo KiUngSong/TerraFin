@@ -425,6 +425,29 @@ class TerraFinAgentService:
             "processing": payload["processing"],
         }
 
+    def patterns(self, name: str, *, depth: str = "auto", view: str = "daily") -> dict[str, Any]:
+        """Evaluate every named market pattern against the latest bar."""
+        from TerraFin.analytics.analysis.patterns import evaluate as _eval_patterns
+
+        payload = self._market_series(name, depth=depth, view=view)
+        frame = payload["frame"]
+        ticker = payload["name"]
+        signals = _eval_patterns(ticker, frame)
+        return {
+            "ticker": ticker,
+            "signals": [
+                {
+                    "name": s.name,
+                    "severity": s.severity,
+                    "message": s.message,
+                    "snapshot": s.snapshot,
+                }
+                for s in signals
+            ],
+            "total": len(signals),
+            "processing": payload["processing"],
+        }
+
     def market_snapshot(self, name: str, *, depth: str = "auto", view: str = "daily") -> dict[str, Any]:
         """Per-ticker price action + indicators only.
 

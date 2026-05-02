@@ -5,11 +5,13 @@ plus a sidecar JSON with metadata. Disk cost is negligible (KB-scale per
 report) so we keep them indefinitely — multi-week stacking is the actual
 product.
 """
+
 import json
 import logging
 from dataclasses import asdict, dataclass
 from datetime import date, datetime, timezone
 from pathlib import Path
+
 
 log = logging.getLogger(__name__)
 

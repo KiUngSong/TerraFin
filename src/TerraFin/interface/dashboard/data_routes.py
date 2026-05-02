@@ -121,14 +121,14 @@ def create_dashboard_data_router() -> APIRouter:
     cache_manager = get_cache_manager()
 
     def _watchlist_response(items: list[dict]) -> WatchlistSnapshotResponse:
-        from TerraFin.interface.signals.http_provider import is_alert_provider_configured
+        from TerraFin.interface.monitor.http_provider import is_signal_provider_configured
 
         backend_configured = watchlist_service.is_backend_configured()
         return WatchlistSnapshotResponse(
             items=[WatchlistItemResponse.model_validate(item) for item in items],
             backendConfigured=backend_configured,
             mode="mongo" if backend_configured else "fallback",
-            monitorEnabled=is_alert_provider_configured(),
+            monitorEnabled=is_signal_provider_configured(),
         )
 
     def _is_monitored(item: dict | None) -> bool:
@@ -146,16 +146,16 @@ def create_dashboard_data_router() -> APIRouter:
         return None
 
     async def _push_monitor_change(symbol: str, is_now_monitored: bool) -> None:
-        """Push immediate register/unregister to the alert provider, then send
+        """Push immediate register/unregister to the signal provider, then send
         a Telegram confirmation (or failure notice) so the user always learns
         the round-trip result and silent fails are surfaced.
 
         Logged-and-swallowed: provider downtime should not break the watchlist
         UI. The heartbeat reconciles within ~60s anyway.
         """
-        from TerraFin.interface.signals.http_provider import get_alert_provider_from_env
+        from TerraFin.interface.monitor.http_provider import get_signal_provider_from_env
 
-        provider = get_alert_provider_from_env()
+        provider = get_signal_provider_from_env()
         if provider is None:
             return
 
@@ -182,7 +182,7 @@ def create_dashboard_data_router() -> APIRouter:
         import asyncio
         import logging
         try:
-            from TerraFin.signals.channels.telegram import TelegramChannel
+            from TerraFin.interface.channels.telegram import TelegramChannel
             ch = TelegramChannel.from_config()
         except Exception:
             return  # Telegram not configured — silently skip
@@ -289,13 +289,13 @@ def create_dashboard_data_router() -> APIRouter:
 
     @router.get(f"{DASHBOARD_API_PREFIX}/reports/weekly")
     def api_list_weekly_reports():
-        from TerraFin.signals.reports import list_reports
+        from TerraFin.analytics.reports import list_reports
         reports = list_reports(limit=12)
         return {"reports": [r.summary() for r in reports]}
 
     @router.get(f"{DASHBOARD_API_PREFIX}/reports/weekly/{{as_of}}")
     def api_get_weekly_report(as_of: str):
-        from TerraFin.signals.reports import load_report
+        from TerraFin.analytics.reports import load_report
         rec = load_report(as_of)
         if rec is None:
             raise HTTPException(status_code=404, detail=f"No report for {as_of}")
@@ -303,8 +303,8 @@ def create_dashboard_data_router() -> APIRouter:
 
     @router.post(f"{DASHBOARD_API_PREFIX}/reports/weekly/run")
     def api_run_weekly_report():
-        from TerraFin.signals.reports import list_reports
-        from TerraFin.signals.reports.weekly import build_weekly_report
+        from TerraFin.analytics.reports import list_reports
+        from TerraFin.analytics.reports.weekly import build_weekly_report
         build_weekly_report()
         latest = list_reports(limit=1)
         return {"reports": [r.summary() for r in latest]}

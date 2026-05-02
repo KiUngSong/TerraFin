@@ -3,6 +3,7 @@
 Single-worker only: in-memory dedup and rate-limit state are per-process. If you
 run uvicorn with --workers > 1, deploy a shared store before relying on these.
 """
+
 import hashlib
 import hmac
 import logging
@@ -10,8 +11,9 @@ import time
 from collections import OrderedDict, deque
 from threading import Lock
 
-from TerraFin.data.contracts.alert_provider import InboundSignal
-from TerraFin.signals.env import signals_env
+from TerraFin.data.contracts.signal_provider import InboundSignal
+from TerraFin.interface.channels.env import signals_env
+
 
 log = logging.getLogger(__name__)
 
@@ -31,7 +33,7 @@ class WebhookSecretMissing(RuntimeError):
 
 
 def get_webhook_secret() -> str:
-    return signals_env("TERRAFIN_SIGNALS_WEBHOOK_SECRET", "TERRAFIN_ALERT_WEBHOOK_SECRET")
+    return signals_env("TERRAFIN_SIGNALS_WEBHOOK_SECRET")
 
 
 def verify_signature(body: bytes, header_sig: str) -> bool:
@@ -42,9 +44,7 @@ def verify_signature(body: bytes, header_sig: str) -> bool:
     """
     secret = get_webhook_secret()
     if not secret:
-        raise WebhookSecretMissing(
-            "TERRAFIN_SIGNALS_WEBHOOK_SECRET is not set. Inbound signal endpoint disabled."
-        )
+        raise WebhookSecretMissing("TERRAFIN_SIGNALS_WEBHOOK_SECRET is not set. Inbound signal endpoint disabled.")
     if not header_sig:
         return False
     expected = hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
@@ -93,7 +93,7 @@ def check_rate_limit(client_id: str) -> bool:
 
 
 def forward_to_telegram(signal: InboundSignal) -> None:
-    from TerraFin.signals.channels.telegram import TelegramChannel
+    from TerraFin.interface.channels.telegram import TelegramChannel
 
     try:
         ch = TelegramChannel.from_config()
@@ -104,7 +104,7 @@ def forward_to_telegram(signal: InboundSignal) -> None:
     sev = f"[{signal.severity.upper()}] " if signal.severity else ""
     text = f"{sev}{signal.ticker}: {signal.signal}"
     ch.send(
-        title="TerraFin Alert",
+        title="TerraFin Signal",
         body_md=text,
         payload={"signals": [signal.model_dump(mode="json")]},
     )

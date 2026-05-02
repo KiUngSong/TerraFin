@@ -70,6 +70,20 @@ class IndicatorsResponse(BaseModel):
     processing: ProcessingMetadata
 
 
+class PatternSignal(BaseModel):
+    name: str
+    severity: str
+    message: str
+    snapshot: dict
+
+
+class PatternsResponse(BaseModel):
+    ticker: str
+    signals: list[PatternSignal]
+    total: int
+    processing: ProcessingMetadata
+
+
 class MarketSnapshotResponse(BaseModel):
     ticker: str
     price_action: PriceAction

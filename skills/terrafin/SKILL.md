@@ -27,6 +27,17 @@ triggers:
   - guru portfolio
   - lppl
   - bubble analysis
+  - pattern signals
+  - capitulation
+  - golden cross
+  - death cross
+  - bollinger breakout
+  - donchian breakout
+  - rsi oversold
+  - rsi overbought
+  - wyckoff
+  - minervini
+  - 52-week high
 ---
 
 # TerraFin

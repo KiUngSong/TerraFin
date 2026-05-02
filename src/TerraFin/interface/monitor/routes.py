@@ -1,15 +1,15 @@
-"""Inbound alert webhook endpoint.
+"""Inbound signal webhook endpoint.
 
-Primary path: POST /signals/api/signal
-Legacy alias: POST /alerting/api/signal  (kept so existing senders keep working)
+POST /signals/api/signal
 """
+
 import logging
 import os
 
 from fastapi import APIRouter, Header, HTTPException, Request
 
-from TerraFin.data.contracts.alert_provider import InboundSignal
-from TerraFin.interface.signals.webhook import (
+from TerraFin.data.contracts.signal_provider import InboundSignal
+from TerraFin.interface.monitor.webhook import (
     WebhookSecretMissing,
     check_rate_limit,
     forward_to_telegram,
@@ -17,10 +17,10 @@ from TerraFin.interface.signals.webhook import (
     verify_signature,
 )
 
+
 log = logging.getLogger(__name__)
 
 SIGNALS_API_PREFIX = "/signals/api"
-ALERTING_API_PREFIX = "/alerting/api"  # legacy
 
 # Inbound signal payloads are tiny (a few hundred bytes). Cap at 64KB to bound
 # the HMAC + JSON-parse cost an unauthenticated caller can force.
@@ -93,18 +93,11 @@ async def _handle_signal(request: Request, x_signature: str):
     return {"status": "ok"}
 
 
-def create_alerting_router() -> APIRouter:
+def create_signals_router() -> APIRouter:
     router = APIRouter()
 
     @router.post(f"{SIGNALS_API_PREFIX}/signal", status_code=200)
     async def inbound_signal(
-        request: Request,
-        x_signature: str = Header(default=""),
-    ):
-        return await _handle_signal(request, x_signature)
-
-    @router.post(f"{ALERTING_API_PREFIX}/signal", status_code=200, include_in_schema=False)
-    async def inbound_signal_legacy(
         request: Request,
         x_signature: str = Header(default=""),
     ):

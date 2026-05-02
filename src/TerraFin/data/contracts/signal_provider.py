@@ -1,6 +1,6 @@
-"""Alert provider contract.
+"""Signal provider contract.
 
-AlertProvider: protocol for registering tickers with an external real-time alert service.
+SignalProvider: protocol for registering tickers with an external real-time signal-emitting service.
 InboundSignal: payload the external API POSTs back to TerraFin when a signal fires.
 """
 
@@ -10,7 +10,7 @@ from typing import Protocol
 from pydantic import BaseModel
 
 
-class AlertProvider(Protocol):
+class SignalProvider(Protocol):
     async def register(self, tickers: list[str]) -> None: ...
     async def unregister(self, tickers: list[str]) -> None: ...
 
