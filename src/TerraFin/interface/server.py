@@ -47,10 +47,6 @@ from TerraFin.data.cache.registry import get_cache_manager
 from TerraFin.data.contracts.dataframes import TimeSeriesDataFrame
 from TerraFin.env import load_entrypoint_dotenv
 from TerraFin.interface.agent.data_routes import create_agent_data_router
-from TerraFin.interface.signals.heartbeat import registration_heartbeat
-from TerraFin.interface.health import create_health_router
-from TerraFin.interface.signals.http_provider import get_alert_provider_from_env
-from TerraFin.interface.signals.routes import create_alerting_router
 from TerraFin.interface.calendar.routes import create_calendar_router
 from TerraFin.interface.calendar.state import reset_calendar_state
 from TerraFin.interface.chart.formatters import format_dataframe
@@ -61,8 +57,12 @@ from TerraFin.interface.dashboard.data_routes import create_dashboard_data_route
 from TerraFin.interface.dashboard.routes import DASHBOARD_PATH, create_dashboard_router
 from TerraFin.interface.errors import AppRuntimeError, build_error_response
 from TerraFin.interface.frontend_assets import FrontendBuildError, validate_frontend_build
+from TerraFin.interface.health import create_health_router
 from TerraFin.interface.market_insights.data_routes import create_market_insights_data_router
 from TerraFin.interface.market_insights.routes import create_market_insights_router
+from TerraFin.interface.monitor.heartbeat import registration_heartbeat
+from TerraFin.interface.monitor.http_provider import get_signal_provider_from_env
+from TerraFin.interface.monitor.routes import create_signals_router
 from TerraFin.interface.stock.data_routes import create_stock_data_router
 from TerraFin.interface.stock.routes import create_stock_router
 from TerraFin.interface.ticker_search import create_ticker_search_router
@@ -80,19 +80,6 @@ def get_runtime_config():
     return load_runtime_config()
 
 
-def _maybe_start_alert_scanner() -> "asyncio.Task | None":
-    """Start background alert scanner if TERRAFIN_SIGNALS_CHANNEL is set to a non-stdout channel."""
-    from TerraFin.signals.env import signals_env
-
-    channel_type = signals_env("TERRAFIN_SIGNALS_CHANNEL", "TERRAFIN_ALERT_CHANNEL", default="stdout")
-    if channel_type in ("stdout", ""):
-        return None
-    interval = int(signals_env("TERRAFIN_SIGNALS_INTERVAL", "TERRAFIN_ALERT_INTERVAL", default="300"))
-    group = signals_env("TERRAFIN_SIGNALS_GROUP", "TERRAFIN_ALERT_GROUP") or None
-    _log.info("Alert scanner enabled (channel=%s, interval=%ds, group=%s)", channel_type, interval, group or "all")
-    return asyncio.create_task(_alert_scanner_loop(interval, group))
-
-
 def _start_weekly_report() -> "asyncio.Task | None":
     """Always run the weekly report scheduler — generation is universal,
     Telegram dispatch is optional. Disable with TERRAFIN_WEEKLY_REPORT_ENABLED=0."""
@@ -105,6 +92,7 @@ def _start_weekly_report() -> "asyncio.Task | None":
 async def _weekly_report_loop() -> None:
     """Generate on startup if no recent report; then on every Friday 16:30 ET."""
     from zoneinfo import ZoneInfo
+
     tz_name = os.environ.get("TERRAFIN_CACHE_TIMEZONE", "America/New_York")
     tz = ZoneInfo(tz_name)
     loop = asyncio.get_running_loop()
@@ -130,21 +118,10 @@ async def _weekly_report_loop() -> None:
         except asyncio.CancelledError:
             return
         try:
-            from TerraFin.signals.reports.weekly import build_weekly_report
-            md = await loop.run_in_executor(None, build_weekly_report)
+            from TerraFin.analytics.reports.weekly import build_weekly_report
+
+            await loop.run_in_executor(None, build_weekly_report)
             _log.info("Weekly report generated")
-            # Optional push to channel if configured
-            from TerraFin.signals.env import signals_env as _sig_env
-            channel_type = _sig_env("TERRAFIN_SIGNALS_CHANNEL", "TERRAFIN_ALERT_CHANNEL", default="stdout")
-            if channel_type not in ("stdout", ""):
-                try:
-                    from TerraFin.signals.alerting.notify import get_channel_from_env
-                    channel = get_channel_from_env()
-                    title = f"TerraFin Weekly — {datetime.now(tz).date().isoformat()}"
-                    await loop.run_in_executor(None, channel.send, title, md, {"markdown": md})
-                    _log.info("Weekly report pushed to channel %s", channel_type)
-                except Exception:
-                    _log.exception("Weekly report channel push failed")
         except Exception:
             _log.exception("Weekly report generation failed")
 
@@ -156,52 +133,14 @@ def _ensure_recent_report() -> None:
     re-running the (sometimes slow) enrichment path on every restart.
     Mid-week startups do not produce a stale report dated today.
     """
-    from TerraFin.signals.reports import list_reports
-    from TerraFin.signals.reports.weekly import _last_completed_friday, build_weekly_report
+    from TerraFin.analytics.reports import list_reports
+    from TerraFin.analytics.reports.weekly import _last_completed_friday, build_weekly_report
 
     target = _last_completed_friday()
     existing = list_reports(limit=8)
     if any(r.as_of == target.isoformat() for r in existing):
         return
     build_weekly_report(as_of=target)
-
-
-async def _alert_scanner_loop(interval: int, group: str | None) -> None:
-    loop = asyncio.get_running_loop()
-    while True:
-        try:
-            from TerraFin.signals.alerting.dedup import deduplicate
-            from TerraFin.signals.alerting.notify import get_channel_from_env
-            from TerraFin.signals.alerting.scanner import scan
-
-            signals = await loop.run_in_executor(None, scan, group)
-            fired = deduplicate(signals)
-            if fired:
-                channel = get_channel_from_env()
-                payload = {
-                    "signals": [
-                        {
-                            "name": s.name,
-                            "ticker": s.ticker,
-                            "severity": s.severity,
-                            "message": s.message,
-                            "snapshot": s.snapshot,
-                        }
-                        for s in fired
-                    ],
-                    "total": len(fired),
-                }
-                title = f"TerraFin Alerts — {len(fired)} signal(s)"
-                body = "\n".join(f"[{s.severity.upper()}] {s.ticker} {s.name}: {s.message}" for s in fired)
-                await loop.run_in_executor(None, channel.send, title, body, payload)
-                _log.info("Alert: sent %d signal(s)", len(fired))
-            else:
-                _log.debug("Alert scan complete — no new signals")
-        except asyncio.CancelledError:
-            return
-        except Exception:
-            _log.exception("Alert scanner error (will retry in %ds)", interval)
-        await asyncio.sleep(interval)
 
 
 def create_app(initial_data: TimeSeriesDataFrame | None = None, base_path: str = "") -> FastAPI:
@@ -229,14 +168,12 @@ def create_app(initial_data: TimeSeriesDataFrame | None = None, base_path: str =
         cache_manager = get_cache_manager()
         cache_manager.start()
         background_tasks: list[asyncio.Task] = []
-        if t := _maybe_start_alert_scanner():
-            background_tasks.append(t)
         if t := _start_weekly_report():
             background_tasks.append(t)
-        alert_provider = get_alert_provider_from_env()
-        if alert_provider is not None:
-            background_tasks.append(asyncio.create_task(registration_heartbeat(alert_provider)))
-            _log.info("Alert provider configured — heartbeat started")
+        signal_provider = get_signal_provider_from_env()
+        if signal_provider is not None:
+            background_tasks.append(asyncio.create_task(registration_heartbeat(signal_provider)))
+            _log.info("Signal provider configured — heartbeat started")
         try:
             yield
         finally:
@@ -306,7 +243,7 @@ def create_app(initial_data: TimeSeriesDataFrame | None = None, base_path: str =
     app.include_router(create_agent_data_router(), prefix=prefix)
     app.include_router(create_stock_data_router(), prefix=prefix)
     app.include_router(create_stock_router(frontend_build.build_dir), prefix=prefix)
-    app.include_router(create_alerting_router(), prefix=prefix)
+    app.include_router(create_signals_router(), prefix=prefix)
     app.include_router(create_ticker_search_router(), prefix=prefix)
     app.include_router(create_health_router())
 

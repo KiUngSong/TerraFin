@@ -16,7 +16,7 @@ A signal here is a *push notification of a market event*: ticker, name,
 severity, snapshot of the indicator state at fire time. It is the
 output of the monitor's detectors, NOT something computed locally inside
 TerraFin. (Local, dataframe-native detectors live in
-``analytics/analysis/detectors/`` and produce the same ``Signal`` shape
+``analytics/analysis/patterns/`` and produce the same ``Signal`` shape
 on demand — but they are pull-driven, not push-driven, and serve the
 agent / report flows.)
 
@@ -42,7 +42,7 @@ This package owns the HTTP boundary in both directions:
 This package is system-to-system glue (two HTTP endpoints + their
 auth/dedup/heartbeat plumbing), not analytics. It carries no signal
 *logic* — the math lives in the monitor on one side and in
-``analytics/analysis/detectors/`` on the other.
+``analytics/analysis/patterns/`` on the other.
 
 ## Configuration
 
