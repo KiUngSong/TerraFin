@@ -74,6 +74,7 @@ Runtime config comes from `src/TerraFin/interface/config.py`.
 | Method | Path | Behaviour |
 |--------|------|-----------|
 | `GET` | `/` | Redirect to the dashboard page, respecting `base_path` |
+| `GET` | `/resolve-ticker?q=...` | Resolve a query string to a ticker symbol and company name |
 | `GET` | `/health` | Multi-component status page (HTML) |
 | `GET` | `/health.json` | Same data as JSON for scripting |
 | `GET` | `/ready` | Readiness endpoint with cache-manager and private-data checks |
@@ -233,6 +234,8 @@ Important boundary:
 | `GET` | `/dashboard/api/fear-greed` | Fear and Greed summary if available |
 | `GET` | `/dashboard/api/cache-status` | Status of all registered cache sources |
 | `POST` | `/dashboard/api/cache-refresh` | Refresh cache sources (`?force=bool`) |
+| `GET` | `/dashboard/api/gex/spx` | SPX GEX live snapshot from CBOE options (regime, spot, zero-gamma, call/put walls, per-strike and per-expiration buckets) |
+| `GET` | `/dashboard/api/gex/spx/history` | SPX GEX daily history from SqueezeMetrics (2011–present) |
 
 The practical rule for future private-source additions is:
 
@@ -285,6 +288,15 @@ configured.
 | `GET` | `/market-insights/api/investor-positioning/holdings` | Guru portfolio (`?guru=`, optional `?filing_date=`) |
 | `GET` | `/market-insights/api/investor-positioning/history` | Filing index for period dropdown (`?guru=`) |
 | `GET` | `/market-insights/api/top-companies` | Private-source top-companies snapshot |
+
+### SPX Gamma Exposure
+
+The Market Insights page includes an SPX GEX accordion panel. GEX data is
+fetched eagerly at page mount (not on accordion open) via
+`GET /dashboard/api/gex/spx`, so the panel renders immediately when the user
+expands it. Historical data comes from `GET /dashboard/api/gex/spx/history`.
+The snapshot card hides while loading or when CBOE data is unavailable
+(`available: false`).
 
 ### Investor positioning loading strategy
 
@@ -346,13 +358,14 @@ The page itself uses the shared TerraFin chart session and progressive
 | `GET` | `/stock/api/company-info` | Company profile and price summary (`?ticker=`) |
 | `GET` | `/stock/api/earnings` | Earnings history (`?ticker=`) |
 | `GET` | `/stock/api/financials` | Financial statements (`?ticker=`, `statement=`, `period=`) |
-| `GET` | `/stock/api/fcf-history` | Annual FCF/share history + 3yr-avg/latest-annual/TTM candidates and the source the `auto` cascade would pick (`?ticker=`, `years=10`). See [api-reference.md](./api-reference.md#stock-analysis). |
+| `GET` | `/stock/api/fcf-history` | Annual FCF/share history + 3yr-avg/latest-annual/TTM candidates and the source the `auto` cascade would pick (`?ticker=`, `years=10`). Also returns `ttmFcfPerShare` + `ttmSource` (how the TTM value was computed: `quarterly_ttm` or `annual`). See [api-reference.md](./api-reference.md#stock-analysis). |
 | `GET` / `POST` | `/stock/api/dcf` | Forward DCF. POST body accepts `projectionYears` (5/10/15), `fcfBaseSource` (`auto`/`3yr_avg`/`ttm`/`latest_annual`), and turnaround inputs (`breakevenYear`, `breakevenCashFlowPerShare`, `postBreakevenGrowthPct`) on top of the base overrides. |
 | `GET` / `POST` | `/stock/api/reverse-dcf` | Reverse DCF (market-implied growth). POST accepts `projectionYears`, `growthProfile`, base overrides. |
 | `GET` | `/stock/api/beta-estimate` | TerraFin's `beta_5y_monthly` estimate against the mapped benchmark. |
+| `GET` | `/stock/api/gex` | GEX snapshot for a ticker (`?ticker=`). Returns regime, spot, zero-gamma strike, call/put walls, by-strike and by-expiration GEX buckets. |
 | `GET` | `/stock/api/filings` | Recent 10-K / 10-Q / 8-K list with EDGAR URLs (`?ticker=`, `limit=`) |
 | `GET` | `/stock/api/filing-document` | Parsed markdown + TOC for one filing (`?ticker=`, `accession=`, `primaryDocument=`, `form=`, `includeImages=`) |
-| `GET` | `/resolve-ticker` | Resolve free-form search into `/stock/...` or `/market-insights?...` |
+| `GET` | `/resolve-ticker?q=...` | Resolve a query string to a ticker symbol and company name (root route — no `/stock/api/` prefix) |
 
 ### Page layout (`/stock/{ticker}`)
 
@@ -468,6 +481,28 @@ namespace.
 |--------|------|-------------|
 | `GET` | `/watchlist` and `/watchlist/` | Personal watchlist page |
 
+### API endpoints
+
+The watchlist page uses the `/dashboard/api/watchlist` API family.
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/dashboard/api/watchlist` | Full watchlist snapshot (items with symbol, name, move %, tags) |
+| `POST` | `/dashboard/api/watchlist` | Add a symbol (`body: {symbol, tags?: []}`) |
+| `DELETE` | `/dashboard/api/watchlist/{symbol}` | Remove a symbol. Pass `?group=<tag>` to remove only from that group. |
+| `PATCH` | `/dashboard/api/watchlist/{symbol}/tags` | Update tags (`body: {tags, mode: "set"|"add"|"remove"}`) |
+| `GET` | `/dashboard/api/watchlist/groups` | List groups with item counts |
+| `POST` | `/dashboard/api/watchlist/groups` | Create an empty named group (`body: {name}`) |
+| `DELETE` | `/dashboard/api/watchlist/groups/{tag}` | Delete a group and remove its tag from all items |
+| `POST` | `/dashboard/api/watchlist/groups/rename` | Rename a group (`body: {old, new}`) |
+| `PUT` | `/dashboard/api/watchlist/groups/order` | Persist group display order (`body: {groups: [name, ...]}`) |
+| `PUT` | `/dashboard/api/watchlist/groups/{group}/item-order` | Persist item order within a group (`body: {symbols: [...]}`) |
+| `PUT` | `/dashboard/api/watchlist` | Bulk-update all symbols and tags (`body: {symbols: [{symbol, tags}]}`) |
+
+### Drag reorder
+
+The watchlist frontend uses `@dnd-kit/core` for touch- and pointer-compatible drag reorder. Groups and ticker rows are independently sortable. Order is persisted optimistically: the client applies the new order immediately via `itemOrderOverride` state, then POSTs to the backend. On error the override is cleared and the server order is restored.
+
 ---
 
 ## Agent API
@@ -510,6 +545,7 @@ or the `terrafin-agent` CLI over calling raw routes directly.
 | `GET` | `/agent/api/runtime/sessions/{session_id}` | - | Read hosted runtime session state, transcript-derived message history, and tools |
 | `DELETE` | `/agent/api/runtime/sessions/{session_id}` | - | Archive a hosted session transcript and remove it from active history |
 | `POST` | `/agent/api/runtime/sessions/{session_id}/messages` | body: `content` | Append a user turn and run the hosted model/tool loop |
+| `GET` | `/agent/api/runtime/sessions/{session_id}/tasks` | - | List background tasks for a hosted session |
 | `GET` | `/agent/api/runtime/sessions/{session_id}/approvals` | - | List approval requests for a hosted session |
 | `GET` | `/agent/api/runtime/tasks/{task_id}` | - | Read a hosted background task |
 | `POST` | `/agent/api/runtime/tasks/{task_id}/cancel` | - | Cancel a hosted background task |
@@ -636,11 +672,16 @@ Request body (`InboundSignal`):
   "signal": "20-day MA touch",
   "severity": "high",
   "signal_id": "uuid-from-sender",
-  "fired_at": "2026-04-30T09:00:00"
+  "fired_at": "2026-04-30T09:00:00",
+  "name": "Apple Inc.",
+  "snapshot": {"close": 192.5, "rsi": 68.2}
 }
 ```
 
+- `fired_at`: optional ISO 8601 datetime string. Naive datetimes (no timezone offset) are accepted and stored as-is — TerraFin does not normalize to UTC. Omit or pass `null` if unknown.
 - `signal_id` is optional but required for deduplication (sender-provided UUID, not TerraFin-generated)
+- `name`: optional company/indicator display name; if blank, TerraFin enriches it from the watchlist cache before forwarding
+- `snapshot`: optional open key/value map of detector context at fire time (e.g. OHLCV fields, indicator values). The Telegram formatter reads `close` to derive price direction (▲ if `close` > previous close, ▼ if lower, — if absent or equal). All other keys are informational and forwarded as-is. `snapshot: null` or omitting the field produces — for direction.
 - `X-Signature` header: HMAC-SHA256 of request body, keyed with `TERRAFIN_SIGNALS_WEBHOOK_SECRET`
 - If `TERRAFIN_SIGNALS_WEBHOOK_SECRET` is unset, the endpoint returns `503` and refuses all signals — the secret is required, not optional
 - Per-IP rate limit: 60 requests / 60 seconds; excess returns `429`

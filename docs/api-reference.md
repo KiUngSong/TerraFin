@@ -19,6 +19,7 @@ OpenAPI is available at `/openapi.json`.
 | `GET` | `/health` | Multi-component status page (HTML, 30 s in-process cache, `?refresh=1` to force) |
 | `GET` | `/health.json` | Same data as JSON |
 | `GET` | `/ready` | Readiness endpoint |
+| `GET` | `/resolve-ticker?q=...` | Resolve a query string to a ticker symbol and company name (no `/stock/api/` prefix) |
 
 ## Chart
 
@@ -43,9 +44,31 @@ Key routes:
 
 Prefix: `/dashboard/api/*`
 
-Representative routes include watchlist, breadth, valuation, and cache-backed
-widget payloads. See [Interface Overview](interface.md) for the current widget
-contract and private-access fallback behavior.
+Representative routes include breadth, valuation, and cache-backed widget
+payloads. See [Interface Overview](interface.md) for the current widget
+contract and private-access fallback behavior. Watchlist routes are listed in
+the [Watchlist](#watchlist) section below.
+
+- SPX GEX snapshot: `GET /dashboard/api/gex/spx`
+- SPX GEX history: `GET /dashboard/api/gex/spx/history`
+
+## Watchlist
+
+Prefix: `/dashboard/api/watchlist*`
+
+| Method | Path | Body | Description |
+|--------|------|------|-------------|
+| `GET` | `/dashboard/api/watchlist` | — | Full snapshot |
+| `POST` | `/dashboard/api/watchlist` | `{symbol, tags?}` | Add symbol |
+| `DELETE` | `/dashboard/api/watchlist/{symbol}` | — | Remove symbol (optional `?group=` to scope) |
+| `PATCH` | `/dashboard/api/watchlist/{symbol}/tags` | `{tags, mode}` | Set/add/remove tags (`mode`: `set`\|`add`\|`remove`, default `set`) |
+| `GET` | `/dashboard/api/watchlist/groups` | — | List groups with counts |
+| `POST` | `/dashboard/api/watchlist/groups` | `{name}` | Create group |
+| `DELETE` | `/dashboard/api/watchlist/groups/{tag}` | — | Delete group |
+| `POST` | `/dashboard/api/watchlist/groups/rename` | `{old, new}` | Rename group |
+| `PUT` | `/dashboard/api/watchlist/groups/order` | `{groups: [name, ...]}` | Persist group order |
+| `PUT` | `/dashboard/api/watchlist/groups/{group}/item-order` | `{symbols: [ticker, ...]}` | Persist item order within group |
+| `PUT` | `/dashboard/api/watchlist` | `{symbols: [{symbol, tags}]}` | Bulk update all symbols and tags |
 
 ## Market Insights
 
@@ -74,6 +97,8 @@ Representative routes include:
     is sized to match.
   - `fcfBaseSource` (`auto` | `3yr_avg` | `ttm` | `latest_annual`) — picks the
     base FCF/share. `auto` cascades 3yr_avg → annual → ttm. Default is `auto`.
+    Note: `autoSelectedSource` in the `/fcf-history` response uses different
+    string values (`quarterly_ttm`, `annual`) — do not pass it back here directly.
   - `breakevenYear`, `breakevenCashFlowPerShare`, `postBreakevenGrowthPct` —
     when all three are supplied, the model switches to **turnaround mode**: the
     base FCF/share input becomes the *current* (possibly negative) FCF; the
@@ -81,7 +106,11 @@ Representative routes include:
     across `breakevenYear` years, then compounds at the post-breakeven rate
     fading toward terminal growth.
 - `GET /stock/api/reverse-dcf?ticker=...`
+- `POST /stock/api/reverse-dcf?ticker=...` — optional body overrides: `baseCashFlowPerShare`,
+  `terminalGrowthPct`, `beta`, `equityRiskPremiumPct`, `currentPrice`, `projectionYears` (1–20, default 5),
+  `growthProfile` (`high_growth` | `early_maturity` | `fully_mature`, default `early_maturity`)
 - `GET /stock/api/beta-estimate?ticker=...`
+- `GET /stock/api/gex?ticker=` — GEX snapshot (regime, spot, zero-gamma, call/put walls, by-strike and by-expiration buckets)
 - `GET /stock/api/fcf-history?ticker=...&years=10` — returns annual FCF/share
   history plus the base candidates the DCF would use:
   - `history`: chronological list of `{year, fcf, fcfPerShare}` (NaN years
@@ -92,7 +121,10 @@ Representative routes include:
     nullable when the underlying data is absent.
   - `autoSelectedSource` — which candidate the backend's `auto` cascade would
     pick under the current data (one of `3yr_avg`, `annual`, `quarterly_ttm`,
-    `missing`).
+    `missing`). Note: these response values differ from the `fcfBaseSource`
+    input values — `ttm` input → `quarterly_ttm` response, `latest_annual`
+    input → `annual` response. Do not pass `autoSelectedSource` back as
+    `fcfBaseSource` directly.
   - `sharesOutstanding`, `sharesNote` — caveat that per-year FCF/share is
     computed using *current* sharesOutstanding (no per-year dilution
     adjustment).
@@ -131,7 +163,9 @@ Core routes:
 
 - `GET /agent/api/runtime/agents`
 - `POST /agent/api/runtime/sessions`
+- `GET /agent/api/runtime/sessions` — list all sessions
 - `GET /agent/api/runtime/sessions/{session_id}`
+- `DELETE /agent/api/runtime/sessions/{session_id}` — archive session
 - `POST /agent/api/runtime/sessions/{session_id}/messages`
 - `GET /agent/api/runtime/sessions/{session_id}/tasks`
 - `GET /agent/api/runtime/sessions/{session_id}/approvals`

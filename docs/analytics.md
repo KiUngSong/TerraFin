@@ -20,9 +20,10 @@ of:
   as first-class interface pages or REST endpoints
 
 The stable product-facing surface today is the chart overlay set plus the
-agent-accessible technical indicators. DCF, options, portfolio optimization,
-spectral helpers, and GBM simulation are usable from Python but are still
-standalone or experimental from a UI/API perspective.
+agent-accessible technical indicators. DCF and GEX (options) are also
+first-class — both have dedicated UI pages and REST endpoints. Portfolio
+optimization, spectral helpers, and GBM simulation are usable from Python but
+are still standalone or experimental from a UI/API perspective.
 
 ## Base utilities
 
@@ -55,7 +56,7 @@ Most technical functions:
 | `range_vol` | `technical/volatility.py` | `range_vol(highs, lows, window=20)` | `(offset, values)` — Parkinson's, offset = window - 1 |
 | `trend_signal` | `technical/trend_signal.py` | `trend_signal(closes, window=126, distribution="normal", df=5)` | `(offset, values)` — Delta-Straddle signal in [-1, +1], offset = window + 1 |
 | `trend_signal_composite` | `technical/trend_signal.py` | `trend_signal_composite(closes, windows=[32,64,126,252,504])` | `(offset, values)` — multi-timeframe averaged signal in [-1, +1] |
-| `mandelbrot_fractal_dimension` | `technical/mandelbrot.py` | `mandelbrot_fractal_dimension(closes, window=65)` | `(offset, values)` — rolling path-complexity score in [1, 2], where lower is smoother / more fragile and higher is choppier / more anti-fragile. TerraFin's chart defaults to the 130-day view, while agent consumers can request 65, 130, and 260 explicitly. |
+| `mandelbrot_fractal_dimension` | `technical/mandelbrot.py` | `mandelbrot_fractal_dimension(closes, window=65)` | `(offset, values)` — rolling path-complexity score in [1, 2], where lower is smoother / more fragile and higher is choppier / more anti-fragile. The function default is `window=65`; TerraFin's chart calls it with `window=130` explicitly and renders that line by default. Agent consumers can request 65, 130, and 260 explicitly. |
 | `percentile_rank` | `technical/vol_regime.py` | `percentile_rank(values, window=126)` | `(offset, ranks)` — rolling min-max rank in [0, 100] |
 | `vol_regime` | `technical/vol_regime.py` | `vol_regime(values, window=126, entry_threshold=20.0, exit_threshold=80.0)` | `(offset, regimes)` — 1=stable, 0=unstable with hysteresis |
 | `lppl` | `technical/lppl.py` | `lppl(closes, n_windows=33, min_window=50, max_window=750, window_step=5, max_iter=45, seed=42)` | `LPPLResult` — confidence, full-series fit, qualifying sub-window fits. Pass `n_windows=None` to use the full article ladder (750→50 in 5-day steps). |
@@ -97,13 +98,13 @@ DCF now lives in the dedicated package `src/TerraFin/analytics/analysis/fundamen
 | `build_stock_dcf_payload(ticker, overrides=None, projection_years=None)` | Build the stock valuation payload used by the Stock Analysis page. `overrides` (`StockDCFOverrides`) carries the FCF-base-source picker, turnaround inputs, and base value/growth/beta overrides. |
 | `build_stock_reverse_dcf_payload(ticker, overrides=None, projection_years=5, growth_profile="early_maturity")` | Build the reverse DCF payload used by the Stock Analysis page |
 | `build_sp500_template()` / `build_stock_template(ticker, overrides=None, projection_years=None)` | Build the underlying valuation templates before presentation |
-| `_select_stock_fcf_base(quarter, annual, source="auto")` | Pick the base FCF/share by source. `source` ∈ `auto` / `3yr_avg` / `ttm` / `latest_annual`. `auto` cascade is `3yr_avg → annual → ttm` (the professional default; see [Analytics Notes](./analytics-notes.md#base-fcf-source-cascade)). |
+| `_select_stock_fcf_base(quarter, annual, source="auto")` | Pick the base FCF/share by source. `source` ∈ `auto` / `3yr_avg` / `ttm` / `latest_annual`. `auto` cascade is `3yr_avg → latest_annual → ttm` (the professional default; see [Analytics Notes](./analytics-notes.md#base-fcf-source-cascade)). Returns `(value, selected_source)` where `selected_source` uses response-side strings: `3yr_avg`, `annual`, `quarterly_ttm`, or `missing` (when no candidate is available). |
 | `_build_turnaround_schedule(...)` | Construct the explicit per-year FCF schedule for turnaround mode (linear interp from current FCF to breakeven; post-breakeven compound fading to terminal). |
 
 DCF is exposed through the product and API endpoints:
 - `GET /market-insights/api/dcf/sp500`
 - `GET /stock/api/dcf?ticker=...&projectionYears=5|10|15` and `POST` for full overrides
-- `GET /stock/api/reverse-dcf?ticker=...`
+- `GET /stock/api/reverse-dcf?ticker=...` and `POST` for overrides (`baseCashFlowPerShare`, `terminalGrowthPct`, `beta`, `equityRiskPremiumPct`, `currentPrice`, `projectionYears` 1–20, `growthProfile` `high_growth|early_maturity|fully_mature`)
 - `GET /stock/api/fcf-history?ticker=...&years=10` — annual FCF/share series + the
   3yr-avg / latest-annual / TTM candidates the DCF would use, plus the source
   the `auto` cascade currently picks. Drives the FCF / Share History card and
@@ -136,11 +137,18 @@ Options analysis lives under `src/TerraFin/analytics/analysis/options/`.
 
 | Entry point | Purpose |
 |-------------|---------|
-| `get_current_gex(ticker)` | Fetch delayed options data and compute gamma exposure views |
-| `GEX_Output` | Dataclass containing spot price and two Plotly figures |
+| `gamma_exposure.py` | Parse CBOE options chain, compute per-strike GEX in $B, zero-gamma strike, long/short gamma regime, call/put walls |
+| `get_current_gex(ticker)` | High-level wrapper — returns a `GexPayload` dict with `available`, `spot_price`, `zero_gamma_strike`, `regime`, `total_gex_b`, `by_strike`, `by_expiration`, `largest_call_wall`, `largest_put_wall` |
 
-This module currently works as a standalone Python utility. It is not served by
-the TerraFin interface routes.
+GEX is now a first-class API feature. Per-ticker GEX is served by `/stock/api/gex?ticker=` and rendered in a panel on the Stock Analysis page. SPX-specific GEX is served by `/dashboard/api/gex/spx` and `/dashboard/api/gex/spx/history` and rendered as an accordion panel on the Market Insights page.
+
+## Market data modules
+
+`src/TerraFin/analytics/data/` contains data-fetching helpers used by analytics and market indicators.
+
+| Module | Purpose |
+|--------|---------|
+| `spx_gex_history.py` | Fetch SqueezeMetrics DIX.csv, parse daily SPX GEX/$B and DIX ratio. 24h cache via PrivateDataService. On fetch failure, stale cached data is served if present; if the cache is empty, the caller receives an error. Used as the underlying source for the SPX GEX market indicator. |
 
 ## Portfolio optimization
 
@@ -231,7 +239,8 @@ This is the quickest way to understand what is already connected to the product:
 | Chart auto-overlays | Stable |
 | Agent API indicators | Stable |
 | DCF | Stable on-demand UI/API feature in Market Insights and Stock Analysis |
-| Options / portfolio / GBM | Standalone, not yet first-class UI/API features |
+| GEX (options) | Stable — `/stock/api/gex` per-ticker panel on Stock Analysis; `/dashboard/api/gex/spx` SPX accordion panel on Market Insights |
+| Portfolio optimization / GBM | Standalone, not yet first-class UI/API features |
 | Risk beta toolkit | Partially integrated — used as the stock DCF fallback and exposed through the stock beta-estimate API |
 | Trend signal (Delta-Straddle) | Stable — chart overlay and agent API |
 | Mandelbrot Fractal Dimension | Stable — chart overlay and agent API |
