@@ -183,10 +183,18 @@ def create_ticker_search_router() -> APIRouter:
 
         Frontend fetches once at app load, then does local prefix matching
         without round-tripping to the server for every keystroke.
+        ``version`` is a short hash of the indicator catalog; the frontend
+        uses it to auto-invalidate its sessionStorage cache without a
+        manually bumped version string.
         """
+        import hashlib
+
         from .aliases_kr import KR_ALIASES
 
         indicators = _build_indicator_entries()
+        version = hashlib.sha1(
+            "|".join(e["symbol"] for e in indicators).encode()
+        ).hexdigest()[:8]
 
         # Curated US/intl aliases first (so a hand-picked entry like
         # 애플 → AAPL wins over an accidental KRX collision); then the
@@ -195,6 +203,7 @@ def create_ticker_search_router() -> APIRouter:
         kr_aliases.update(KR_ALIASES)
 
         return {
+            "version": version,
             "kr_aliases": kr_aliases,
             "indicators": indicators,
         }

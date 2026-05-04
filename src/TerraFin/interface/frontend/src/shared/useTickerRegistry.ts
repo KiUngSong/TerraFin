@@ -11,25 +11,18 @@ export interface TickerRegistry {
   indicators: IndicatorEntry[];
 }
 
-// Bump version when the server-side indicator catalog shape changes so old
-// sessionStorage caches don't keep showing removed/duplicated entries.
-const CACHE_KEY = 'tf-ticker-registry-v2';
+const CACHE_KEY = 'tf-ticker-registry';
+// memo is set only after a verified network fetch; readCache() is for initial render only.
+let verifiedMemo: TickerRegistry | null = null;
 let inflight: Promise<TickerRegistry> | null = null;
-let memo: TickerRegistry | null = null;
 
 function readCache(): TickerRegistry | null {
-  if (memo) return memo;
   try {
     const raw = sessionStorage.getItem(CACHE_KEY);
     if (!raw) return null;
     const parsed = JSON.parse(raw);
     if (parsed && typeof parsed === 'object' && parsed.kr_aliases && Array.isArray(parsed.indicators)) {
-      const reg: TickerRegistry = {
-        krAliases: parsed.kr_aliases,
-        indicators: parsed.indicators,
-      };
-      memo = reg;
-      return reg;
+      return { krAliases: parsed.kr_aliases, indicators: parsed.indicators };
     }
   } catch {
     // ignore
@@ -38,7 +31,7 @@ function readCache(): TickerRegistry | null {
 }
 
 async function fetchRegistry(): Promise<TickerRegistry> {
-  if (memo) return memo;
+  if (verifiedMemo) return verifiedMemo;
   if (inflight) return inflight;
   inflight = (async () => {
     const resp = await fetch('/api/ticker-search/registry');
@@ -48,7 +41,8 @@ async function fetchRegistry(): Promise<TickerRegistry> {
       krAliases: data.kr_aliases || {},
       indicators: data.indicators || [],
     };
-    memo = reg;
+    verifiedMemo = reg;
+    // Store with server version so next page load can detect staleness.
     try { sessionStorage.setItem(CACHE_KEY, JSON.stringify(data)); } catch { /* ignore */ }
     return reg;
   })().finally(() => { inflight = null; });
@@ -59,13 +53,12 @@ export function useTickerRegistry(): TickerRegistry | null {
   const [reg, setReg] = useState<TickerRegistry | null>(() => readCache());
 
   useEffect(() => {
-    if (reg) return;
     let cancelled = false;
     fetchRegistry()
       .then((r) => { if (!cancelled) setReg(r); })
       .catch(() => {});
     return () => { cancelled = true; };
-  }, [reg]);
+  }, []);
 
   return reg;
 }

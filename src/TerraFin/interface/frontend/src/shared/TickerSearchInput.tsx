@@ -25,11 +25,18 @@ export interface TickerSearchInputProps {
 
 const DEBOUNCE_MS = 200;
 
+interface BackendIndicator {
+  symbol: string;
+  name: string;
+  group: string;
+}
+
 const TickerSearchInput: React.FC<TickerSearchInputProps> = ({
   value, onChange, onSelect, onSubmit, placeholder, disabled, ariaLabel, inputStyle,
 }) => {
   const registry = useTickerRegistry();
   const [yahooStocks, setYahooStocks] = useState<YahooStock[]>([]);
+  const [backendIndicators, setBackendIndicators] = useState<BackendIndicator[]>([]);
   const [open, setOpen] = useState(false);
   const [activeIdx, setActiveIdx] = useState(-1);
   const wrapperRef = useRef<HTMLDivElement>(null);
@@ -41,11 +48,12 @@ const TickerSearchInput: React.FC<TickerSearchInputProps> = ({
     return localPrefixMatch(value, registry, 8);
   }, [value, registry]);
 
-  // Backend only for non-Korean queries (Yahoo proxy required for CORS)
+  // Backend search for stocks (Yahoo proxy) and indicators not yet in local registry
   useEffect(() => {
     const q = value.trim();
     if (!q || isKoreanQuery(q)) {
       setYahooStocks([]);
+      setBackendIndicators([]);
       return;
     }
     const myId = ++reqIdRef.current;
@@ -56,6 +64,7 @@ const TickerSearchInput: React.FC<TickerSearchInputProps> = ({
         const data = await resp.json();
         if (myId !== reqIdRef.current) return;
         setYahooStocks(data.stocks || []);
+        setBackendIndicators(data.indicators || []);
       } catch {
         // ignore
       }
@@ -80,11 +89,16 @@ const TickerSearchInput: React.FC<TickerSearchInputProps> = ({
 
   const hits: SearchHit[] = useMemo(() => {
     const known = new Set(local.hits.map((h) => h.symbol));
+    // Merge backend indicators not already present in local registry hits
+    const remoteInds: SearchHit[] = backendIndicators
+      .filter((i) => !known.has(i.symbol))
+      .map((i) => ({ symbol: i.symbol, name: i.name, group: i.group, category: 'indicator' as const }));
+    remoteInds.forEach((i) => known.add(i.symbol));
     const yahooHits: SearchHit[] = yahooStocks
       .filter((s) => !known.has(s.symbol))
       .map((s) => ({ symbol: s.symbol, name: s.name, exchange: s.exchange, type: s.type, category: 'stock' as const }));
-    return [...local.hits, ...yahooHits];
-  }, [local.hits, yahooStocks]);
+    return [...local.hits, ...remoteInds, ...yahooHits];
+  }, [local.hits, backendIndicators, yahooStocks]);
 
   const handleSelect = (hit: SearchHit) => {
     onSelect(hit);
