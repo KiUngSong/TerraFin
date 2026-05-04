@@ -1,5 +1,5 @@
-from dataclasses import dataclass
 from collections.abc import Callable
+from dataclasses import dataclass
 
 import numpy as np
 import pandas as pd
@@ -292,6 +292,62 @@ def _trailing_forward_pe_full_history_backfill(_key: str, *, loaded_start: str |
     return _private_backfill("trailing_forward_pe", loaded_start)
 
 
+def _spx_gex_frame() -> TimeSeriesDataFrame:
+    from TerraFin.analytics.data.spx_gex_history import get_spx_gex_history
+
+    points = get_spx_gex_history()
+    if not points:
+        return TimeSeriesDataFrame.make_empty()
+    df = pd.DataFrame({"time": [p["date"] for p in points], "close": [p["gex_b"] for p in points]})
+    frame = TimeSeriesDataFrame(df)
+    frame.name = "SPX GEX"
+    frame.chart_meta = {"zones": [{"from": -0.5, "to": 0.5, "color": "rgba(148,163,184,0.25)"}]}
+    return frame
+
+
+def _fetch_spx_gex(_key: str) -> TimeSeriesDataFrame:
+    return _spx_gex_frame()
+
+
+def _spx_gex_recent_history(_key: str, *, period: str = "3y") -> HistoryChunk:
+    frame = _spx_gex_frame()
+    recent = _slice_recent_timeseries(frame, period)
+    loaded_start, loaded_end = _frame_bounds(recent)
+    has_older = len(recent) < len(frame)
+    return HistoryChunk(
+        frame=recent,
+        loaded_start=loaded_start,
+        loaded_end=loaded_end,
+        requested_period=period,
+        is_complete=not has_older,
+        has_older=has_older,
+        source_version="squeezemetrics:spx-gex",
+    )
+
+
+def _spx_gex_full_history_backfill(_key: str, *, loaded_start: str | None = None) -> HistoryChunk:
+    frame = _spx_gex_frame()
+    if loaded_start and not frame.empty:
+        cutoff = pd.Timestamp(loaded_start)
+        mask = pd.to_datetime(frame["time"], errors="coerce") < cutoff
+        older_df = frame[mask].reset_index(drop=True)
+        older: TimeSeriesDataFrame = TimeSeriesDataFrame(older_df)
+        older.name = "SPX GEX"
+    else:
+        older = TimeSeriesDataFrame.make_empty()
+        older.name = "SPX GEX"
+    derived_start, derived_end = _frame_bounds(older)
+    return HistoryChunk(
+        frame=older,
+        loaded_start=derived_start,
+        loaded_end=derived_end,
+        requested_period=None,
+        is_complete=True,
+        has_older=False,
+        source_version="squeezemetrics:spx-gex",
+    )
+
+
 MARKET_INDICATOR_REGISTRY = {
     "VIX": MarketIndicator(description="VIX: CBOE Volatility Index", key="^VIX"),
     "VVIX": MarketIndicator(description="VVIX: CBOE VIX Volatility", key="^VVIX"),
@@ -343,5 +399,12 @@ MARKET_INDICATOR_REGISTRY = {
         get_data=_fetch_trailing_forward_pe,
         get_recent_history=_trailing_forward_pe_recent_history,
         get_full_history_backfill=_trailing_forward_pe_full_history_backfill,
+    ),
+    "SPX GEX": MarketIndicator(
+        description="SPX Gamma Exposure (SqueezeMetrics, 2011–present). Negative = short gamma; dealers amplify moves.",
+        key="spx-gex",
+        get_data=_fetch_spx_gex,
+        get_recent_history=_spx_gex_recent_history,
+        get_full_history_backfill=_spx_gex_full_history_backfill,
     ),
 }

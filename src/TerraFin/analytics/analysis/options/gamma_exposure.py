@@ -140,5 +140,96 @@ def gex_by_strike(spot, data):
     return fig
 
 
+def get_gex_payload(ticker: str, lookahead_days: int = 90, strike_window_pct: float = 0.15):
+    """Structured GEX snapshot suitable for JSON serialization (frontend, archive).
+
+    Returns ``None`` when the underlying option chain isn't available — call
+    sites use that as the "no options listed for this ticker" signal.
+
+    The payload bundles:
+      * spot price + total GEX (in USD billions, signed)
+      * regime label (long_gamma / short_gamma) inferred from the sign of
+        total GEX. Long gamma = dealers buy dips/sell rallies (mean-revert);
+        short gamma = dealers chase moves (amplifies trend).
+      * GEX bucketed by strike (within ±strike_window_pct of spot) and by
+        expiration (within the next lookahead_days), so a UI can render
+        per-bucket bars and a zero-gamma crossing point without re-doing
+        the math.
+      * zero_gamma_strike — the strike at which the cumulative GEX flips
+        sign as you walk strikes from low → high. Often used as a regime
+        boundary by intraday traders.
+      * largest_call_wall / largest_put_wall — the strike with the most
+        positive (call) and most negative (put) GEX. The "wall" levels
+        mean-revert price intraday in long-gamma regimes.
+    """
+    spot, option_data = scrape_data(ticker)
+    if option_data is None:
+        return None
+
+    compute_total_gex(spot, option_data)
+    cutoff = datetime.today() + timedelta(days=lookahead_days)
+    near = option_data.loc[option_data.expiration < cutoff]
+    if near.empty:
+        return None
+
+    by_strike_full = near.groupby("strike")["GEX"].sum() / 10**9
+    in_window = (by_strike_full.index > spot * (1 - strike_window_pct)) & (
+        by_strike_full.index < spot * (1 + strike_window_pct)
+    )
+    by_strike = by_strike_full.loc[in_window].sort_index()
+    by_expiration = near.groupby("expiration")["GEX"].sum().sort_index() / 10**9
+
+    total_gex = float(by_strike_full.sum())
+    regime = "long_gamma" if total_gex >= 0 else "short_gamma"
+
+    cumulative = by_strike_full.sort_index().cumsum()
+    zero_gamma_strike = None
+    prev_strike, prev_val = None, None
+    for strike, cum in cumulative.items():
+        if prev_val is not None and (prev_val < 0 <= cum or prev_val > 0 >= cum):
+            # Linear interpolation between the bracketing strikes.
+            denom = cum - prev_val
+            zero_gamma_strike = float(prev_strike) if denom == 0 else float(
+                prev_strike + (strike - prev_strike) * (-prev_val) / denom
+            )
+            break
+        prev_strike, prev_val = strike, cum
+
+    if not by_strike.empty:
+        call_wall_strike = float(by_strike.idxmax())
+        call_wall_gex = float(by_strike.max())
+        put_wall_strike = float(by_strike.idxmin())
+        put_wall_gex = float(by_strike.min())
+    else:
+        call_wall_strike = call_wall_gex = put_wall_strike = put_wall_gex = None
+
+    return {
+        "ticker": ticker,
+        "spot_price": float(spot),
+        "total_gex_b": total_gex,
+        "regime": regime,
+        "zero_gamma_strike": zero_gamma_strike,
+        "largest_call_wall": (
+            {"strike": call_wall_strike, "gex_b": call_wall_gex}
+            if call_wall_strike is not None
+            else None
+        ),
+        "largest_put_wall": (
+            {"strike": put_wall_strike, "gex_b": put_wall_gex}
+            if put_wall_strike is not None
+            else None
+        ),
+        "by_strike": [
+            {"strike": float(k), "gex_b": float(v)} for k, v in by_strike.items()
+        ],
+        "by_expiration": [
+            {"expiration": d.strftime("%Y-%m-%d"), "gex_b": float(v)}
+            for d, v in by_expiration.items()
+        ],
+        "lookahead_days": lookahead_days,
+        "strike_window_pct": strike_window_pct,
+    }
+
+
 if __name__ == "__main__":
     get_current_gex("^SPX")

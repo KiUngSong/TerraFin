@@ -1,3 +1,5 @@
+from typing import Literal
+
 from fastapi import APIRouter, Body, HTTPException, Query
 from pydantic import BaseModel
 
@@ -10,8 +12,6 @@ from TerraFin.interface.watchlist_service import (
     WatchlistValidationError,
     get_watchlist_service,
 )
-
-from typing import Literal
 
 
 DASHBOARD_API_PREFIX = "/dashboard/api"
@@ -66,6 +66,18 @@ class WatchlistRenameGroupRequest(BaseModel):
     new: str
 
 
+class WatchlistCreateGroupRequest(BaseModel):
+    name: str
+
+
+class WatchlistReorderGroupsRequest(BaseModel):
+    groups: list[str]
+
+
+class WatchlistReorderItemsRequest(BaseModel):
+    symbols: list[str]
+
+
 class BreadthMetricResponse(BaseModel):
     label: str
     value: str
@@ -114,6 +126,18 @@ class CacheStatusResponse(BaseModel):
     sources: list[dict]
 
 
+class SpxGexHistoryPointResponse(BaseModel):
+    date: str
+    gex_b: float
+    dix: float | None = None
+    price: float | None = None
+
+
+class SpxGexHistoryResponse(BaseModel):
+    points: list[SpxGexHistoryPointResponse]
+    source: str
+
+
 def create_dashboard_data_router() -> APIRouter:
     router = APIRouter()
     data_factory = get_data_factory()
@@ -134,9 +158,7 @@ def create_dashboard_data_router() -> APIRouter:
     def _is_monitored(item: dict | None) -> bool:
         if not item:
             return False
-        return any(
-            str(t).strip().lower() == "monitor" for t in (item.get("tags") or [])
-        )
+        return any(str(t).strip().lower() == "monitor" for t in (item.get("tags") or []))
 
     def _find_item(items: list[dict], symbol: str) -> dict | None:
         target = (symbol or "").strip().upper()
@@ -150,8 +172,9 @@ def create_dashboard_data_router() -> APIRouter:
         a Telegram confirmation (or failure notice) so the user always learns
         the round-trip result and silent fails are surfaced.
 
-        Logged-and-swallowed: provider downtime should not break the watchlist
-        UI. The heartbeat reconciles within ~60s anyway.
+        Pre-checks ``/health`` first so we can fail loud with an actionable
+        "monitor daemon is down — start it" message instead of swallowing a
+        connection-refused as a vague heartbeat-retry warning.
         """
         from TerraFin.interface.monitor.http_provider import get_signal_provider_from_env
 
@@ -160,6 +183,18 @@ def create_dashboard_data_router() -> APIRouter:
             return
 
         action = "registered to monitor list" if is_now_monitored else "removed from monitor list"
+        if (await provider.health()) is None:
+            await _notify_monitor_change(
+                symbol,
+                ok=False,
+                action=action,
+                error=(
+                    "Monitor daemon unreachable on the configured URL. "
+                    "Start it with DataFactory's `scripts/start_monitor.sh` "
+                    "(or check that the host/port and bearer key match)."
+                ),
+            )
+            return
         try:
             if is_now_monitored:
                 await provider.register([symbol])
@@ -167,22 +202,24 @@ def create_dashboard_data_router() -> APIRouter:
                 await provider.unregister([symbol])
         except Exception as exc:
             import logging
+
             logging.getLogger(__name__).warning(
                 "Immediate monitor push failed for %s (heartbeat will retry)",
-                symbol, exc_info=True,
+                symbol,
+                exc_info=True,
             )
             await _notify_monitor_change(symbol, ok=False, action=action, error=str(exc))
             return
         await _notify_monitor_change(symbol, ok=True, action=action, error=None)
 
-    async def _notify_monitor_change(
-        symbol: str, *, ok: bool, action: str, error: str | None
-    ) -> None:
+    async def _notify_monitor_change(symbol: str, *, ok: bool, action: str, error: str | None) -> None:
         """Best-effort Telegram confirmation for the monitor toggle round-trip."""
         import asyncio
         import logging
+
         try:
             from TerraFin.interface.channels.telegram import TelegramChannel
+
             ch = TelegramChannel.from_config()
         except Exception:
             return  # Telegram not configured — silently skip
@@ -209,9 +246,41 @@ def create_dashboard_data_router() -> APIRouter:
 
     @router.get(f"{DASHBOARD_API_PREFIX}/watchlist/groups", response_model=WatchlistGroupsResponse)
     def api_get_watchlist_groups():
-        return WatchlistGroupsResponse(
-            groups=[WatchlistGroupResponse(**g) for g in watchlist_service.list_groups()]
-        )
+        return WatchlistGroupsResponse(groups=[WatchlistGroupResponse(**g) for g in watchlist_service.list_groups()])
+
+    @router.post(f"{DASHBOARD_API_PREFIX}/watchlist/groups", response_model=WatchlistGroupsResponse)
+    def api_create_watchlist_group(body: WatchlistCreateGroupRequest = Body(...)):
+        try:
+            watchlist_service.create_group(body.name)
+            return WatchlistGroupsResponse(groups=[WatchlistGroupResponse(**g) for g in watchlist_service.list_groups()])
+        except WatchlistValidationError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except WatchlistConfigurationError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    @router.delete(f"{DASHBOARD_API_PREFIX}/watchlist/groups/{{name}}", response_model=WatchlistSnapshotResponse)
+    def api_delete_watchlist_group(name: str):
+        try:
+            return _watchlist_response(watchlist_service.delete_group(name))
+        except WatchlistValidationError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except WatchlistConfigurationError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    @router.put(f"{DASHBOARD_API_PREFIX}/watchlist/groups/order", response_model=WatchlistGroupsResponse)
+    def api_reorder_watchlist_groups(body: WatchlistReorderGroupsRequest = Body(...)):
+        try:
+            watchlist_service.reorder_groups(body.groups)
+            return WatchlistGroupsResponse(groups=[WatchlistGroupResponse(**g) for g in watchlist_service.list_groups()])
+        except WatchlistConfigurationError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    @router.put(f"{DASHBOARD_API_PREFIX}/watchlist/groups/{{group}}/item-order", response_model=WatchlistSnapshotResponse)
+    def api_reorder_watchlist_items(group: str, body: WatchlistReorderItemsRequest = Body(...)):
+        try:
+            return _watchlist_response(watchlist_service.reorder_items(group, body.symbols))
+        except WatchlistConfigurationError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
 
     @router.post(f"{DASHBOARD_API_PREFIX}/watchlist/groups/rename", response_model=WatchlistSnapshotResponse)
     def api_rename_watchlist_group(body: WatchlistRenameGroupRequest = Body(...)):
@@ -250,8 +319,16 @@ def create_dashboard_data_router() -> APIRouter:
     def api_add_watchlist_symbol(body: WatchlistCreateRequest = Body(...)):
         try:
             return _watchlist_response(watchlist_service.add_symbol(body.symbol, tags=body.tags))
-        except WatchlistConflictError as exc:
-            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except WatchlistConflictError:
+            # Ticker already exists — add it to the requested group instead of rejecting.
+            if body.tags:
+                try:
+                    return _watchlist_response(watchlist_service.add_tags(body.symbol, body.tags))
+                except WatchlistConfigurationError as exc:
+                    raise HTTPException(status_code=503, detail=str(exc)) from exc
+                except WatchlistValidationError as exc:
+                    raise HTTPException(status_code=400, detail=str(exc)) from exc
+            raise HTTPException(status_code=409, detail=f"{body.symbol.strip().upper()} is already in the watchlist.")
         except WatchlistConfigurationError as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
         except WatchlistValidationError as exc:
@@ -260,10 +337,7 @@ def create_dashboard_data_router() -> APIRouter:
     @router.put(f"{DASHBOARD_API_PREFIX}/watchlist", response_model=WatchlistSnapshotResponse)
     def api_replace_watchlist(body: WatchlistReplaceRequest = Body(...)):
         try:
-            normalized = [
-                s if isinstance(s, str) else s.model_dump()
-                for s in body.symbols
-            ]
+            normalized = [s if isinstance(s, str) else s.model_dump() for s in body.symbols]
             return _watchlist_response(watchlist_service.replace_symbols(normalized))
         except WatchlistConfigurationError as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
@@ -271,11 +345,13 @@ def create_dashboard_data_router() -> APIRouter:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     @router.delete(f"{DASHBOARD_API_PREFIX}/watchlist/{{symbol}}", response_model=WatchlistSnapshotResponse)
-    async def api_remove_watchlist_symbol(symbol: str):
+    async def api_remove_watchlist_symbol(symbol: str, group: str | None = Query(default=None)):
         try:
-            was_monitored = _is_monitored(
-                _find_item(watchlist_service.get_watchlist_snapshot(), symbol)
-            )
+            if group:
+                # Group-scoped: remove only that tag; item is preserved in other groups.
+                items = watchlist_service.remove_tags(symbol, [group])
+                return _watchlist_response(items)
+            was_monitored = _is_monitored(_find_item(watchlist_service.get_watchlist_snapshot(), symbol))
             items = watchlist_service.remove_symbol(symbol)
             if was_monitored:
                 await _push_monitor_change(symbol, is_now_monitored=False)
@@ -290,12 +366,14 @@ def create_dashboard_data_router() -> APIRouter:
     @router.get(f"{DASHBOARD_API_PREFIX}/reports/weekly")
     def api_list_weekly_reports():
         from TerraFin.analytics.reports import list_reports
+
         reports = list_reports(limit=12)
         return {"reports": [r.summary() for r in reports]}
 
     @router.get(f"{DASHBOARD_API_PREFIX}/reports/weekly/{{as_of}}")
     def api_get_weekly_report(as_of: str):
         from TerraFin.analytics.reports import load_report
+
         rec = load_report(as_of)
         if rec is None:
             raise HTTPException(status_code=404, detail=f"No report for {as_of}")
@@ -305,6 +383,7 @@ def create_dashboard_data_router() -> APIRouter:
     def api_run_weekly_report():
         from TerraFin.analytics.reports import list_reports
         from TerraFin.analytics.reports.weekly import build_weekly_report
+
         build_weekly_report()
         latest = list_reports(limit=1)
         return {"reports": [r.summary() for r in latest]}
@@ -350,5 +429,15 @@ def create_dashboard_data_router() -> APIRouter:
     def api_post_cache_refresh(force: bool = Query(default=False)):
         refresh_all_due(force=force)
         return CacheRefreshResponse(ok=True, force=force, sources=cache_manager.get_status())
+
+    @router.get(f"{DASHBOARD_API_PREFIX}/spx-gex-history", response_model=SpxGexHistoryResponse)
+    def api_get_spx_gex_history(force: bool = Query(default=False)):
+        from TerraFin.analytics.data.spx_gex_history import get_spx_gex_history
+
+        points = get_spx_gex_history(force_refresh=force)
+        return SpxGexHistoryResponse(
+            points=[SpxGexHistoryPointResponse(**p) for p in points],
+            source="squeezemetrics",
+        )
 
     return router

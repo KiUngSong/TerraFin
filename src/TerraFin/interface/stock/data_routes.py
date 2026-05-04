@@ -7,6 +7,7 @@ from pydantic import BaseModel
 
 from TerraFin.analytics.analysis.fundamental import build_stock_dcf_payload, build_stock_reverse_dcf_payload
 from TerraFin.analytics.analysis.fundamental.dcf.models import StockDCFOverrides
+from TerraFin.analytics.analysis.options.gamma_exposure import get_gex_payload
 from TerraFin.analytics.analysis.risk import estimate_beta_5y_monthly, estimate_beta_5y_monthly_adjusted
 from TerraFin.interface.stock.payloads import (
     build_company_info_payload,
@@ -202,6 +203,32 @@ def build_beta_estimate_payload(ticker: str) -> dict[str, Any]:
     }
 
 
+class GexBucket(BaseModel):
+    strike: float | None = None
+    expiration: str | None = None
+    gex_b: float
+
+
+class GexWall(BaseModel):
+    strike: float
+    gex_b: float
+
+
+class GexResponse(BaseModel):
+    available: bool
+    ticker: str | None = None
+    spot_price: float | None = None
+    total_gex_b: float | None = None
+    regime: str | None = None  # "long_gamma" | "short_gamma"
+    zero_gamma_strike: float | None = None
+    largest_call_wall: GexWall | None = None
+    largest_put_wall: GexWall | None = None
+    by_strike: list[GexBucket] = []
+    by_expiration: list[GexBucket] = []
+    lookahead_days: int | None = None
+    strike_window_pct: float | None = None
+
+
 # ---------------------------------------------------------------------------
 # Router
 # ---------------------------------------------------------------------------
@@ -298,6 +325,18 @@ def create_stock_data_router() -> APIRouter:
     @router.get("/resolve-ticker", response_model=ResolveTickerResponse)
     def api_resolve_ticker(q: str = Query(..., min_length=1)):
         return ResolveTickerResponse(**resolve_ticker_query(q))
+
+    @router.get(f"{STOCK_API_PREFIX}/gex", response_model=GexResponse)
+    def api_gex(ticker: str = Query(..., min_length=1)):
+        # Cboe's delayed-quotes endpoint doesn't list options for every
+        # ticker (KOSPI/TSE names, micro-caps, etc.). Return available=False
+        # so the frontend can hide the panel without surfacing an error.
+        normalized = ticker.upper()
+        symbol = normalized[1:] if normalized.startswith("^") else normalized
+        payload = get_gex_payload(symbol)
+        if payload is None:
+            return GexResponse(available=False, ticker=normalized)
+        return GexResponse(available=True, **payload)
 
     @router.get(f"{STOCK_API_PREFIX}/filings", response_model=FilingsListResponse)
     def api_filings(

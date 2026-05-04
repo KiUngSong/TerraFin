@@ -4,6 +4,9 @@ import InsightCard from '../dashboard/components/InsightCard';
 import DcfWorkbench from '../dcf/DcfWorkbench';
 import { clearAgentViewContextSource, publishAgentViewContext } from '../agent/viewContext';
 import { BREAKPOINTS } from '../shared/responsive';
+import AdditionalFeatureToggle from '../stock/components/AdditionalFeatureToggle';
+import SpxGexSnapshotCard from '../dashboard/widgets/SpxGexSnapshotCard';
+import { useGex } from '../stock/useStockData';
 import MacroFocusPanel from './components/MacroFocusPanel';
 
 // Page reflows earlier than the shared tablet breakpoint (1023) because the
@@ -52,6 +55,8 @@ const MarketInsightsPage: React.FC = () => {
   const [topCompanies, setTopCompanies] = useState<Array<{ rank: number; ticker: string; name: string; marketCap: string; country: string }>>([]);
   const [isNarrowLayout, setIsNarrowLayout] = useState(false);
   const [sp500DcfOpen, setSp500DcfOpen] = useState(false);
+  const [isGexOpen, setIsGexOpen] = useState(false);
+  const { data: gexData, loading: gexLoading, error: gexError } = useGex('SPX');
   const [filingHistory, setFilingHistory] = useState<FilingSummary[]>([]);
   const [selectedFilingDate, setSelectedFilingDate] = useState<string | null>(null);
 
@@ -284,6 +289,16 @@ const MarketInsightsPage: React.FC = () => {
             ) : null}
           </div>
         </InsightCard>
+
+        <AdditionalFeatureToggle
+          title="SPX Gamma Exposure"
+          subtitle="Dealer net gamma positioning history (SqueezeMetrics, 2011–present). Long gamma suppresses volatility; short gamma amplifies it."
+          open={isGexOpen}
+          onToggle={() => setIsGexOpen((prev) => !prev)}
+        />
+        {isGexOpen && (
+          <SpxGexSnapshotCard data={gexData} loading={gexLoading} error={gexError} />
+        )}
 
         <InsightCard title="Investor Positioning" subtitle="Guru portfolio concentration and top holdings.">
           <div style={{ display: 'grid', gap: 12 }}>

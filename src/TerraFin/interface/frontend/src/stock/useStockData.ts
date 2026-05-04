@@ -107,6 +107,56 @@ interface FcfHistoryResponse {
 
 export type { ChartPoint, CompanyInfo, EarningsRecord, FcfCandidates, FcfHistoryResponse, FcfHistoryRow, FilingDocument, FilingRow, FilingsListResponse, TocEntry };
 
+export interface GexBucket {
+  strike?: number | null;
+  expiration?: string | null;
+  gex_b: number;
+}
+
+export interface GexWall {
+  strike: number;
+  gex_b: number;
+}
+
+export interface GexPayload {
+  available: boolean;
+  ticker: string | null;
+  spot_price: number | null;
+  total_gex_b: number | null;
+  regime: 'long_gamma' | 'short_gamma' | null;
+  zero_gamma_strike: number | null;
+  largest_call_wall: GexWall | null;
+  largest_put_wall: GexWall | null;
+  by_strike: GexBucket[];
+  by_expiration: GexBucket[];
+  lookahead_days: number | null;
+  strike_window_pct: number | null;
+}
+
+export function useGex(ticker: string, enabled = true) {
+  const [data, setData] = useState<GexPayload | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!ticker || !enabled) {
+      setData(null);
+      setError(null);
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
+    setError(null);
+    fetch(`/stock/api/gex?ticker=${encodeURIComponent(ticker)}`)
+      .then((res) => (res.ok ? res.json() : Promise.reject(new Error(`${res.status}`))))
+      .then((d) => setData(d))
+      .catch((e) => setError(e.message))
+      .finally(() => setLoading(false));
+  }, [enabled, ticker]);
+
+  return { data, loading, error };
+}
+
 export function useCompanyInfo(ticker: string, enabled = true) {
   const [data, setData] = useState<CompanyInfo | null>(null);
   const [loading, setLoading] = useState(true);

@@ -20,6 +20,7 @@ const QUICK_PICKS = [
   { name: 'Nikkei 225', label: 'Nikkei' },
   { name: 'Kospi', label: 'Kospi' },
   { name: 'Kosdaq', label: 'Kosdaq' },
+  { name: 'SPX GEX', label: 'SPX GEX' },
 ];
 const QUICK_PICK_NAMES = QUICK_PICKS.map((pick) => pick.name);
 const QUICK_PICK_META: Record<string, { type: string; description: string }> = {
@@ -33,6 +34,11 @@ const QUICK_PICK_META: Record<string, { type: string; description: string }> = {
   'Nikkei 225': { type: 'index', description: 'Price-weighted Japanese large-cap equity index.' },
   Kospi: { type: 'index', description: 'Benchmark South Korean large-cap equity index.' },
   Kosdaq: { type: 'index', description: 'South Korean growth and technology-focused equity index.' },
+  'SPX GEX': {
+    type: 'options',
+    description:
+      'Dealer net gamma positioning (SqueezeMetrics, 2011–present). Negative = short gamma — dealers amplify moves. SqueezeMetrics estimates GEX from dark pool volume; CBOE snapshot calculates from open interest — expect divergence.',
+  },
 };
 const MACRO_CHART_COMPACT_BREAKPOINT = 860;
 const MACRO_CHART_SCALE_MARGINS: ChartScaleMargins = { top: 0.04, bottom: 0.04 };

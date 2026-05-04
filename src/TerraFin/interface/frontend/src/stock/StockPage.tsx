@@ -14,8 +14,10 @@ import StockChart from './components/StockChart';
 import CompanyProfile from './components/CompanyProfile';
 import EarningsTable from './components/EarningsTable';
 import FcfHistoryChart from './components/FcfHistoryChart';
+import GexPanel from './components/GexPanel';
+import AdditionalFeatureToggle from './components/AdditionalFeatureToggle';
 import SecFilings from './components/SecFilings';
-import { useCompanyInfo, useEarnings, useFcfHistory } from './useStockData';
+import { useCompanyInfo, useEarnings, useFcfHistory, useGex } from './useStockData';
 
 const TICKER_GROUPS = [
   {
@@ -86,6 +88,7 @@ const StockPage: React.FC = () => {
   const [searchValue, setSearchValue] = React.useState('');
   const [readyTicker, setReadyTicker] = React.useState<string | null>(null);
   const [isReverseDcfOpen, setIsReverseDcfOpen] = React.useState(false);
+  const [isGexOpen, setIsGexOpen] = React.useState(false);
   const { isMobile, isTabletOrBelow } = useViewportTier();
   const [stockDcfState, setStockDcfState] = React.useState<{
     payload: DcfValuationPayload | null;
@@ -121,9 +124,14 @@ const StockPage: React.FC = () => {
   const isEquity = !companyInfo?.quoteType || companyInfo.quoteType === 'EQUITY';
   const { data: earnings, loading: earningsLoading } = useEarnings(ticker);
   const { data: fcfHistory, loading: fcfHistoryLoading, error: fcfHistoryError } = useFcfHistory(ticker, 10);
+  const { data: gex, loading: gexLoading, error: gexError } = useGex(ticker);
+  // Cboe delayed-quotes only lists US-listed options. Hide the GEX
+  // section entirely when the ticker has no chain (KOSPI/TSE, micro-caps).
+  const showGex = !gexLoading && !gexError && gex?.available === true;
 
   React.useEffect(() => {
     setIsReverseDcfOpen(false);
+    setIsGexOpen(false);
   }, [ticker]);
 
   // SEC filings section hides itself for non-US tickers (KOSPI, TSE, etc.)
@@ -430,28 +438,12 @@ const StockPage: React.FC = () => {
         ) : null}
 
         {isEquity ? (
-        <section style={reverseDcfToggleCardStyle}>
-          <button
-            type="button"
-            aria-expanded={isReverseDcfOpen}
-            onClick={() => setIsReverseDcfOpen((current) => !current)}
-            style={reverseDcfToggleButtonStyle}
-          >
-            <div style={reverseDcfToggleTextBlockStyle}>
-              <div style={reverseDcfEyebrowStyle}>Additional Feature</div>
-              <div style={reverseDcfTitleRowStyle}>
-                <h3 style={reverseDcfTitleStyle}>Reverse DCF</h3>
-                <span style={reverseDcfStateBadgeStyle(isReverseDcfOpen)}>
-                  {isReverseDcfOpen ? 'Expanded' : 'Collapsed'}
-                </span>
-              </div>
-              <p style={reverseDcfSubtitleStyle}>
-                Market-implied growth assumptions for {ticker}. Open this only when you want the extra valuation tool.
-              </p>
-            </div>
-            <span style={reverseDcfToggleChipStyle(isReverseDcfOpen)}>{isReverseDcfOpen ? 'Hide' : 'Show'}</span>
-          </button>
-        </section>
+          <AdditionalFeatureToggle
+            title="Reverse DCF"
+            subtitle={`Market-implied growth assumptions for ${ticker}. Open this only when you want the extra valuation tool.`}
+            open={isReverseDcfOpen}
+            onToggle={() => setIsReverseDcfOpen((current) => !current)}
+          />
         ) : null}
 
         {isEquity && isReverseDcfOpen ? (
@@ -485,6 +477,28 @@ const StockPage: React.FC = () => {
                 loading={reverseDcfState.loading}
                 error={reverseDcfState.error}
               />
+            </InsightCard>
+          </section>
+        ) : null}
+
+        {showGex ? (
+          <AdditionalFeatureToggle
+            title="Gamma Exposure (delayed)"
+            subtitle={`Dealer GEX snapshot for ${ticker} from Cboe delayed quotes. Long/short gamma regime, zero-gamma strike, call/put walls.`}
+            open={isGexOpen}
+            onToggle={() => setIsGexOpen((current) => !current)}
+          />
+        ) : null}
+
+        {showGex && isGexOpen ? (
+          <section>
+            <InsightCard
+              title="Gamma Exposure (delayed)"
+              subtitle={`Cboe delayed-quote chain. Updated on each page load.`}
+              fillContent
+              allowOverflow
+            >
+              <GexPanel payload={gex} loading={gexLoading} error={gexError} />
             </InsightCard>
           </section>
         ) : null}
@@ -541,87 +555,6 @@ const overviewDividerStyle: React.CSSProperties = {
   height: 1,
   background: '#e2e8f0',
 };
-
-const reverseDcfToggleCardStyle: React.CSSProperties = {
-  background: '#ffffff',
-  borderRadius: 14,
-  border: '1px solid #e2e8f0',
-  boxShadow: '0 8px 20px rgba(15, 23, 42, 0.04)',
-  overflow: 'hidden',
-};
-
-const reverseDcfToggleButtonStyle: React.CSSProperties = {
-  width: '100%',
-  border: 'none',
-  background: 'linear-gradient(180deg, #ffffff 0%, #f8fafc 100%)',
-  padding: 16,
-  display: 'flex',
-  alignItems: 'flex-start',
-  justifyContent: 'space-between',
-  gap: 16,
-  flexWrap: 'wrap',
-  textAlign: 'left',
-  cursor: 'pointer',
-};
-
-const reverseDcfToggleTextBlockStyle: React.CSSProperties = {
-  display: 'grid',
-  gap: 6,
-  minWidth: 0,
-};
-
-const reverseDcfEyebrowStyle: React.CSSProperties = {
-  fontSize: 11,
-  fontWeight: 700,
-  color: '#64748b',
-  letterSpacing: '0.06em',
-  textTransform: 'uppercase',
-};
-
-const reverseDcfTitleRowStyle: React.CSSProperties = {
-  display: 'flex',
-  alignItems: 'center',
-  gap: 10,
-  flexWrap: 'wrap',
-};
-
-const reverseDcfTitleStyle: React.CSSProperties = {
-  margin: 0,
-  fontSize: 15,
-  fontWeight: 700,
-  color: '#0f172a',
-};
-
-const reverseDcfStateBadgeStyle = (open: boolean): React.CSSProperties => ({
-  borderRadius: 999,
-  padding: '5px 9px',
-  background: open ? '#dcfce7' : '#f1f5f9',
-  color: open ? '#166534' : '#475569',
-  fontSize: 11,
-  fontWeight: 700,
-});
-
-const reverseDcfSubtitleStyle: React.CSSProperties = {
-  margin: 0,
-  fontSize: 12,
-  color: '#64748b',
-  lineHeight: 1.5,
-};
-
-const reverseDcfToggleChipStyle = (open: boolean): React.CSSProperties => ({
-  flexShrink: 0,
-  minWidth: 72,
-  height: 36,
-  borderRadius: 999,
-  border: `1px solid ${open ? '#86efac' : '#cbd5e1'}`,
-  background: open ? '#ecfdf5' : '#ffffff',
-  color: open ? '#166534' : '#334155',
-  fontSize: 12,
-  fontWeight: 800,
-  display: 'inline-flex',
-  alignItems: 'center',
-  justifyContent: 'center',
-});
 
 function rowGridStyle(
   isNarrowLayout: boolean,
