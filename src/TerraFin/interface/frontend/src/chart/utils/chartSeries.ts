@@ -3,7 +3,7 @@
  */
 import { CandlestickSeries, HistogramSeries, LineSeries, LineStyle } from 'lightweight-charts';
 import type { CandlestickPoint, ChartSeries, ChartZone, LinePoint } from '../types';
-import { attachPriceLevelsPrimitive, detachPriceLevelsPrimitive } from './chartPriceLevels';
+import { attachPriceLevelsPrimitive, clearNativePriceLines, detachPriceLevelsPrimitive, syncNativePriceLines } from './chartPriceLevels';
 import { attachZonePrimitive, detachZonePrimitive } from './chartZones';
 
 export type ChartApi = any; // eslint-disable-line
@@ -254,19 +254,7 @@ export function createSeriesFromSpec(chart: ChartApi, spec: SeriesSpec): SeriesR
   series.setData((spec.originalData ?? spec.data) as LinePoint[]);
   attachZonePrimitive(series, spec.renderZones ? spec.zones : undefined);
   attachPriceLevelsPrimitive(series, spec.priceLevels);
-  if (spec.priceLevels) {
-    for (const level of spec.priceLevels) {
-      series.createPriceLine({
-        price: level.price,
-        color: level.color,
-        lineWidth: 1,
-        lineStyle: LineStyle.Solid,
-        axisLabelVisible: true,
-        axisLabelColor: level.color,
-        title: level.title,
-      });
-    }
-  }
+  syncNativePriceLines(series, spec.priceLevels);
   return series;
 }
 
@@ -282,6 +270,7 @@ export function applySeriesAppearance(series: SeriesRef, spec: SeriesSpec): void
   series.applyOptions(lineOptions(spec));
   attachZonePrimitive(series, spec.renderZones ? spec.zones : undefined);
   attachPriceLevelsPrimitive(series, spec.priceLevels);
+  syncNativePriceLines(series, spec.priceLevels);
 }
 
 export function applySeriesData(series: SeriesRef, spec: SeriesSpec): void {
@@ -289,6 +278,7 @@ export function applySeriesData(series: SeriesRef, spec: SeriesSpec): void {
 }
 
 export function destroySeries(series: SeriesRef): void {
+  clearNativePriceLines(series);
   detachPriceLevelsPrimitive(series);
   detachZonePrimitive(series);
 }

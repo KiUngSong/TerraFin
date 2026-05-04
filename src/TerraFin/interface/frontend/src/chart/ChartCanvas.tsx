@@ -330,19 +330,7 @@ const ChartCanvas: React.FC<ChartCanvasProps> = ({
         scaleMargins: priceScaleMargins,
       },
     });
-    if (showVolume && volumeAvailable) {
-      try {
-        chartRef.current
-          .priceScale(VOLUME_PRICE_SCALE_ID)
-          .applyOptions({
-            scaleMargins: { top: 0.8, bottom: 0 },
-            visible: false,
-          });
-      } catch {
-        // Volume scale may not exist yet on first run; useEffect re-runs after series mount.
-      }
-    }
-  }, [activeSeries, priceScaleMargins, priceScaleMode, returnMode, showVolume, volumeAvailable]);
+  }, [activeSeries, priceScaleMargins, priceScaleMode, returnMode]);
 
   useEffect(() => {
     if (!chartRef.current) return;
@@ -384,6 +372,16 @@ const ChartCanvas: React.FC<ChartCanvasProps> = ({
       if (!seriesRef) {
         seriesRef = createSeriesFromSpec(chart, spec);
         seriesRefsByKeyRef.current.set(spec.key, seriesRef);
+        // Configure volume price scale immediately after series creation so the
+        // scale exists when applyOptions runs (avoiding the first-toggle float bug).
+        if (spec.key === VOLUME_SERIES_KEY) {
+          try {
+            chart.priceScale(VOLUME_PRICE_SCALE_ID).applyOptions({
+              scaleMargins: { top: 0.8, bottom: 0 },
+              visible: false,
+            });
+          } catch { /* ignore */ }
+        }
       } else {
         if (seriesAppearanceSignatureByKeyRef.current.get(spec.key) !== spec.appearanceSignature) {
           applySeriesAppearance(seriesRef, spec);

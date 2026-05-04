@@ -1,7 +1,18 @@
+import { LineStyle } from 'lightweight-charts';
+
 type PriceLevel = {
   price: number;
   color: string;
   title: string;
+};
+
+type NativePriceLine = {
+  applyOptions: (options: object) => void;
+};
+
+type SeriesWithNativeLines = {
+  createPriceLine: (options: object) => NativePriceLine;
+  removePriceLine: (line: NativePriceLine) => void;
 };
 
 type SeriesLike = {
@@ -12,6 +23,8 @@ type SeriesLike = {
 
 const PRICE_LEVEL_PRIMITIVE_KEY = Symbol('terrafin-price-level-primitive');
 const PRICE_LEVEL_SIGNATURE_KEY = Symbol('terrafin-price-level-signature');
+const NATIVE_PRICE_LINES_KEY = Symbol('terrafin-native-price-lines');
+const NATIVE_PRICE_LINES_SIG_KEY = Symbol('terrafin-native-price-lines-sig');
 
 class SeriesPriceLevelPrimitive {
   constructor(private readonly levels: PriceLevel[]) {}
@@ -77,4 +90,52 @@ export function detachPriceLevelsPrimitive(series: SeriesLike | null | undefined
   }
   delete series[PRICE_LEVEL_PRIMITIVE_KEY];
   delete series[PRICE_LEVEL_SIGNATURE_KEY];
+}
+
+export function syncNativePriceLines(series: SeriesLike, levels?: PriceLevel[]): void {
+  const nextSig = JSON.stringify(levels ?? []);
+  if (series[NATIVE_PRICE_LINES_SIG_KEY] === nextSig) return;
+
+  // Remove previously created native lines.
+  const existing = series[NATIVE_PRICE_LINES_KEY] as NativePriceLine[] | undefined;
+  if (existing?.length) {
+    const s = series as unknown as SeriesWithNativeLines;
+    for (const line of existing) {
+      try { s.removePriceLine(line); } catch { /* teardown */ }
+    }
+  }
+  series[NATIVE_PRICE_LINES_KEY] = [];
+  series[NATIVE_PRICE_LINES_SIG_KEY] = nextSig;
+
+  if (!levels?.length) return;
+
+  const s = series as unknown as SeriesWithNativeLines;
+  if (typeof s.createPriceLine !== 'function') return;
+
+  const created: NativePriceLine[] = [];
+  for (const level of levels) {
+    created.push(s.createPriceLine({
+      price: level.price,
+      color: level.color,
+      lineWidth: 1,
+      lineStyle: LineStyle.Solid,
+      axisLabelVisible: true,
+      axisLabelColor: level.color,
+      title: level.title,
+    }));
+  }
+  series[NATIVE_PRICE_LINES_KEY] = created;
+}
+
+export function clearNativePriceLines(series: SeriesLike | null | undefined): void {
+  if (!series) return;
+  const existing = series[NATIVE_PRICE_LINES_KEY] as NativePriceLine[] | undefined;
+  if (existing?.length) {
+    const s = series as unknown as SeriesWithNativeLines;
+    for (const line of existing) {
+      try { s.removePriceLine(line); } catch { /* teardown */ }
+    }
+  }
+  delete series[NATIVE_PRICE_LINES_KEY];
+  delete series[NATIVE_PRICE_LINES_SIG_KEY];
 }

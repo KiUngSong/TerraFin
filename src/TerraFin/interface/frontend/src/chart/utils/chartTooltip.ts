@@ -105,7 +105,7 @@ export function createTooltip(ctx: TooltipContext): {
     toolTip.style.display = 'block';
 
     const tw = 180;
-    const th = 80;
+    const th = toolTip.offsetHeight || 80;
     let left = param.point.x + margin;
     if (left + tw > el.clientWidth) left = param.point.x - margin - tw;
     let top = param.point.y + margin;

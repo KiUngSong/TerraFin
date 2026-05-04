@@ -180,10 +180,14 @@ def build_multi_payload_from_items(source_items: list[dict]) -> dict:
         elif n_candlestick == 1 and n_line >= 1:
             if st == "candlestick":
                 item["priceScaleId"] = "right"
-            elif not primary_assigned:
+            elif not primary_assigned and not _is_line_only(item.get("id", "")):
+                # Non-indicator comparison series gets the visible left axis.
                 item["priceScaleId"] = "left"
                 primary_assigned = True
             else:
+                # Indicator-type line series (market indicators, economic indicators)
+                # use hidden overlay scales so they don't pollute the left axis with
+                # out-of-range numbers (e.g. GEX in billions alongside SPX at 5000+).
                 item["priceScaleId"] = f"overlay-{overlay_idx}"
                 overlay_idx += 1
         elif n_candlestick == 1 and n_line == 0:

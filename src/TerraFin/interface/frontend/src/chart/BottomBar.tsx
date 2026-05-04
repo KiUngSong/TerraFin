@@ -171,7 +171,7 @@ const PriceScaleControls: React.FC<{
           whiteSpace: 'nowrap',
         }}
       >
-        log
+        Log
       </button>
       <Divider compact={compact} />
     </>
@@ -190,6 +190,7 @@ const VolumeToggle: React.FC<{
   const disabled = !available;
   return (
     <>
+      <Divider compact={compact} />
       <button
         type="button"
         onMouseEnter={() => setHovered(true)}
@@ -226,7 +227,6 @@ const VolumeToggle: React.FC<{
       >
         Vol
       </button>
-      <Divider compact={compact} />
     </>
   );
 };
@@ -293,7 +293,7 @@ const BottomBar: React.FC<BottomBarProps> = ({
           </div>
 
           {!isEmpty ? (
-            <div style={{ display: 'flex', alignItems: 'center', flexShrink: 0 }}>
+            <div style={{ display: 'flex', alignItems: 'center', flexShrink: 0, marginLeft: 'auto' }}>
               {onShowVolumeChange ? (
                 <VolumeToggle
                   available={volumeAvailable}
