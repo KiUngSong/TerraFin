@@ -67,7 +67,7 @@ from TerraFin.interface.stock.data_routes import create_stock_data_router
 from TerraFin.interface.stock.routes import create_stock_router
 from TerraFin.interface.ticker_search import create_ticker_search_router
 from TerraFin.interface.watchlist.routes import create_watchlist_router
-from TerraFin.interface.watchlist_service import get_watchlist_service
+from TerraFin.interface.watchlist_service import get_watchlist_service, start_watchlist_refresh_loop
 
 
 ROOT_DIR = Path(__file__).parent
@@ -165,6 +165,10 @@ def create_app(initial_data: TimeSeriesDataFrame | None = None, base_path: str =
     async def _lifespan(app: FastAPI):
         _ = app
         _ = get_watchlist_service()
+        # Per-region market-close-driven refresh of stored daily move %.
+        # Daemon thread; loop dies with the process. No explicit stop in
+        # the lifespan teardown — same pattern as the cache manager.
+        start_watchlist_refresh_loop()
         cache_manager = get_cache_manager()
         cache_manager.start()
         background_tasks: list[asyncio.Task] = []

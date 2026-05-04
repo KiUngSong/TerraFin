@@ -45,7 +45,6 @@ async function parseWatchlistResponse(response: Response): Promise<ParsedWatchli
 export function useWatchlist() {
   const [items, setItems] = useState<WatchlistItem[]>([]);
   const [groups, setGroups] = useState<WatchlistGroup[]>([]);
-  const [selectedGroup, setSelectedGroup] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -69,10 +68,7 @@ export function useWatchlist() {
     setLoading(true);
     setError(null);
     try {
-      const url = selectedGroup
-        ? `${WATCHLIST_ENDPOINT}?group=${encodeURIComponent(selectedGroup)}`
-        : WATCHLIST_ENDPOINT;
-      const response = await fetch(url);
+      const response = await fetch(WATCHLIST_ENDPOINT);
       const payload = await parseWatchlistResponse(response);
       setItems(payload.items);
       setBackendConfigured(payload.backendConfigured);
@@ -87,7 +83,7 @@ export function useWatchlist() {
     } finally {
       setLoading(false);
     }
-  }, [selectedGroup]);
+  }, []);
 
   useEffect(() => {
     void refresh();
@@ -117,13 +113,14 @@ export function useWatchlist() {
     }
   }, [fetchGroups]);
 
-  const removeSymbol = useCallback(async (symbol: string) => {
+  const removeSymbol = useCallback(async (symbol: string, group?: string) => {
     setBusy(true);
     setError(null);
     try {
-      const response = await fetch(`${WATCHLIST_ENDPOINT}/${encodeURIComponent(symbol)}`, {
-        method: 'DELETE',
-      });
+      const url = group
+        ? `${WATCHLIST_ENDPOINT}/${encodeURIComponent(symbol)}?group=${encodeURIComponent(group)}`
+        : `${WATCHLIST_ENDPOINT}/${encodeURIComponent(symbol)}`;
+      const response = await fetch(url, { method: 'DELETE' });
       const payload = await parseWatchlistResponse(response);
       setItems(payload.items);
       setBackendConfigured(payload.backendConfigured);
@@ -212,18 +209,79 @@ export function useWatchlist() {
     }
   }, [fetchGroups]);
 
-  const deleteGroup = useCallback(async (tag: string, currentItems: WatchlistItem[]) => {
+  const reorderGroups = useCallback(async (groupNames: string[]) => {
     setBusy(true);
     setError(null);
     try {
-      const updatedSymbols = currentItems.map((item) => ({
-        symbol: item.symbol,
-        tags: item.tags.filter((t) => t !== tag),
-      }));
-      const response = await fetch(WATCHLIST_ENDPOINT, {
+      const response = await fetch(`${WATCHLIST_ENDPOINT}/groups/order`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ symbols: updatedSymbols }),
+        body: JSON.stringify({ groups: groupNames }),
+      });
+      if (!response.ok) {
+        const payload = (await response.json().catch(() => ({}))) as { detail?: string };
+        throw new Error(payload.detail || 'Unable to reorder groups right now.');
+      }
+      await fetchGroups();
+    } catch (mutationError) {
+      setError(mutationError instanceof Error ? mutationError.message : 'Unable to reorder groups right now.');
+      throw mutationError;
+    } finally {
+      setBusy(false);
+    }
+  }, [fetchGroups]);
+
+  const reorderItems = useCallback(async (group: string, symbolOrder: string[]) => {
+    setBusy(true);
+    setError(null);
+    try {
+      const response = await fetch(`${WATCHLIST_ENDPOINT}/groups/${encodeURIComponent(group)}/item-order`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ symbols: symbolOrder }),
+      });
+      if (!response.ok) {
+        const payload = (await response.json().catch(() => ({}))) as { detail?: string };
+        throw new Error(payload.detail || 'Unable to reorder items right now.');
+      }
+      // Do not update items state — backend returns MongoDB storage order, not display order.
+      // Caller manages optimistic local order via itemOrderOverride.
+    } catch (mutationError) {
+      setError(mutationError instanceof Error ? mutationError.message : 'Unable to reorder items right now.');
+      throw mutationError;
+    } finally {
+      setBusy(false);
+    }
+  }, []);
+
+  const createGroup = useCallback(async (name: string) => {
+    setBusy(true);
+    setError(null);
+    try {
+      const response = await fetch(`${WATCHLIST_ENDPOINT}/groups`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name }),
+      });
+      if (!response.ok) {
+        const payload = (await response.json().catch(() => ({}))) as { detail?: string };
+        throw new Error(payload.detail || 'Unable to create group right now.');
+      }
+      await fetchGroups();
+    } catch (mutationError) {
+      setError(mutationError instanceof Error ? mutationError.message : 'Unable to create group right now.');
+      throw mutationError;
+    } finally {
+      setBusy(false);
+    }
+  }, [fetchGroups]);
+
+  const deleteGroup = useCallback(async (tag: string) => {
+    setBusy(true);
+    setError(null);
+    try {
+      const response = await fetch(`${WATCHLIST_ENDPOINT}/groups/${encodeURIComponent(tag)}`, {
+        method: 'DELETE',
       });
       const payload = await parseWatchlistResponse(response);
       setItems(payload.items);
@@ -242,8 +300,6 @@ export function useWatchlist() {
   return {
     items,
     groups,
-    selectedGroup,
-    setSelectedGroup,
     loading,
     busy,
     error,
@@ -255,7 +311,10 @@ export function useWatchlist() {
     removeSymbol,
     setTags,
     renameGroup,
+    createGroup,
     deleteGroup,
     promoteGroup,
+    reorderGroups,
+    reorderItems,
   };
 }

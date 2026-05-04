@@ -1,7 +1,81 @@
+import logging
+import os
+import threading
+import time
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 from threading import Lock
+from zoneinfo import ZoneInfo
 
 from TerraFin.configuration import WatchlistConfig, load_terrafin_config
+
+
+log = logging.getLogger(__name__)
+
+
+# Per-region close + post-close buffer for the watchlist move-% refresh.
+# The scheduler converts each (close_hour, close_minute, tz) → next UTC
+# fire on every loop iteration so DST flips fall out for free. The hour
+# of "close + 1h" gives yfinance time to publish the EOD bar.
+_REFRESH_REGIONS = [
+    {"label": "KRX", "tz": "Asia/Seoul", "close_hour": 15, "close_minute": 30, "buffer_minutes": 60},
+    {"label": "NYSE", "tz": "America/New_York", "close_hour": 16, "close_minute": 0, "buffer_minutes": 60},
+]
+
+
+def _enabled() -> bool:
+    return os.environ.get("TERRAFIN_WATCHLIST_REFRESH_ENABLED", "1") not in ("0", "false", "False")
+
+
+def _per_symbol_sleep_seconds() -> float:
+    raw = os.environ.get("TERRAFIN_WATCHLIST_PER_SYMBOL_SLEEP_SEC")
+    if not raw:
+        return 0.2
+    try:
+        return max(float(raw), 0.0)
+    except ValueError:
+        return 0.2
+
+
+def _next_fire_at_utc(now_utc: datetime) -> tuple[datetime, str]:
+    """Compute the next refresh fire time across all regions, returning
+    (fire_at_utc, region_label). Each region's fire time is "close +
+    buffer" expressed in its own tz; if today's slot already passed,
+    advance to tomorrow's. Pick the earliest across regions."""
+    candidates: list[tuple[datetime, str]] = []
+    for region in _REFRESH_REGIONS:
+        tz = ZoneInfo(region["tz"])
+        now_local = now_utc.astimezone(tz)
+        target_local = now_local.replace(
+            hour=region["close_hour"],
+            minute=region["close_minute"],
+            second=0,
+            microsecond=0,
+        ) + timedelta(minutes=region["buffer_minutes"])
+        if target_local <= now_local:
+            target_local = target_local + timedelta(days=1)
+        candidates.append((target_local.astimezone(timezone.utc), region["label"]))
+    return min(candidates, key=lambda c: c[0])
+
+
+def _previous_fire_at_utc(now_utc: datetime) -> datetime:
+    """Most recent passed slot across all regions — used at boot to
+    decide whether a catch-up fire is needed (we missed a slot while
+    the process was down)."""
+    passed: list[datetime] = []
+    for region in _REFRESH_REGIONS:
+        tz = ZoneInfo(region["tz"])
+        now_local = now_utc.astimezone(tz)
+        target_local = now_local.replace(
+            hour=region["close_hour"],
+            minute=region["close_minute"],
+            second=0,
+            microsecond=0,
+        ) + timedelta(minutes=region["buffer_minutes"])
+        if target_local > now_local:
+            target_local = target_local - timedelta(days=1)
+        passed.append(target_local.astimezone(timezone.utc))
+    return max(passed)
 
 
 try:
@@ -39,13 +113,17 @@ class WatchlistItemRecord:
     name: str
     move: str
     tags: list[str] = None  # type: ignore[assignment]
+    move_refreshed_at: str | None = None
 
     def __post_init__(self) -> None:
         if self.tags is None:
             self.tags = []
 
     def to_dict(self) -> dict:
-        return {"symbol": self.symbol, "name": self.name, "move": self.move, "tags": list(self.tags)}
+        out: dict = {"symbol": self.symbol, "name": self.name, "move": self.move, "tags": list(self.tags)}
+        if self.move_refreshed_at:
+            out["move_refreshed_at"] = self.move_refreshed_at
+        return out
 
 
 WatchlistMongoConfig = WatchlistConfig
@@ -118,6 +196,9 @@ class WatchlistService:
         self._lock = Lock()
         self._client = None
         self._items: list[dict] | None = None
+        self._explicit_groups: list[str] | None = None
+        self._group_order: list[str] | None = None
+        self._item_order: dict[str, list[str]] | None = None
         self._backend_unavailable = False
 
     def get_watchlist_snapshot(self, group: str | None = None) -> list[dict]:
@@ -127,7 +208,81 @@ class WatchlistService:
         if group:
             tag = group.strip().lower()
             items = [item for item in items if tag in [t.lower() for t in item.get("tags", [])]]
+            # Apply per-group item ordering (lazy: items not in order appended at end).
+            order = (self._item_order or {}).get(group) or (self._item_order or {}).get(tag) or []
+            if order:
+                sym_map = {i["symbol"]: i for i in items}
+                ordered = [sym_map.pop(s) for s in order if s in sym_map]
+                ordered.extend(sym_map.values())
+                items = ordered
         return items
+
+    def refresh_all_moves(self) -> int:
+        """Recompute the daily move % for every stored symbol and
+        persist back to Mongo. Returns the count of items whose move
+        actually changed (skip-write-if-unchanged).
+
+        Each item gets ``move_refreshed_at`` set to the current UTC
+        ISO timestamp on EVERY successful fetch — even when the value
+        didn't change — so the UI can surface "data verified at HH:MM
+        local". The Mongo doc is rewritten only when at least one
+        ``move`` flipped, but the in-memory ``_items`` cache always
+        gets the new timestamps so reads see them.
+        """
+        if not self._is_backend_available():
+            return 0
+        sleep_between = _per_symbol_sleep_seconds()
+        with self._lock:
+            items = self._load_items_locked()
+            if not items:
+                return 0
+            updated = 0
+            now_iso = datetime.now(timezone.utc).isoformat()
+            for idx, item in enumerate(items):
+                symbol = item.get("symbol")
+                if not symbol:
+                    continue
+                try:
+                    fresh = _format_move_from_history(symbol)
+                except Exception:
+                    log.exception("watchlist move recompute failed for %s", symbol)
+                    continue
+                item["move_refreshed_at"] = now_iso
+                if item.get("move") != fresh:
+                    item["move"] = fresh
+                    updated += 1
+                if sleep_between and idx < len(items) - 1:
+                    time.sleep(sleep_between)
+            self._write_items_locked(items)
+            self._items = items
+            log.info(
+                "watchlist move refresh: %d/%d move-flipped, %d total verified",
+                updated, len(items), len(items),
+            )
+            return updated
+
+    def latest_refresh_at_utc(self) -> datetime | None:
+        """Most recent ``move_refreshed_at`` across all stored items.
+        ``None`` if the field is missing everywhere — used by the boot
+        catch-up path to decide if a fire is overdue.
+        """
+        if self._items is None:
+            self.refresh_snapshot()
+        latest: datetime | None = None
+        for item in self._items or []:
+            stamp = item.get("move_refreshed_at")
+            if not stamp:
+                continue
+            try:
+                parsed = datetime.fromisoformat(stamp)
+            except ValueError:
+                continue
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=timezone.utc)
+            if latest is None or parsed > latest:
+                latest = parsed
+        return latest
+
 
     def is_backend_configured(self) -> bool:
         return self._is_backend_available()
@@ -270,19 +425,97 @@ class WatchlistService:
                 if old_key in [t.lower() for t in existing]:
                     updated = [new_tag if t.lower() == old_key else t for t in existing]
                     item["tags"] = _normalize_tags(updated)
+            eg = list(self._explicit_groups or [])
+            self._explicit_groups = [new_tag if e.lower() == old_key else e for e in eg]
+            self._group_order = [new_tag if g.lower() == old_key else g for g in (self._group_order or [])]
+            io = dict(self._item_order or {})
+            if old_key in io:
+                io[new_tag] = io.pop(old_key)
+            else:
+                # Try case-insensitive key match
+                for k in list(io):
+                    if k.lower() == old_key:
+                        io[new_tag] = io.pop(k)
+                        break
+            self._item_order = io
             self._write_items_locked(items)
             self._items = items
             return [dict(entry) for entry in items]
 
     def list_groups(self) -> list[dict]:
-        items = self.get_watchlist_snapshot()
-        counts: dict[str, int] = {}
-        for item in items:
-            for tag in item.get("tags") or []:
-                if is_reserved_tag(tag):
-                    continue
-                counts[tag] = counts.get(tag, 0) + 1
-        return [{"tag": tag, "count": count} for tag, count in sorted(counts.items())]
+        # Hold the lock for the full read so _items, _explicit_groups, and
+        # _group_order are always observed from the same consistent write.
+        with self._lock:
+            items = self._load_items_locked()
+            counts: dict[str, int] = {}
+            for item in items:
+                for tag in item.get("tags") or []:
+                    if is_reserved_tag(tag):
+                        continue
+                    counts[tag] = counts.get(tag, 0) + 1
+            for eg in (self._explicit_groups or []):
+                if not is_reserved_tag(eg) and eg not in counts:
+                    counts[eg] = 0
+            # Apply group_order; unordered groups appended alphabetically at end.
+            go = [g for g in (self._group_order or []) if g in counts]
+            remaining = sorted(k for k in counts if k not in go)
+            ordered_keys = go + remaining
+            return [{"tag": tag, "count": counts[tag]} for tag in ordered_keys]
+
+    def reorder_groups(self, group_names: list[str]) -> list[dict]:
+        self._require_backend_configured()
+        with self._lock:
+            items = self._load_items_locked()
+            self._group_order = [g.strip() for g in group_names if g.strip()]
+            self._write_items_locked(items)
+            self._items = items
+            return [dict(i) for i in items]
+
+    def reorder_items(self, group: str, symbol_order: list[str]) -> list[dict]:
+        self._require_backend_configured()
+        with self._lock:
+            items = self._load_items_locked()
+            io = dict(self._item_order or {})
+            io[group] = [s.strip() for s in symbol_order if s.strip()]
+            self._item_order = io
+            self._write_items_locked(items)
+            self._items = items
+            return [dict(i) for i in items]
+
+    def create_group(self, name: str) -> list[dict]:
+        tag = name.strip()
+        if not tag:
+            raise WatchlistValidationError("Group name is required.")
+        if is_reserved_tag(tag):
+            raise WatchlistValidationError(f"'{tag}' is a reserved name.")
+        self._require_backend_configured()
+        with self._lock:
+            items = self._load_items_locked()
+            eg = list(self._explicit_groups or [])
+            if tag.lower() not in [e.lower() for e in eg]:
+                eg.append(tag)
+                self._explicit_groups = eg
+            self._write_items_locked(items)
+            self._items = items
+            return [dict(i) for i in items]
+
+    def delete_group(self, name: str) -> list[dict]:
+        tag_key = name.strip().lower()
+        if not tag_key:
+            raise WatchlistValidationError("Group name is required.")
+        if is_reserved_tag(tag_key):
+            raise WatchlistValidationError(f"'{name}' is a reserved group.")
+        self._require_backend_configured()
+        with self._lock:
+            items = self._load_items_locked()
+            for item in items:
+                item["tags"] = [t for t in (item.get("tags") or []) if t.lower() != tag_key]
+            self._explicit_groups = [e for e in (self._explicit_groups or []) if e.lower() != tag_key]
+            self._group_order = [g for g in (self._group_order or []) if g.lower() != tag_key]
+            self._item_order = {k: v for k, v in (self._item_order or {}).items() if k.lower() != tag_key}
+            self._write_items_locked(items)
+            self._items = items
+            return [dict(i) for i in items]
 
     def _build_item(self, symbol: str, tags: list[str] | None = None) -> dict:
         try:
@@ -302,6 +535,8 @@ class WatchlistService:
     def _load_items_locked(self) -> list[dict]:
         document = self._read_document_locked()
         if document is None:
+            if self._explicit_groups is None:
+                self._explicit_groups = []
             if self.is_backend_configured():
                 try:
                     self._write_items_locked([])
@@ -309,6 +544,18 @@ class WatchlistService:
                 except WatchlistConfigurationError:
                     return self._fallback_items()
             return self._fallback_items()
+
+        raw_eg = document.get("explicit_groups")
+        self._explicit_groups = [str(g).strip() for g in raw_eg if isinstance(g, str) and str(g).strip()] if isinstance(raw_eg, list) else []
+
+        raw_go = document.get("group_order")
+        self._group_order = [str(g).strip() for g in raw_go if isinstance(g, str) and str(g).strip()] if isinstance(raw_go, list) else []
+
+        raw_io = document.get("item_order")
+        self._item_order = (
+            {k: [str(s) for s in v if s] for k, v in raw_io.items() if isinstance(v, list)}
+            if isinstance(raw_io, dict) else {}
+        )
 
         raw_items = document.get("items")
         if isinstance(raw_items, list):
@@ -351,6 +598,9 @@ class WatchlistService:
                     "$set": {
                         "Company List": [item["symbol"] for item in items],
                         "items": items,
+                        "explicit_groups": self._explicit_groups or [],
+                        "group_order": self._group_order or [],
+                        "item_order": self._item_order or {},
                     }
                 },
                 upsert=True,
@@ -394,12 +644,14 @@ class WatchlistService:
             if not symbol or symbol in seen:
                 continue
             seen.add(symbol)
+            stamp = raw_item.get("move_refreshed_at")
             normalized.append(
                 WatchlistItemRecord(
                     symbol=symbol,
                     name=_normalize_name(raw_item.get("name"), symbol=symbol),
                     move=_normalize_move(raw_item.get("move")),
                     tags=_normalize_tags(raw_item.get("tags") or []),
+                    move_refreshed_at=str(stamp) if stamp else None,
                 ).to_dict()
             )
         return normalized
@@ -422,6 +674,58 @@ class WatchlistService:
 
 
 _watchlist_service: WatchlistService | None = None
+
+
+def start_watchlist_refresh_loop() -> threading.Thread | None:
+    """Daemon thread that fires ``refresh_all_moves`` at each region's
+    market close + buffer. Boot-time catch-up: if the latest stored
+    ``move_refreshed_at`` is older than the most recently passed slot,
+    fire once immediately before entering the schedule loop.
+    Returns the started thread (daemon) or ``None`` if disabled.
+    """
+    if not _enabled():
+        log.info("watchlist refresh loop disabled via TERRAFIN_WATCHLIST_REFRESH_ENABLED=0")
+        return None
+
+    def _loop() -> None:
+        try:
+            svc = get_watchlist_service()
+        except Exception:
+            log.exception("watchlist refresh loop: cannot resolve service")
+            return
+        if not svc.is_backend_configured():
+            log.info("watchlist refresh loop: Mongo backend not configured, exiting")
+            return
+        # Boot catch-up
+        try:
+            latest = svc.latest_refresh_at_utc()
+            now = datetime.now(timezone.utc)
+            previous_slot = _previous_fire_at_utc(now)
+            if latest is None or latest < previous_slot:
+                log.info(
+                    "watchlist refresh loop: catch-up fire (latest=%s, previous_slot=%s)",
+                    latest, previous_slot,
+                )
+                svc.refresh_all_moves()
+        except Exception:
+            log.exception("watchlist refresh loop: catch-up fire failed")
+        # Steady-state schedule
+        while True:
+            try:
+                now = datetime.now(timezone.utc)
+                fire_at, label = _next_fire_at_utc(now)
+                wait = max((fire_at - now).total_seconds(), 1.0)
+                log.info("watchlist refresh loop: next fire %s (%s, in %.0fs)", fire_at.isoformat(), label, wait)
+                time.sleep(wait)
+                svc = get_watchlist_service()
+                svc.refresh_all_moves()
+            except Exception:
+                log.exception("watchlist refresh loop: iteration failed")
+                time.sleep(60)
+
+    thread = threading.Thread(target=_loop, name="watchlist-move-refresh", daemon=True)
+    thread.start()
+    return thread
 
 
 def get_watchlist_service() -> WatchlistService:

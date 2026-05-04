@@ -1,4 +1,21 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import {
+  DndContext,
+  closestCenter,
+  PointerSensor,
+  TouchSensor,
+  useSensor,
+  useSensors,
+} from '@dnd-kit/core';
+import type { DragEndEvent } from '@dnd-kit/core';
+import {
+  SortableContext,
+  horizontalListSortingStrategy,
+  verticalListSortingStrategy,
+  useSortable,
+  arrayMove,
+} from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 import DashboardHeader from '../dashboard/components/DashboardHeader';
 import InsightCard from '../dashboard/components/InsightCard';
 import { BREAKPOINTS } from '../shared/responsive';
@@ -17,8 +34,9 @@ const isReservedTag = (tag: string): boolean => RESERVED_TAGS.has(tag.toLowerCas
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 function nextDefaultGroupName(existingNames: string[]): string {
+  const lower = new Set(existingNames.map((n) => n.toLowerCase()));
   let n = 1;
-  while (existingNames.includes(`base group ${n}`)) n++;
+  while (lower.has(`base group ${n}`)) n++;
   return `Base Group ${n}`;
 }
 
@@ -88,49 +106,237 @@ interface DisplayGroup {
   name: string;
   items: WatchlistItem[];
   isSynthetic: boolean;
-  isPending: boolean;
 }
 
 function buildDisplayGroups(
   items: WatchlistItem[],
   groupTags: string[],
-  pendingGroups: string[],
 ): DisplayGroup[] {
   const result: DisplayGroup[] = groupTags.map((tag) => ({
     name: tag,
     items: items.filter((item) => item.tags.includes(tag)),
     isSynthetic: false,
-    isPending: pendingGroups.includes(tag),
   }));
 
   const untagged = items.filter((item) => item.tags.length === 0);
   if (untagged.length > 0) {
     const syntheticName = nextDefaultGroupName(groupTags);
-    result.unshift({ name: syntheticName, items: untagged, isSynthetic: true, isPending: false });
+    result.unshift({ name: syntheticName, items: untagged, isSynthetic: true });
   }
 
   if (result.length === 0) {
-    result.push({ name: 'Base Group 1', items: [], isSynthetic: true, isPending: true });
+    result.push({ name: 'Base Group 1', items: [], isSynthetic: true });
   }
 
   return result;
 }
 
+// ─── Sortable group tab ───────────────────────────────────────────────────────
+
+interface SortableGroupTabProps {
+  id: string;
+  group: DisplayGroup;
+  isActive: boolean;
+  isReorderMode: boolean;
+  onClick: () => void;
+}
+
+const SortableGroupTab: React.FC<SortableGroupTabProps> = ({ id, group, isActive, isReorderMode, onClick }) => {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+    id,
+    disabled: !isReorderMode || group.isSynthetic,
+  });
+  return (
+    <div
+      ref={setNodeRef}
+      style={{
+        flexShrink: 0,
+        transform: CSS.Transform.toString(transform),
+        transition,
+        opacity: isDragging ? 0.4 : 1,
+        cursor: isReorderMode && !group.isSynthetic ? 'grab' : undefined,
+        touchAction: isReorderMode && !group.isSynthetic ? 'none' : undefined,
+      }}
+      {...(isReorderMode && !group.isSynthetic ? { ...attributes, ...listeners } : {})}
+    >
+      <button
+        type="button"
+        onClick={() => { if (!isReorderMode || group.isSynthetic) onClick(); }}
+        style={{
+          ...tabStyle(isActive),
+          opacity: isReorderMode && group.isSynthetic ? 0.5 : 1,
+        }}
+      >
+        {isReorderMode && !group.isSynthetic && (
+          <span style={{ marginRight: 4, color: '#94a3b8', fontSize: 11 }}>⠿</span>
+        )}
+        {group.name}
+        <span style={{ marginLeft: 5, fontSize: 11, opacity: 0.65 }}>
+          {group.items.length}
+        </span>
+      </button>
+    </div>
+  );
+};
+
+// ─── Sortable ticker row ──────────────────────────────────────────────────────
+
+interface SortableTickerRowProps {
+  id: string;
+  item: WatchlistItem;
+  canDrag: boolean;
+  isNarrowLayout: boolean;
+  activeGroup: string | null;
+  groupTags: string[];
+  backendConfigured: boolean;
+  monitorEnabled: boolean;
+  busy: boolean;
+  assigningTickerFor: string | null;
+  activeDisplayGroup: DisplayGroup | null;
+  onRemove: (symbol: string, group: string | undefined) => void;
+  onSetTags: (symbol: string, tags: string[], mode: 'set' | 'add' | 'remove') => void;
+  onAssign: (symbol: string | null) => void;
+}
+
+const SortableTickerRow: React.FC<SortableTickerRowProps> = ({
+  id, item, canDrag, isNarrowLayout, activeGroup, groupTags,
+  backendConfigured, monitorEnabled, busy, assigningTickerFor,
+  activeDisplayGroup, onRemove, onSetTags, onAssign,
+}) => {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+    id,
+    disabled: !canDrag,
+  });
+
+  const otherGroupTags = item.tags.filter(
+    (t) => t !== activeGroup && !isReservedTag(t),
+  );
+  const availableGroups = groupTags.filter(
+    (g) => !item.tags.includes(g) && !isReservedTag(g),
+  );
+  const isMonitored = item.tags.some((t) => t.toLowerCase() === MONITOR_TAG);
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={{
+        ...tickerRowStyle(isNarrowLayout, canDrag),
+        transform: CSS.Transform.toString(transform),
+        transition,
+        opacity: isDragging ? 0.4 : 1,
+      }}
+    >
+      {canDrag && (
+        <span
+          style={{ color: '#cbd5e1', fontSize: 16, cursor: 'grab', flexShrink: 0, userSelect: 'none', paddingRight: 4, touchAction: 'none' }}
+          {...attributes}
+          {...listeners}
+        >⠿</span>
+      )}
+      <div style={{ minWidth: 0, flex: 1 }}>
+        <a href={`/stock/${item.symbol}`} style={symbolLinkStyle}>{item.symbol}</a>
+        {item.name && item.name !== item.symbol ? (
+          <div
+            style={{ fontSize: 12, color: '#64748b', marginTop: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}
+            title={item.name}
+          >
+            {item.name}
+          </div>
+        ) : null}
+        {(otherGroupTags.length > 0 || (backendConfigured && availableGroups.length > 0)) && (
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 3, marginTop: 5, alignItems: 'center' }}>
+            {otherGroupTags.map((tag) => (
+              <span key={tag} style={{ ...tagPillStyle, display: 'inline-flex', alignItems: 'center', gap: 2 }}>
+                {tag}
+                {backendConfigured && (
+                  <button
+                    type="button"
+                    title={`Remove from ${tag}`}
+                    onClick={() => { onSetTags(item.symbol, [tag], 'remove'); }}
+                    disabled={busy}
+                    style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, fontSize: 9, color: '#94a3b8', lineHeight: 1 }}
+                  >×</button>
+                )}
+              </span>
+            ))}
+            {backendConfigured && availableGroups.length > 0 && (
+              assigningTickerFor === item.symbol ? (
+                <select
+                  autoFocus
+                  defaultValue=""
+                  onChange={(e) => {
+                    if (e.target.value) { onSetTags(item.symbol, [e.target.value], 'add'); }
+                    onAssign(null);
+                  }}
+                  onBlur={() => onAssign(null)}
+                  style={{ fontSize: 11, borderRadius: 6, border: '1px solid #cbd5e1', padding: '2px 4px', color: '#475569' }}
+                >
+                  <option value="" disabled>Add to group…</option>
+                  {availableGroups.map((g) => (
+                    <option key={g} value={g}>{g}</option>
+                  ))}
+                </select>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => onAssign(item.symbol)}
+                  style={addGroupPillStyle}
+                >+ group</button>
+              )
+            )}
+          </div>
+        )}
+      </div>
+      <div style={{
+        display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0,
+        justifyContent: isNarrowLayout ? 'flex-start' : 'flex-end', flexWrap: 'wrap',
+      }}>
+        <span style={{ fontSize: 13, fontWeight: 700, color: moveColor(item.move) }}>
+          {item.move}
+        </span>
+        {backendConfigured && monitorEnabled ? (
+          <button
+            type="button"
+            onClick={() => { onSetTags(item.symbol, [MONITOR_TAG], isMonitored ? 'remove' : 'add'); }}
+            disabled={busy}
+            title={isMonitored ? 'Stop realtime monitoring' : 'Start realtime monitoring'}
+            aria-pressed={isMonitored}
+            style={monitorToggleStyle(isMonitored, busy)}
+          >
+            <span aria-hidden="true">{isMonitored ? '🔔' : '🔕'}</span>
+            <span>{isMonitored ? 'Monitoring' : 'Monitor'}</span>
+          </button>
+        ) : null}
+        {backendConfigured ? (
+          <button
+            type="button"
+            onClick={() => {
+              onRemove(item.symbol, activeDisplayGroup && !activeDisplayGroup.isSynthetic ? activeDisplayGroup.name : undefined);
+            }}
+            disabled={busy}
+            style={secondaryButtonStyle(busy)}
+          >
+            Remove
+          </button>
+        ) : null}
+      </div>
+    </div>
+  );
+};
+
 // ─── Group management panel ───────────────────────────────────────────────────
 
 interface GroupManagePanelProps {
   displayGroups: DisplayGroup[];
-  pendingGroups: string[];
   busy: boolean;
   onRename: (group: DisplayGroup, newName: string) => Promise<void>;
   onDelete: (group: DisplayGroup) => Promise<void>;
-  onAddGroup: (name: string) => void;
+  onAddGroup: (name: string) => Promise<void>;
   onClose: () => void;
 }
 
 const GroupManagePanel: React.FC<GroupManagePanelProps> = ({
   displayGroups,
-  pendingGroups,
   busy,
   onRename,
   onDelete,
@@ -159,11 +365,11 @@ const GroupManagePanel: React.FC<GroupManagePanelProps> = ({
     if (group) await onRename(group, trimmed);
   };
 
-  const handleAddGroup = () => {
+  const handleAddGroup = async () => {
     const name = newGroupInput.trim();
     setNewGroupInput('');
     if (!name) return;
-    onAddGroup(name);
+    await onAddGroup(name);
   };
 
   return (
@@ -178,7 +384,6 @@ const GroupManagePanel: React.FC<GroupManagePanelProps> = ({
         {displayGroups.map((group) => {
           const isRenaming = renamingGroup === group.name;
           const isConfirmingDelete = confirmDeleteFor === group.name;
-          const isPending = pendingGroups.includes(group.name);
 
           return (
             <div key={group.name} style={groupRowStyle}>
@@ -209,7 +414,7 @@ const GroupManagePanel: React.FC<GroupManagePanelProps> = ({
               ) : (
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <span style={{ fontSize: 13, fontWeight: 600, color: '#0f172a' }}>{group.name}</span>
-                  {isPending && (
+                  {group.items.length === 0 && (
                     <span style={{ fontSize: 10, color: '#94a3b8', marginLeft: 6 }}>empty</span>
                   )}
                 </div>
@@ -261,13 +466,13 @@ const GroupManagePanel: React.FC<GroupManagePanelProps> = ({
         <input
           value={newGroupInput}
           onChange={(e) => setNewGroupInput(e.target.value)}
-          onKeyDown={(e) => { if (e.key === 'Enter') { handleAddGroup(); } }}
+          onKeyDown={(e) => { if (e.key === 'Enter') { void handleAddGroup(); } }}
           placeholder="New group name…"
           style={{ ...panelInputStyle, flex: 1 }}
         />
         <button
           type="button"
-          onClick={handleAddGroup}
+          onClick={() => { void handleAddGroup(); }}
           disabled={!newGroupInput.trim() || busy}
           style={primaryButtonStyle(!newGroupInput.trim() || busy)}
         >Add</button>
@@ -283,8 +488,20 @@ const WatchlistPage: React.FC = () => {
   const [watchlistInput, setWatchlistInput] = useState('');
   const [isNarrowLayout, setIsNarrowLayout] = useState(false);
   const [activeGroup, setActiveGroup] = useState<string | null>(null);
-  const [pendingGroups, setPendingGroups] = useState<string[]>([]);
   const [isManagePanelOpen, setIsManagePanelOpen] = useState(false);
+  const [isReorderMode, setIsReorderMode] = useState(false);
+  const [itemOrderOverride, setItemOrderOverride] = useState<Record<string, string[]>>({});
+
+  // Separate sensor instances per DndContext to prevent cross-context event routing
+  // on touch devices (tab bar context vs item list context).
+  const groupSensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
+    useSensor(TouchSensor, { activationConstraint: { delay: 250, tolerance: 5 } }),
+  );
+  const itemSensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
+    useSensor(TouchSensor, { activationConstraint: { delay: 250, tolerance: 5 } }),
+  );
   const [assigningTickerFor, setAssigningTickerFor] = useState<string | null>(null);
   const [addToGroup, setAddToGroup] = useState<string | null>(null);
 
@@ -298,27 +515,20 @@ const WatchlistPage: React.FC = () => {
     removeSymbol,
     setTags,
     renameGroup,
+    createGroup,
     deleteGroup,
     promoteGroup,
+    reorderGroups,
+    reorderItems,
     backendConfigured,
     monitorEnabled,
   } = useWatchlist();
 
-  const groupTags = useMemo(() => {
-    const realTags = groups.map((g) => g.tag);
-    const newPending = pendingGroups.filter((p) => !realTags.includes(p));
-    return [...realTags, ...newPending];
-  }, [groups, pendingGroups]);
-
-  // Clear pending groups that materialized as real groups
-  useEffect(() => {
-    const realTags = groups.map((g) => g.tag);
-    setPendingGroups((prev) => prev.filter((p) => !realTags.includes(p)));
-  }, [groups]);
+  const groupTags = useMemo(() => groups.map((g) => g.tag), [groups]);
 
   const displayGroups = useMemo(
-    () => buildDisplayGroups(items, groupTags, pendingGroups),
-    [items, groupTags, pendingGroups],
+    () => buildDisplayGroups(items, groupTags),
+    [items, groupTags],
   );
 
   // Auto-select first group on load; keep selection when groups change
@@ -335,7 +545,15 @@ const WatchlistPage: React.FC = () => {
     [displayGroups, activeGroup],
   );
 
-  const visibleItems = activeDisplayGroup?.items ?? [];
+  const visibleItems = useMemo(() => {
+    const base = activeDisplayGroup?.items ?? [];
+    const order = activeDisplayGroup ? itemOrderOverride[activeDisplayGroup.name] : undefined;
+    if (!order) return base;
+    const symMap = Object.fromEntries(base.map((i) => [i.symbol, i]));
+    const ordered = order.map((s) => symMap[s]).filter((i): i is WatchlistItem => Boolean(i));
+    const extras = base.filter((i) => !order.includes(i.symbol));
+    return [...ordered, ...extras];
+  }, [activeDisplayGroup, itemOrderOverride]);
 
   // Keep addToGroup in sync with displayGroups — reset if selected group disappears
   useEffect(() => {
@@ -355,27 +573,51 @@ const WatchlistPage: React.FC = () => {
     try {
       await addSymbol(symbol, tags);
       setWatchlistInput('');
+      // Item set changed — stale override would misplace the new ticker
+      if (addToGroup) setItemOrderOverride((prev) => { const n = { ...prev }; delete n[addToGroup]; return n; });
     } catch {
       // handled in hook
     }
+  };
+
+  const handleGroupDragEnd = (event: DragEndEvent) => {
+    const { active, over } = event;
+    if (!over || active.id === over.id || busy) return;
+    const oldIdx = displayGroups.findIndex((g) => g.name === active.id);
+    const newIdx = displayGroups.findIndex((g) => g.name === over.id);
+    if (oldIdx === -1 || newIdx === -1) return;
+    const reordered = arrayMove(displayGroups, oldIdx, newIdx);
+    void reorderGroups(reordered.filter((g) => !g.isSynthetic).map((g) => g.name));
+  };
+
+  const handleItemDragEnd = (event: DragEndEvent) => {
+    const { active, over } = event;
+    if (!over || active.id === over.id || !activeDisplayGroup || activeDisplayGroup.isSynthetic) return;
+    const oldIdx = visibleItems.findIndex((i) => i.symbol === active.id);
+    const newIdx = visibleItems.findIndex((i) => i.symbol === over.id);
+    if (oldIdx === -1 || newIdx === -1) return;
+    const reordered = arrayMove(visibleItems, oldIdx, newIdx);
+    const newOrder = reordered.map((i) => i.symbol);
+    const groupName = activeDisplayGroup.name;
+    setItemOrderOverride((prev) => ({ ...prev, [groupName]: newOrder }));
+    void reorderItems(groupName, newOrder).catch(() => {
+      setItemOrderOverride((prev) => {
+        const next = { ...prev };
+        delete next[groupName];
+        return next;
+      });
+    });
   };
 
   const handleRenameGroup = async (group: DisplayGroup, newName: string) => {
     const old = group.name;
     const normalized = newName.trim();
     if (!normalized) return;
-    if (pendingGroups.includes(old)) {
-      setPendingGroups((prev) => prev.map((p) => (p === old ? normalized : p)));
-      if (activeGroup === old) setActiveGroup(normalized);
-      return;
-    }
     if (group.isSynthetic) {
       if (group.items.length === 0) {
-        // Empty placeholder — just register as a pending named group
-        setPendingGroups((prev) => (prev.includes(normalized) ? prev : [...prev, normalized]));
+        await createGroup(normalized);
         setActiveGroup(normalized);
       } else {
-        // Untagged items exist — add the new tag to all of them
         await promoteGroup(group.items, normalized, items);
         setActiveGroup(normalized);
       }
@@ -383,33 +625,33 @@ const WatchlistPage: React.FC = () => {
     }
     await renameGroup(old, normalized);
     setActiveGroup(normalized);
+    // Migrate itemOrderOverride key so drag order persists through rename
+    setItemOrderOverride((prev) => {
+      if (!(old in prev)) return prev;
+      const next = { ...prev };
+      next[normalized] = next[old];
+      delete next[old];
+      return next;
+    });
   };
 
   const handleDeleteGroup = async (group: DisplayGroup) => {
-    if (pendingGroups.includes(group.name)) {
-      setPendingGroups((prev) => prev.filter((p) => p !== group.name));
-      const remaining = displayGroups.filter((g) => g.name !== group.name);
-      setActiveGroup(remaining[0]?.name ?? null);
-      return;
-    }
+    // Snapshot items before async loop — group.items would be stale after first removeSymbol resolves
+    const itemsToDelete = [...group.items];
     if (group.isSynthetic) {
-      // No tag to strip — remove these untagged items from the watchlist
-      for (const item of group.items) {
-        await removeSymbol(item.symbol); // eslint-disable-line
-      }
+      // Parallel to minimize busy flicker between sequential setBusy(false) calls
+      await Promise.all(itemsToDelete.map((item) => removeSymbol(item.symbol)));
     } else {
-      await deleteGroup(group.name, items);
+      await deleteGroup(group.name);
     }
-    const remaining = displayGroups.filter((g) => g.name !== group.name);
-    setActiveGroup(remaining[0]?.name ?? null);
+    // No setActiveGroup here — the useEffect on displayGroups already re-selects
+    // remaining[0] whenever the deleted group disappears from the list.
   };
 
-  const handleAddNewGroup = (name: string) => {
-    const trimmed = name.trim().toLowerCase();
+  const handleAddNewGroup = async (name: string) => {
+    const trimmed = name.trim();
     if (!trimmed) return;
-    if (!groupTags.includes(trimmed)) {
-      setPendingGroups((prev) => [...prev, trimmed]);
-    }
+    await createGroup(trimmed);
     setActiveGroup(trimmed);
     setIsManagePanelOpen(false);
   };
@@ -492,14 +734,7 @@ const WatchlistPage: React.FC = () => {
               )}
             </form>
             {error ? (
-              <div style={{ fontSize: 12, color: '#b91c1c' }}>
-                {error}
-                {error.toLowerCase().includes('already') && (
-                  <span style={{ color: '#475569', display: 'block', marginTop: 2 }}>
-                    To add to another group, use the "+ group" button on the ticker row.
-                  </span>
-                )}
-              </div>
+              <div style={{ fontSize: 12, color: '#b91c1c' }}>{error}</div>
             ) : null}
           </div>
         </InsightCard>
@@ -511,33 +746,49 @@ const WatchlistPage: React.FC = () => {
           ) : (
             <div>
               {/* Tab bar */}
-              <div style={tabBarWrapperStyle}>
-                <div style={tabBarStyle}>
-                  {displayGroups.map((group) => {
-                    const isActive = group.name === activeGroup;
-                    return (
-                      <button
-                        key={group.name}
-                        type="button"
-                        onClick={() => setActiveGroup(group.name)}
-                        style={tabStyle(isActive)}
-                      >
-                        {group.name}
-                        <span style={{ marginLeft: 5, fontSize: 11, opacity: 0.65 }}>
-                          {group.items.length}
-                        </span>
-                      </button>
-                    );
-                  })}
-                </div>
-                {/* Manage button */}
+              <div style={{
+                ...tabBarWrapperStyle,
+                flexDirection: isNarrowLayout ? 'column' : 'row',
+                alignItems: isNarrowLayout ? 'stretch' : 'center',
+              }}>
+                <DndContext sensors={groupSensors} collisionDetection={closestCenter} onDragEnd={handleGroupDragEnd}>
+                  <SortableContext items={displayGroups.filter((g) => !g.isSynthetic).map((g) => g.name)} strategy={horizontalListSortingStrategy}>
+                    <div style={tabBarStyle}>
+                      {displayGroups.map((group) => (
+                        <SortableGroupTab
+                          key={group.name}
+                          id={group.name}
+                          group={group}
+                          isActive={group.name === activeGroup}
+                          isReorderMode={isReorderMode}
+                          onClick={() => setActiveGroup(group.name)}
+                        />
+                      ))}
+                    </div>
+                  </SortableContext>
+                </DndContext>
+                {/* Manage + Reorder buttons */}
                 {backendConfigured && (
-                  <button
-                    type="button"
-                    onClick={() => setIsManagePanelOpen((v) => !v)}
-                    style={manageTabBtnStyle(isManagePanelOpen)}
-                    title="Manage groups"
-                  >⚙ Manage</button>
+                  <div style={{
+                    display: 'flex', gap: 4, flexShrink: 0,
+                    marginLeft: isNarrowLayout ? 0 : 8,
+                    paddingBottom: isNarrowLayout ? 6 : undefined,
+                  }}>
+                    <button
+                      type="button"
+                      onClick={() => { setIsReorderMode((v) => !v); setIsManagePanelOpen(false); }}
+                      style={manageTabBtnStyle(isReorderMode)}
+                      title={isReorderMode ? 'Done reordering' : 'Reorder groups and tickers'}
+                    >{isReorderMode ? 'Done' : '⇅ Reorder'}</button>
+                    {!isReorderMode && (
+                      <button
+                        type="button"
+                        onClick={() => setIsManagePanelOpen((v) => !v)}
+                        style={manageTabBtnStyle(isManagePanelOpen)}
+                        title="Manage groups"
+                      >⚙ Manage</button>
+                    )}
+                  </div>
                 )}
               </div>
 
@@ -545,7 +796,6 @@ const WatchlistPage: React.FC = () => {
               {isManagePanelOpen && (
                 <GroupManagePanel
                   displayGroups={displayGroups}
-                  pendingGroups={pendingGroups}
                   busy={busy}
                   onRename={handleRenameGroup}
                   onDelete={handleDeleteGroup}
@@ -555,133 +805,44 @@ const WatchlistPage: React.FC = () => {
               )}
 
               {/* Ticker list */}
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 12 }}>
-                {visibleItems.length === 0 ? (
-                  <div style={{ fontSize: 13, color: '#94a3b8', padding: '12px 0' }}>
-                    No tickers in this group yet. Add one using the form on the left.
-                  </div>
-                ) : (
-                  visibleItems.map((item) => {
-                    const otherGroupTags = item.tags.filter(
-                      (t) => t !== activeGroup && !isReservedTag(t),
-                    );
-                    const availableGroups = groupTags.filter(
-                      (g) => !item.tags.includes(g) && !isReservedTag(g),
-                    );
-                    const isMonitored = item.tags.some((t) => t.toLowerCase() === MONITOR_TAG);
-                    return (
-                      <div key={item.symbol} style={tickerRowStyle(isNarrowLayout)}>
-                        {/* Symbol + name + cross-group pills */}
-                        <div style={{ minWidth: 0 }}>
-                          <a href={`/stock/${item.symbol}`} style={symbolLinkStyle}>{item.symbol}</a>
-                          {item.name && item.name !== item.symbol ? (
-                            <div
-                              style={{
-                                fontSize: 12,
-                                color: '#64748b',
-                                marginTop: 1,
-                                whiteSpace: 'nowrap',
-                                overflow: 'hidden',
-                                textOverflow: 'ellipsis',
-                              }}
-                              title={item.name}
-                            >
-                              {item.name}
-                            </div>
-                          ) : null}
-                          {(otherGroupTags.length > 0 || (backendConfigured && availableGroups.length > 0)) && (
-                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 3, marginTop: 5, alignItems: 'center' }}>
-                              {otherGroupTags.map((tag) => (
-                                <span key={tag} style={{ ...tagPillStyle, display: 'inline-flex', alignItems: 'center', gap: 2 }}>
-                                  {tag}
-                                  {backendConfigured && (
-                                    <button
-                                      type="button"
-                                      title={`Remove from ${tag}`}
-                                      onClick={() => { void setTags(item.symbol, [tag], 'remove'); }}
-                                      disabled={busy}
-                                      style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, fontSize: 9, color: '#94a3b8', lineHeight: 1 }}
-                                    >×</button>
-                                  )}
-                                </span>
-                              ))}
-                              {backendConfigured && availableGroups.length > 0 && (
-                                assigningTickerFor === item.symbol ? (
-                                  <select
-                                    autoFocus
-                                    defaultValue=""
-                                    onChange={(e) => {
-                                      if (e.target.value) { void setTags(item.symbol, [e.target.value], 'add'); }
-                                      setAssigningTickerFor(null);
-                                    }}
-                                    onBlur={() => setAssigningTickerFor(null)}
-                                    style={{ fontSize: 11, borderRadius: 6, border: '1px solid #cbd5e1', padding: '2px 4px', color: '#475569' }}
-                                  >
-                                    <option value="" disabled>Add to group…</option>
-                                    {availableGroups.map((g) => (
-                                      <option key={g} value={g}>{g}</option>
-                                    ))}
-                                  </select>
-                                ) : (
-                                  <button
-                                    type="button"
-                                    onClick={() => setAssigningTickerFor(item.symbol)}
-                                    style={addGroupPillStyle}
-                                  >+ group</button>
-                                )
-                              )}
-                            </div>
-                          )}
-                        </div>
-
-                        {/* Move % + remove */}
-                        <div
-                          style={{
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: 10,
-                            flexShrink: 0,
-                            // On narrow row layout the cluster sits on its
-                            // own line — keep it left-aligned so it doesn't
-                            // float far from the symbol it describes.
-                            justifyContent: isNarrowLayout ? 'flex-start' : 'flex-end',
-                            flexWrap: 'wrap',
-                          }}
-                        >
-                          <span style={{ fontSize: 13, fontWeight: 700, color: moveColor(item.move) }}>
-                            {item.move}
-                          </span>
-                          {backendConfigured && monitorEnabled ? (
-                            <button
-                              type="button"
-                              onClick={() => {
-                                void setTags(item.symbol, [MONITOR_TAG], isMonitored ? 'remove' : 'add');
-                              }}
-                              disabled={busy}
-                              title={isMonitored ? 'Stop realtime monitoring' : 'Start realtime monitoring'}
-                              aria-pressed={isMonitored}
-                              style={monitorToggleStyle(isMonitored, busy)}
-                            >
-                              <span aria-hidden="true">{isMonitored ? '🔔' : '🔕'}</span>
-                              <span>{isMonitored ? 'Monitoring' : 'Monitor'}</span>
-                            </button>
-                          ) : null}
-                          {backendConfigured ? (
-                            <button
-                              type="button"
-                              onClick={() => { void removeSymbol(item.symbol); }}
-                              disabled={busy}
-                              style={secondaryButtonStyle(busy)}
-                            >
-                              Remove
-                            </button>
-                          ) : null}
-                        </div>
+              <DndContext sensors={itemSensors} collisionDetection={closestCenter} onDragEnd={handleItemDragEnd}>
+                <SortableContext items={visibleItems.map((i) => i.symbol)} strategy={verticalListSortingStrategy}>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 12 }}>
+                    {visibleItems.length === 0 ? (
+                      <div style={{ fontSize: 13, color: '#94a3b8', padding: '12px 0' }}>
+                        No tickers in this group yet. Add one using the form on the left.
                       </div>
-                    );
-                  })
-                )}
-              </div>
+                    ) : (
+                      visibleItems.map((item, itemIdx) => {
+                        const canDrag = !!(isReorderMode && backendConfigured && activeDisplayGroup && !activeDisplayGroup.isSynthetic);
+                        return (
+                          <SortableTickerRow
+                            key={item.symbol}
+                            id={item.symbol}
+                            item={item}
+                            canDrag={canDrag}
+                            isNarrowLayout={isNarrowLayout}
+                            activeGroup={activeGroup}
+                            groupTags={groupTags}
+                            backendConfigured={backendConfigured}
+                            monitorEnabled={monitorEnabled}
+                            busy={busy}
+                            assigningTickerFor={assigningTickerFor}
+                            activeDisplayGroup={activeDisplayGroup}
+                            onRemove={(symbol, group) => {
+                              void removeSymbol(symbol, group);
+                              // Item set changed — clear stale override so order resets to server truth
+                              if (activeDisplayGroup) setItemOrderOverride((prev) => { const n = { ...prev }; delete n[activeDisplayGroup.name]; return n; });
+                            }}
+                            onSetTags={(symbol, tags, mode) => { void setTags(symbol, tags, mode); }}
+                            onAssign={setAssigningTickerFor}
+                          />
+                        );
+                      })
+                    )}
+                  </div>
+                </SortableContext>
+              </DndContext>
             </div>
           )}
         </InsightCard>
@@ -812,13 +973,17 @@ const panelActionBtnStyle: React.CSSProperties = {
   whiteSpace: 'nowrap',
 };
 
-const tickerRowStyle = (isNarrow: boolean): React.CSSProperties => ({
+const tickerRowStyle = (isNarrow: boolean, hasDragHandle: boolean): React.CSSProperties => ({
   display: 'grid',
   // Narrow viewports: stack vertically. The action cluster (move % +
   // Monitor + Remove) gets crowded against the company name/pill block at
   // ≤1180px, especially on phones where the auto-sized right column was
   // wide enough to push into the truncated left content.
-  gridTemplateColumns: isNarrow ? '1fr' : 'minmax(0, 1fr) auto',
+  gridTemplateColumns: isNarrow
+    ? '1fr'
+    : hasDragHandle
+      ? 'auto minmax(0, 1fr) auto'
+      : 'minmax(0, 1fr) auto',
   alignItems: isNarrow ? 'stretch' : 'center',
   gap: isNarrow ? 8 : 12,
   border: '1px solid #e2e8f0',
