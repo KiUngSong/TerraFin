@@ -27,6 +27,25 @@ class HttpSignalProvider:
     async def unregister(self, tickers: list[str]) -> None:
         await self._post("/unregister", {"tickers": tickers})
 
+    async def health(self) -> dict | None:
+        """Return the monitor's /health JSON, or None if unreachable.
+        Use this from the UI hot-path before POSTing register/unregister
+        so we can fail loud (with an actionable message) instead of
+        burning a retry on a dead daemon.
+        """
+        try:
+            import httpx
+        except ImportError as exc:
+            raise RuntimeError("httpx required: pip install httpx") from exc
+        headers = {"Authorization": f"Bearer {self.api_key}"} if self.api_key else {}
+        try:
+            async with httpx.AsyncClient() as client:
+                resp = await client.get(f"{self.base_url}/health", headers=headers, timeout=3)
+                resp.raise_for_status()
+                return resp.json()
+        except Exception:
+            return None
+
     async def list_subscribed(self) -> list[str]:
         """Return tickers currently subscribed on the provider, aggregated
         across all brokers. Used to detect orphans (subscribed but not in

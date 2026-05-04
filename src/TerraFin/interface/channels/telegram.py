@@ -122,11 +122,30 @@ def _html_escape(s: str) -> str:
 # consumers; rendering is bucketed because most signals fire as "high" anyway.
 _SEVERITY_EMOJI = {"high": "🔴", "med": "🟡", "medium": "🟡", "low": "🟢"}
 
+_BULLISH_KEYWORDS = ("bull", "golden", " buy", "↑", "breakout", "bounce", "coppock", "above", "long")
+_BEARISH_KEYWORDS = ("bear", "death", " sell", "↓", "breakdown", "below", "short")
+
+
+def _signal_direction(signal_dict: dict) -> str:
+    """Return ▲/▼/— based on snapshot.side first, then keyword heuristic on signal text."""
+    snapshot = signal_dict.get("snapshot") or {}
+    side = snapshot.get("side")
+    if side == 1:
+        return "▲"
+    if side == -1:
+        return "▼"
+    text = (signal_dict.get("message") or signal_dict.get("signal") or "").lower()
+    if any(k in text for k in _BULLISH_KEYWORDS):
+        return "▲"
+    if any(k in text for k in _BEARISH_KEYWORDS):
+        return "▼"
+    return "—"
+
 
 def _format_signal_payload(title: str, signals: list[dict]) -> str:
-    """Group signals by ticker, render as ticker-led bullet list with emoji severity.
+    """Group signals by ticker, render as ticker-led bullet list with direction + severity.
 
-    Wire shape per signal: ``{"ticker": str, "severity"?: str, "message"|"signal"?: str}``.
+    Wire shape per signal: ``{"ticker": str, "severity"?: str, "message"|"signal"?: str, "snapshot"?: dict}``.
     """
     ts = time.strftime("%H:%M %Z", time.localtime())
     lines = [f"<b>{_html_escape(title)}</b>  <i>{_html_escape(ts)}</i>", ""]
@@ -136,12 +155,18 @@ def _format_signal_payload(title: str, signals: list[dict]) -> str:
         by_ticker.setdefault(s.get("ticker") or "?", []).append(s)
 
     for ticker, group in by_ticker.items():
-        lines.append(f"<b>{_html_escape(ticker)}</b>")
+        name = (group[0].get("name") or "").strip()
+        if name and name != ticker:
+            header = f"<b>{_html_escape(name)}</b>  <code>{_html_escape(ticker)}</code>"
+        else:
+            header = f"<b>{_html_escape(ticker)}</b>"
+        lines.append(header)
         for s in group:
             sev = (s.get("severity") or "").lower()
             emoji = _SEVERITY_EMOJI.get(sev, "⚪")
             msg = s.get("message") or s.get("signal") or ""
-            lines.append(f"  • {_html_escape(msg)} {emoji}")
+            direction = _signal_direction(s)
+            lines.append(f"  {direction} {_html_escape(msg)} {emoji}")
         lines.append("")
     return "\n".join(lines).rstrip()
 

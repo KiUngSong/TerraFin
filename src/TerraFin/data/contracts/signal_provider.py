@@ -21,3 +21,5 @@ class InboundSignal(BaseModel):
     severity: str | None = None
     signal_id: str | None = None  # sender-provided UUID; used for dedup
     fired_at: datetime | None = None
+    name: str = ""  # company/indicator display name; enriched by receiver if blank
+    snapshot: dict = {}  # detector context at fire time (OHLCV, indicator values, etc.)

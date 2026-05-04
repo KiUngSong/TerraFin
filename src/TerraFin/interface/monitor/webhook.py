@@ -92,6 +92,19 @@ def check_rate_limit(client_id: str) -> bool:
     return True
 
 
+def _resolve_ticker_name(ticker: str) -> str:
+    """Look up company name from watchlist cache. Returns "" on any failure."""
+    try:
+        from TerraFin.interface.watchlist_service import get_watchlist_service
+        svc = get_watchlist_service()
+        for item in svc.get_watchlist_snapshot():
+            if item.get("symbol") == ticker:
+                return item.get("name") or ""
+    except Exception:
+        pass
+    return ""
+
+
 def forward_to_telegram(signal: InboundSignal) -> None:
     from TerraFin.interface.channels.telegram import TelegramChannel
 
@@ -115,10 +128,15 @@ def forward_to_telegram(signal: InboundSignal) -> None:
         log.warning("Telegram not configured, dropping signal %s: %s", signal.ticker, exc)
         return
 
+    signal_dict = signal.model_dump(mode="json")
+    # Enrich with company name if the sender didn't include one.
+    if not signal_dict.get("name"):
+        signal_dict["name"] = _resolve_ticker_name(signal.ticker)
+
     sev = f"[{signal.severity.upper()}] " if signal.severity else ""
     text = f"{sev}{signal.ticker}: {signal.signal}"
     ch.send(
         title="TerraFin Signal",
         body_md=text,
-        payload={"signals": [signal.model_dump(mode="json")]},
+        payload={"signals": [signal_dict]},
     )

@@ -154,8 +154,12 @@ class TimeSeriesDataFrame(pd.DataFrame):
 
         data = data[final_columns]
         data = data.dropna(subset=["time", "close"])
-        price_cols = [c for c in ("open", "high", "low", "close") if c in data.columns]
-        data = data[(data[price_cols] > 0).all(axis=1)]
+        # Only enforce positive-price filter when OHLC columns are present.
+        # Close-only series (indicators, GEX, returns) can have legitimate negative values.
+        ohlc_cols = [c for c in ("open", "high", "low") if c in data.columns]
+        if ohlc_cols:
+            price_cols = [c for c in ("open", "high", "low", "close") if c in data.columns]
+            data = data[(data[price_cols] > 0).all(axis=1)]
         data = data.sort_values("time")
         data = data.drop_duplicates(subset=["time"], keep="last")
 
