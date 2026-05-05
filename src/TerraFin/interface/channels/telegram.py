@@ -127,7 +127,14 @@ _BEARISH_KEYWORDS = ("bear", "death", " sell", "↓", "breakdown", "below", "sho
 
 
 def _signal_direction(signal_dict: dict) -> str:
-    """Return ▲/▼/— based on snapshot.side first, then keyword heuristic on signal text."""
+    """Return ▲/▼/◆ — explicit direction field first, then snapshot.side, then keyword heuristic."""
+    direction = signal_dict.get("direction")
+    if direction == "bull":
+        return "▲"
+    if direction == "bear":
+        return "▼"
+    if direction == "neutral":
+        return "◆"
     snapshot = signal_dict.get("snapshot") or {}
     side = snapshot.get("side")
     if side == 1:
@@ -142,12 +149,46 @@ def _signal_direction(signal_dict: dict) -> str:
     return "—"
 
 
-def _format_signal_payload(title: str, signals: list[dict]) -> str:
-    """Group signals by ticker, render as ticker-led bullet list with direction + severity.
+_SNAPSHOT_DISPLAY = {"rsi", "macd", "signal", "hist", "atr", "bb", "adx", "cci", "obv", "mfi", "vwap"}
 
-    Wire shape per signal: ``{"ticker": str, "severity"?: str, "message"|"signal"?: str, "snapshot"?: dict}``.
+
+def _format_snapshot_line(snapshot: dict) -> str:
+    """Build a compact context line from snapshot fields.
+
+    Shows `close` as price, then the first key present in the known
+    indicator allowlist. Arbitrary sender-controlled keys are not shown
+    to prevent unexpected output.
     """
-    ts = time.strftime("%H:%M %Z", time.localtime())
+    if not snapshot:
+        return ""
+    parts: list[str] = []
+    close = snapshot.get("close")
+    if close is not None:
+        try:
+            parts.append(f"${float(close):,.2f}")
+        except (TypeError, ValueError):
+            pass
+    for key in _SNAPSHOT_DISPLAY:
+        val = snapshot.get(key)
+        if val is None:
+            continue
+        try:
+            fval = float(val)
+        except (TypeError, ValueError):
+            continue
+        parts.append(f"{key.upper()} {fval:.2f}")
+        break
+    return "  |  ".join(parts)
+
+
+def _format_signal_payload(title: str, signals: list[dict]) -> str:
+    """Render signals as mobile-scannable blocks: direction + ticker on line 1,
+    signal + severity on line 2, price/context on line 3 if snapshot has data.
+
+    Wire shape per signal:
+      ``{"ticker", "severity"?, "direction"?, "message"|"signal"?, "name"?, "snapshot"?}``
+    """
+    ts = time.strftime("%m-%d %H:%M %Z", time.localtime())
     lines = [f"<b>{_html_escape(title)}</b>  <i>{_html_escape(ts)}</i>", ""]
 
     by_ticker: dict[str, list[dict]] = {}
@@ -156,18 +197,23 @@ def _format_signal_payload(title: str, signals: list[dict]) -> str:
 
     for ticker, group in by_ticker.items():
         name = (group[0].get("name") or "").strip()
-        if name and name != ticker:
-            header = f"<b>{_html_escape(name)}</b>  <code>{_html_escape(ticker)}</code>"
-        else:
-            header = f"<b>{_html_escape(ticker)}</b>"
-        lines.append(header)
         for s in group:
+            direction = _signal_direction(s)
             sev = (s.get("severity") or "").lower()
             emoji = _SEVERITY_EMOJI.get(sev, "⚪")
-            msg = s.get("message") or s.get("signal") or ""
-            direction = _signal_direction(s)
-            lines.append(f"  {direction} {_html_escape(msg)} {emoji}")
-        lines.append("")
+            msg = _html_escape(s.get("message") or s.get("signal") or "")
+            ticker_part = f"<b>{_html_escape(ticker)}</b>"
+            if name and name != ticker:
+                line1 = f"{direction} {ticker_part} · {_html_escape(name)}"
+            else:
+                line1 = f"{direction} {ticker_part}"
+            line2 = f"{msg}  {emoji}" if msg else emoji
+            lines.append(line1)
+            lines.append(line2)
+            ctx = _format_snapshot_line(s.get("snapshot") or {})
+            if ctx:
+                lines.append(f"<i>{_html_escape(ctx)}</i>")
+            lines.append("")
     return "\n".join(lines).rstrip()
 
 

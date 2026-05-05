@@ -17,6 +17,8 @@ from TerraFin.interface.channels.env import signals_env
 
 log = logging.getLogger(__name__)
 
+_SEV_ALIASES = {"medium": "med", "critical": "high", "warn": "med", "warning": "med"}
+
 _DEDUP_MAX = 10_000
 _seen_signal_ids: "OrderedDict[str, None]" = OrderedDict()
 _dedup_lock = Lock()
@@ -114,7 +116,8 @@ def forward_to_telegram(signal: InboundSignal) -> None:
     # the phone. Accepted vocabulary on the wire is ``high|med|low``;
     # senders are responsible for normalizing whatever upstream alias
     # they used (e.g. ``medium`` → ``med``) before POSTing.
-    sev_norm = (signal.severity or "").lower()
+    sev_raw = (signal.severity or "").lower()
+    sev_norm = _SEV_ALIASES.get(sev_raw, sev_raw)
     if sev_norm not in {"high", "med"}:
         log.debug(
             "Telegram forward skipped for %s (%s) — severity=%r below threshold",
@@ -133,10 +136,8 @@ def forward_to_telegram(signal: InboundSignal) -> None:
     if not signal_dict.get("name"):
         signal_dict["name"] = _resolve_ticker_name(signal.ticker)
 
-    sev = f"[{signal.severity.upper()}] " if signal.severity else ""
-    text = f"{sev}{signal.ticker}: {signal.signal}"
     ch.send(
         title="TerraFin Signal",
-        body_md=text,
+        body_md="",
         payload={"signals": [signal_dict]},
     )
