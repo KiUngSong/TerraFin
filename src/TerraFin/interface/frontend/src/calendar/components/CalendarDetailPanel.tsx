@@ -169,7 +169,18 @@ const CalendarDetailPanel: React.FC<CalendarDetailPanelProps> = ({ event }) => {
     );
   }
 
-  const localDate = new Date(event.start).toLocaleString();
+  const localDate = new Date(event.start).toLocaleString(undefined, {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+  const localDateOnly = new Date(event.start).toLocaleDateString(undefined, {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  });
   const earnings =
     event.category === "earning" && event.description
       ? parseEarningsDesc(event.description)
@@ -179,16 +190,30 @@ const CalendarDetailPanel: React.FC<CalendarDetailPanelProps> = ({ event }) => {
       ? parseMacroDesc(event.description)
       : null;
 
+  const earningTicker = earnings
+    ? event.title.split(" - ")[0].trim()
+    : null;
+  const displayTitle = event.title.replace(/\s*\(The\)\s*$/, "");
+
   return (
     <aside className="tf-calendar-detail">
       <div>
         <div className="tf-calendar-detail-label">Event</div>
-        <div className="tf-calendar-detail-title">{event.title}</div>
+        <div className="tf-calendar-detail-title">
+          {earningTicker ? (
+            <a href={`/stock/${earningTicker}`}>{displayTitle}</a>
+          ) : (
+            displayTitle
+          )}
+        </div>
       </div>
 
       <div className="tf-calendar-detail-grid">
         <div>
-          <strong>Date/Time:</strong> {event.displayTime || localDate}
+          <strong>Date:</strong>{" "}
+          {event.category === "earning"
+            ? localDateOnly
+            : event.displayTime || localDate}
         </div>
         <div>
           <strong>Category:</strong> {event.category.charAt(0).toUpperCase() + event.category.slice(1)}
