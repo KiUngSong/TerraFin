@@ -7,6 +7,17 @@ go straight to Yahoo Finance.
 
 # Official Korean company name → ticker
 KR_ALIASES: dict[str, str] = {
+    # ── Global indices (map to INDEX_MAP keys, not raw tickers)
+    "코스피": "Kospi",
+    "코스닥": "Kosdaq",
+    "나스닥": "Nasdaq",
+    "다우": "Dow",
+    "다우존스": "Dow",
+    "닛케이": "Nikkei 225",
+    "닛케이225": "Nikkei 225",
+    "상하이": "Shanghai Composite",
+    "상해종합": "Shanghai Composite",
+    "에스앤피": "S&P 500",
     # ── Mega cap tech
     "애플": "AAPL",
     "마이크로소프트": "MSFT",

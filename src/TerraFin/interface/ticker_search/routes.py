@@ -50,9 +50,11 @@ def _build_indicator_entries() -> list[dict[str, Any]]:
     chart-UI entry points; the underlying source layer is not surfaced.
     """
     from TerraFin.data.providers.economic import indicator_registry
-    from TerraFin.data.providers.market import MARKET_INDICATOR_REGISTRY
+    from TerraFin.data.providers.market import INDEX_DESCRIPTIONS, INDEX_MAP, MARKET_INDICATOR_REGISTRY
 
     out: list[dict[str, Any]] = []
+    for name in INDEX_MAP:
+        out.append({"symbol": name, "name": INDEX_DESCRIPTIONS.get(name, name), "group": "Index"})
     for name, ind in MARKET_INDICATOR_REGISTRY.items():
         out.append({"symbol": name, "name": ind.description or name, "group": "Market"})
     for name, ind in indicator_registry._indicators.items():
@@ -221,8 +223,14 @@ def create_ticker_search_router() -> APIRouter:
             exact = lookup_kr_alias(query)
             if exact is not None:
                 translated = exact
-                # Exact match → enrich with Yahoo metadata for the resolved ticker
-                stocks = _search_yahoo(exact)
+                # If the alias resolves to a known index or indicator, surface as
+                # such rather than hitting Yahoo (which returns noisy equity results).
+                translated_indicators = _search_indicators(exact)
+                if translated_indicators:
+                    indicators = translated_indicators
+                    stocks = []
+                else:
+                    stocks = _search_yahoo(exact)
             else:
                 # Prefix match against the static alias map for live suggestions
                 matches = prefix_match_kr_aliases(query)
