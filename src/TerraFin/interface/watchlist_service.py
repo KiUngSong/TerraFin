@@ -153,6 +153,28 @@ class WatchlistService:
                 ordered = [sym_map.pop(s) for s in order if s in sym_map]
                 ordered.extend(sym_map.values())
                 items = ordered
+        elif self._item_order:
+            # Full fetch: apply group-ordered + within-group ordering so that a
+            # page reload preserves the user's drag-drop arrangement.
+            # Walk groups in _group_order sequence; within each group apply
+            # _item_order. Items that appear in no order list fall through at end.
+            sym_map = {i["symbol"]: i for i in items}
+            seen: set[str] = set()
+            ordered: list[dict] = []
+            # Collect groups in display order (same logic as list_groups).
+            all_groups = list(self._item_order.keys())
+            go = [g for g in (self._group_order or []) if g in self._item_order]
+            remaining_groups = [g for g in all_groups if g not in go]
+            for grp in go + remaining_groups:
+                for sym in (self._item_order.get(grp) or []):
+                    if sym in sym_map and sym not in seen:
+                        ordered.append(sym_map[sym])
+                        seen.add(sym)
+            # Append any items not covered by any order list.
+            for item in items:
+                if item["symbol"] not in seen:
+                    ordered.append(item)
+            items = ordered
         return items
 
     def refresh_all_moves(self) -> int:
