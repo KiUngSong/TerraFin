@@ -60,6 +60,8 @@ from TerraFin.interface.frontend_assets import FrontendBuildError, validate_fron
 from TerraFin.interface.health import create_health_router
 from TerraFin.interface.market_insights.data_routes import create_market_insights_data_router
 from TerraFin.interface.market_insights.routes import create_market_insights_router
+from TerraFin.interface.jobs import watchlist_refresh as _job_watchlist_refresh
+from TerraFin.interface.jobs import weekly_report as _job_weekly_report
 from TerraFin.interface.monitor.heartbeat import registration_heartbeat
 from TerraFin.interface.monitor.http_provider import get_signal_provider_from_env
 from TerraFin.interface.monitor.routes import create_signals_router
@@ -67,7 +69,7 @@ from TerraFin.interface.stock.data_routes import create_stock_data_router
 from TerraFin.interface.stock.routes import create_stock_router
 from TerraFin.interface.ticker_search import create_ticker_search_router
 from TerraFin.interface.watchlist.routes import create_watchlist_router
-from TerraFin.interface.watchlist_service import get_watchlist_service, start_watchlist_refresh_loop
+from TerraFin.interface.watchlist_service import get_watchlist_service
 
 
 ROOT_DIR = Path(__file__).parent
@@ -79,68 +81,6 @@ SERVER_LOG_FILE = ROOT_DIR / "interface_server.log"
 def get_runtime_config():
     return load_runtime_config()
 
-
-def _start_weekly_report() -> "asyncio.Task | None":
-    """Always run the weekly report scheduler — generation is universal,
-    Telegram dispatch is optional. Disable with TERRAFIN_WEEKLY_REPORT_ENABLED=0."""
-    if os.environ.get("TERRAFIN_WEEKLY_REPORT_ENABLED", "1") in ("0", "false", "False"):
-        return None
-    _log.info("Weekly report scheduler enabled (Fri 16:30 ET)")
-    return asyncio.create_task(_weekly_report_loop())
-
-
-async def _weekly_report_loop() -> None:
-    """Generate on startup if no recent report; then on every Friday 16:30 ET."""
-    from zoneinfo import ZoneInfo
-
-    tz_name = os.environ.get("TERRAFIN_CACHE_TIMEZONE", "America/New_York")
-    tz = ZoneInfo(tz_name)
-    loop = asyncio.get_running_loop()
-
-    # Onboarding: ensure a report exists for the latest Friday on startup so
-    # the dashboard always has something to show, even before the next tick.
-    try:
-        await loop.run_in_executor(None, _ensure_recent_report)
-    except Exception:
-        _log.exception("Initial weekly report generation failed")
-
-    while True:
-        now = datetime.now(tz)
-        days_ahead = (4 - now.weekday()) % 7
-        target = now.replace(hour=16, minute=30, second=0, microsecond=0)
-        if days_ahead == 0 and now >= target:
-            days_ahead = 7
-        target = target + timedelta(days=days_ahead)
-        sleep_seconds = (target - now).total_seconds()
-        _log.info("Weekly report: next run at %s (%.0fs)", target.isoformat(), sleep_seconds)
-        try:
-            await asyncio.sleep(sleep_seconds)
-        except asyncio.CancelledError:
-            return
-        try:
-            from TerraFin.analytics.reports.weekly import build_weekly_report
-
-            await loop.run_in_executor(None, build_weekly_report)
-            _log.info("Weekly report generated")
-        except Exception:
-            _log.exception("Weekly report generation failed")
-
-
-def _ensure_recent_report() -> None:
-    """Generate a report for the most recently completed Friday close.
-
-    Skips if a report already exists for that exact anchor date — avoids
-    re-running the (sometimes slow) enrichment path on every restart.
-    Mid-week startups do not produce a stale report dated today.
-    """
-    from TerraFin.analytics.reports import list_reports
-    from TerraFin.analytics.reports.weekly import _last_completed_friday, build_weekly_report
-
-    target = _last_completed_friday()
-    existing = list_reports(limit=8)
-    if any(r.as_of == target.isoformat() for r in existing):
-        return
-    build_weekly_report(as_of=target)
 
 
 def create_app(initial_data: TimeSeriesDataFrame | None = None, base_path: str = "") -> FastAPI:
@@ -165,28 +105,24 @@ def create_app(initial_data: TimeSeriesDataFrame | None = None, base_path: str =
     async def _lifespan(app: FastAPI):
         _ = app
         _ = get_watchlist_service()
-        # Per-region market-close-driven refresh of stored daily move %.
-        # Daemon thread; loop dies with the process. No explicit stop in
-        # the lifespan teardown — same pattern as the cache manager.
-        start_watchlist_refresh_loop()
         cache_manager = get_cache_manager()
         cache_manager.start()
-        background_tasks: list[asyncio.Task] = []
-        if t := _start_weekly_report():
-            background_tasks.append(t)
+
+        jobs: list[asyncio.Task] = [
+            asyncio.create_task(_job_watchlist_refresh.run(), name="watchlist-refresh"),
+            asyncio.create_task(_job_weekly_report.run(), name="weekly-report"),
+        ]
         signal_provider = get_signal_provider_from_env()
         if signal_provider is not None:
-            background_tasks.append(asyncio.create_task(registration_heartbeat(signal_provider)))
+            jobs.append(asyncio.create_task(registration_heartbeat(signal_provider), name="signal-heartbeat"))
             _log.info("Signal provider configured — heartbeat started")
+
         try:
             yield
         finally:
-            for t in background_tasks:
+            for t in jobs:
                 t.cancel()
-                try:
-                    await t
-                except (asyncio.CancelledError, Exception):
-                    pass
+            await asyncio.gather(*jobs, return_exceptions=True)
             cache_manager.stop()
 
     app = FastAPI(lifespan=_lifespan)

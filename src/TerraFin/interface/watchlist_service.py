@@ -1,81 +1,14 @@
 import logging
 import os
-import threading
 import time
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from threading import Lock
-from zoneinfo import ZoneInfo
 
 from TerraFin.configuration import WatchlistConfig, load_terrafin_config
 
 
 log = logging.getLogger(__name__)
-
-
-# Per-region close + post-close buffer for the watchlist move-% refresh.
-# The scheduler converts each (close_hour, close_minute, tz) → next UTC
-# fire on every loop iteration so DST flips fall out for free. The hour
-# of "close + 1h" gives yfinance time to publish the EOD bar.
-_REFRESH_REGIONS = [
-    {"label": "KRX", "tz": "Asia/Seoul", "close_hour": 15, "close_minute": 30, "buffer_minutes": 60},
-    {"label": "NYSE", "tz": "America/New_York", "close_hour": 16, "close_minute": 0, "buffer_minutes": 60},
-]
-
-
-def _enabled() -> bool:
-    return os.environ.get("TERRAFIN_WATCHLIST_REFRESH_ENABLED", "1") not in ("0", "false", "False")
-
-
-def _per_symbol_sleep_seconds() -> float:
-    raw = os.environ.get("TERRAFIN_WATCHLIST_PER_SYMBOL_SLEEP_SEC")
-    if not raw:
-        return 0.2
-    try:
-        return max(float(raw), 0.0)
-    except ValueError:
-        return 0.2
-
-
-def _next_fire_at_utc(now_utc: datetime) -> tuple[datetime, str]:
-    """Compute the next refresh fire time across all regions, returning
-    (fire_at_utc, region_label). Each region's fire time is "close +
-    buffer" expressed in its own tz; if today's slot already passed,
-    advance to tomorrow's. Pick the earliest across regions."""
-    candidates: list[tuple[datetime, str]] = []
-    for region in _REFRESH_REGIONS:
-        tz = ZoneInfo(region["tz"])
-        now_local = now_utc.astimezone(tz)
-        target_local = now_local.replace(
-            hour=region["close_hour"],
-            minute=region["close_minute"],
-            second=0,
-            microsecond=0,
-        ) + timedelta(minutes=region["buffer_minutes"])
-        if target_local <= now_local:
-            target_local = target_local + timedelta(days=1)
-        candidates.append((target_local.astimezone(timezone.utc), region["label"]))
-    return min(candidates, key=lambda c: c[0])
-
-
-def _previous_fire_at_utc(now_utc: datetime) -> datetime:
-    """Most recent passed slot across all regions — used at boot to
-    decide whether a catch-up fire is needed (we missed a slot while
-    the process was down)."""
-    passed: list[datetime] = []
-    for region in _REFRESH_REGIONS:
-        tz = ZoneInfo(region["tz"])
-        now_local = now_utc.astimezone(tz)
-        target_local = now_local.replace(
-            hour=region["close_hour"],
-            minute=region["close_minute"],
-            second=0,
-            microsecond=0,
-        ) + timedelta(minutes=region["buffer_minutes"])
-        if target_local > now_local:
-            target_local = target_local - timedelta(days=1)
-        passed.append(target_local.astimezone(timezone.utc))
-    return max(passed)
 
 
 try:
@@ -681,57 +614,6 @@ class WatchlistService:
 
 _watchlist_service: WatchlistService | None = None
 
-
-def start_watchlist_refresh_loop() -> threading.Thread | None:
-    """Daemon thread that fires ``refresh_all_moves`` at each region's
-    market close + buffer. Boot-time catch-up: if the latest stored
-    ``move_refreshed_at`` is older than the most recently passed slot,
-    fire once immediately before entering the schedule loop.
-    Returns the started thread (daemon) or ``None`` if disabled.
-    """
-    if not _enabled():
-        log.info("watchlist refresh loop disabled via TERRAFIN_WATCHLIST_REFRESH_ENABLED=0")
-        return None
-
-    def _loop() -> None:
-        try:
-            svc = get_watchlist_service()
-        except Exception:
-            log.exception("watchlist refresh loop: cannot resolve service")
-            return
-        if not svc.is_backend_configured():
-            log.info("watchlist refresh loop: Mongo backend not configured, exiting")
-            return
-        # Boot catch-up
-        try:
-            latest = svc.latest_refresh_at_utc()
-            now = datetime.now(timezone.utc)
-            previous_slot = _previous_fire_at_utc(now)
-            if latest is None or latest < previous_slot:
-                log.info(
-                    "watchlist refresh loop: catch-up fire (latest=%s, previous_slot=%s)",
-                    latest, previous_slot,
-                )
-                svc.refresh_all_moves()
-        except Exception:
-            log.exception("watchlist refresh loop: catch-up fire failed")
-        # Steady-state schedule
-        while True:
-            try:
-                now = datetime.now(timezone.utc)
-                fire_at, label = _next_fire_at_utc(now)
-                wait = max((fire_at - now).total_seconds(), 1.0)
-                log.info("watchlist refresh loop: next fire %s (%s, in %.0fs)", fire_at.isoformat(), label, wait)
-                time.sleep(wait)
-                svc = get_watchlist_service()
-                svc.refresh_all_moves()
-            except Exception:
-                log.exception("watchlist refresh loop: iteration failed")
-                time.sleep(60)
-
-    thread = threading.Thread(target=_loop, name="watchlist-move-refresh", daemon=True)
-    thread.start()
-    return thread
 
 
 def get_watchlist_service() -> WatchlistService:
