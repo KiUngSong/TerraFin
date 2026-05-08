@@ -95,13 +95,15 @@ def check_rate_limit(client_id: str) -> bool:
 
 
 def _resolve_ticker_name(ticker: str) -> str:
-    """Look up company name from watchlist cache. Returns "" on any failure."""
+    """Look up company name from watchlist cache. Returns "" on any failure or
+    when the stored name equals the ticker symbol (sentinel for missing data)."""
     try:
         from TerraFin.interface.watchlist_service import get_watchlist_service
         svc = get_watchlist_service()
         for item in svc.get_watchlist_snapshot():
             if item.get("symbol") == ticker:
-                return item.get("name") or ""
+                name = (item.get("name") or "").strip()
+                return name if name != ticker else ""
     except Exception:
         pass
     return ""

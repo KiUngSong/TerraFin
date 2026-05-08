@@ -182,7 +182,7 @@ def _format_snapshot_line(snapshot: dict) -> str:
 
 
 def _format_signal_payload(title: str, signals: list[dict]) -> str:
-    """Render signals as mobile-scannable blocks: direction + ticker on line 1,
+    """Render signals as mobile-scannable blocks: direction + name + ticker on line 1,
     signal + severity on line 2, price/context on line 3 if snapshot has data.
 
     Wire shape per signal:
@@ -204,7 +204,7 @@ def _format_signal_payload(title: str, signals: list[dict]) -> str:
             msg = _html_escape(s.get("message") or s.get("signal") or "")
             ticker_part = f"<b>{_html_escape(ticker)}</b>"
             if name and name != ticker:
-                line1 = f"{direction} {ticker_part} · {_html_escape(name)}"
+                line1 = f"{direction} {_html_escape(name)} {ticker_part}"
             else:
                 line1 = f"{direction} {ticker_part}"
             line2 = f"{msg}  {emoji}" if msg else emoji

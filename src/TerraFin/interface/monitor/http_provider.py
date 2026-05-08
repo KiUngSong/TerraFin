@@ -21,8 +21,11 @@ class HttpSignalProvider:
         self.base_url = base_url.rstrip("/")
         self.api_key = api_key
 
-    async def register(self, tickers: list[str]) -> None:
-        await self._post("/register", {"tickers": tickers})
+    async def register(self, tickers: list[str], names: dict[str, str] | None = None) -> None:
+        body: dict = {"tickers": tickers}
+        if names:
+            body["names"] = names
+        await self._post("/register", body)
 
     async def unregister(self, tickers: list[str]) -> None:
         await self._post("/unregister", {"tickers": tickers})

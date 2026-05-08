@@ -211,7 +211,15 @@ def create_dashboard_data_router() -> APIRouter:
             return
         try:
             if is_now_monitored:
-                await provider.register([symbol])
+                name = ""
+                try:
+                    for item in watchlist_service.get_watchlist_snapshot():
+                        if item.get("symbol") == symbol:
+                            name = item.get("name") or ""
+                            break
+                except Exception:
+                    pass
+                await provider.register([symbol], names={symbol: name} if name and name != symbol else {})
             else:
                 await provider.unregister([symbol])
         except Exception as exc:
@@ -237,13 +245,25 @@ def create_dashboard_data_router() -> APIRouter:
             ch = TelegramChannel.from_config()
         except Exception:
             return  # Telegram not configured — silently skip
+
+        name = ""
+        try:
+            items = watchlist_service.get_watchlist_snapshot()
+            for item in items:
+                if item.get("symbol") == symbol:
+                    name = (item.get("name") or "").strip()
+                    break
+        except Exception:
+            pass
+        label = f"{name} <b>{symbol}</b>" if name and name != symbol else f"<b>{symbol}</b>"
+
         if ok:
             emoji = "✅"
-            msg = f"{emoji} <b>{symbol}</b> {action}"
+            msg = f"{emoji} {label} {action}"
         else:
             emoji = "⚠️"
             msg = (
-                f"{emoji} <b>{symbol}</b> {action} — <b>FAILED</b>\n"
+                f"{emoji} {label} {action} — <b>FAILED</b>\n"
                 f"<i>{error or 'unknown error'}</i>\n"
                 f"Heartbeat will retry within 60s."
             )

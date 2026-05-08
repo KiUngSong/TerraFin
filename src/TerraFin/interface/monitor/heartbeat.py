@@ -58,7 +58,13 @@ async def registration_heartbeat(provider, interval: int = 60) -> None:
                 await provider.unregister(to_unregister)
                 log.info("Evicted %d orphan ticker(s) from signal provider: %s", len(to_unregister), to_unregister)
             if to_register:
-                await provider.register(to_register)
+                reg_set = set(to_register)
+                names = {
+                    item["symbol"]: item.get("name", "")
+                    for item in items
+                    if item.get("symbol") in reg_set
+                }
+                await provider.register(to_register, names=names)
                 log.info("Registered %d ticker(s) with signal provider: %s", len(to_register), to_register)
         except asyncio.CancelledError:
             return
