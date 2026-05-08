@@ -804,35 +804,74 @@ def _column_has_distinguishing_header(col: int, header_rows: list[list[str]]) ->
     return False
 
 
+_CURRENCY_PREFIX_RE = re.compile(r"^\$+$")
+
+
 def _merge_adjacent_duplicate_columns(
     header: list[str], body_rows: list[list[str]]
 ) -> tuple[list[str], list[list[str]]]:
     """Fuse adjacent columns when every row agrees (identical text or one
     side empty) for both the header and all body rows.
 
+    Also fuses adjacent columns where the left is a bare ``$`` currency-sign
+    column that prefixes the right: same parent header lines, left leaf is
+    ``$``, and every body cell in the left column is ``$`` or empty.
+
     Triggered when a body cell's ``colspan`` exceeds a header group width —
     the colspan expansion then duplicates the value across two or more
     adjacent groups. Merging folds them back to one column.
     """
-    def _compatible(a: str, b: str) -> bool:
+    def _is_currency_prefix(text: str) -> bool:
+        return bool(_CURRENCY_PREFIX_RE.fullmatch(text.strip())) if text.strip() else False
+
+    def _compatible_header(a: str, b: str) -> bool:
         if not a or not b:
             return True
-        return a == b
+        if a == b:
+            return True
+        # Left is bare $ currency prefix with same parent header as right.
+        a_parts = a.split("\n")
+        b_parts = b.split("\n")
+        return a_parts[:-1] == b_parts[:-1] and _is_currency_prefix(a_parts[-1])
 
-    def _pick(a: str, b: str) -> str:
-        # Prefer non-empty; when both set and equal, either works.
-        return a if a else b
+    def _compatible_body(a: str, b: str) -> bool:
+        if not a or not b:
+            return True
+        if a == b:
+            return True
+        return _is_currency_prefix(a)
+
+    def _pick_header(a: str, b: str) -> str:
+        if not a:
+            return b
+        if not b or a == b:
+            return a
+        a_parts = a.split("\n")
+        b_parts = b.split("\n")
+        if a_parts[:-1] == b_parts[:-1] and _is_currency_prefix(a_parts[-1]):
+            combined = (a_parts[-1].strip() + " " + b_parts[-1].strip()).strip()
+            return "\n".join(a_parts[:-1] + [combined])
+        return a
+
+    def _pick_body(a: str, b: str) -> str:
+        if not a:
+            return b
+        if not b or a == b:
+            return a
+        if _is_currency_prefix(a):
+            return (a.strip() + " " + b.strip()).strip()
+        return a
 
     changed = True
     while changed and len(header) > 1:
         changed = False
         c = 0
         while c < len(header) - 1:
-            if not _compatible(header[c], header[c + 1]):
+            if not _compatible_header(header[c], header[c + 1]):
                 c += 1
                 continue
             if not all(
-                _compatible(
+                _compatible_body(
                     row[c] if c < len(row) else "",
                     row[c + 1] if c + 1 < len(row) else "",
                 )
@@ -841,11 +880,11 @@ def _merge_adjacent_duplicate_columns(
                 c += 1
                 continue
             # Merge c and c+1.
-            header = header[:c] + [_pick(header[c], header[c + 1])] + header[c + 2 :]
+            header = header[:c] + [_pick_header(header[c], header[c + 1])] + header[c + 2 :]
             body_rows = [
                 (
                     row[:c]
-                    + [_pick(row[c] if c < len(row) else "", row[c + 1] if c + 1 < len(row) else "")]
+                    + [_pick_body(row[c] if c < len(row) else "", row[c + 1] if c + 1 < len(row) else "")]
                     + row[c + 2 :]
                 )
                 for row in body_rows
@@ -922,9 +961,22 @@ def _rebuild_table_markdown(html: str) -> str | None:
     # but tells us nothing about the column identity. Level 1/2/3 fair-value
     # columns keep passing this check because their sub-header text
     # ("Level 1" / "Level 2" / "Level 3") genuinely differs per column.
+    # Full-width spanning rows (colspan = total table width) repeat the same
+    # text in every group after collapse. They're section-separator labels,
+    # not column data — exclude them from spacer detection so they don't
+    # falsely keep a spacer group alive.
+    def _is_spanning_row(row: list[str]) -> bool:
+        vals = [c.strip() for c in row]
+        non_empty = [v for v in vals if v]
+        return bool(non_empty) and len(set(non_empty)) == 1 and len(non_empty) == len(vals)
+
     keep: list[int] = []
     for c in range(len(header)):
-        body_has = any(row[c].strip() for row in body_rows_collapsed if c < len(row))
+        body_has = any(
+            row[c].strip()
+            for row in body_rows_collapsed
+            if c < len(row) and not _is_spanning_row(row)
+        )
         distinguishing = _column_has_distinguishing_header(c, header_rows_collapsed)
         # Keep column 0 always (row labels live there).
         if c == 0 or body_has or distinguishing:
@@ -934,6 +986,12 @@ def _rebuild_table_markdown(html: str) -> str | None:
     header = [header[c] for c in keep]
     body_rows_collapsed = [
         [row[c] if c < len(row) else "" for c in keep]
+        for row in body_rows_collapsed
+    ]
+    # Spanning rows (colspan = full table width) land with the same label in
+    # every group after collapse. Preserve col[0]; blank the data columns.
+    body_rows_collapsed = [
+        ([row[0]] + [""] * (len(row) - 1)) if _is_spanning_row(row) else row
         for row in body_rows_collapsed
     ]
 
