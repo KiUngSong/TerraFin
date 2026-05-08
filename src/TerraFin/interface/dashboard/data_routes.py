@@ -11,6 +11,7 @@ from TerraFin.interface.watchlist_service import (
     WatchlistNotFoundError,
     WatchlistValidationError,
     get_watchlist_service,
+    is_reserved_tag,
 )
 
 
@@ -348,8 +349,18 @@ def create_dashboard_data_router() -> APIRouter:
     async def api_remove_watchlist_symbol(symbol: str, group: str | None = Query(default=None)):
         try:
             if group:
-                # Group-scoped: remove only that tag; item is preserved in other groups.
+                # Group-scoped: remove only that tag; if no real group tags remain
+                # after removal, delete the item entirely so it doesn't appear in
+                # the synthetic base group.
                 items = watchlist_service.remove_tags(symbol, [group])
+                item = _find_item(items, symbol)
+                if item is not None:
+                    real_tags = [t for t in (item.get("tags") or []) if not is_reserved_tag(t)]
+                    if not real_tags:
+                        was_monitored = _is_monitored(item)
+                        items = watchlist_service.remove_symbol(symbol)
+                        if was_monitored:
+                            await _push_monitor_change(symbol, is_now_monitored=False)
                 return _watchlist_response(items)
             was_monitored = _is_monitored(_find_item(watchlist_service.get_watchlist_snapshot(), symbol))
             items = watchlist_service.remove_symbol(symbol)
