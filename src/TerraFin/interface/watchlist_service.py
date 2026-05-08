@@ -83,7 +83,6 @@ try:
 except ImportError:  # pragma: no cover - optional dependency at runtime
     MongoClient = None
 
-from TerraFin.data import get_data_factory
 from TerraFin.data.providers.private_access.fallbacks import get_watchlist_fallback
 
 
@@ -177,16 +176,22 @@ def _resolve_company_name(symbol: str) -> str:
     return str(info.get("shortName") or info.get("longName") or symbol).strip() or symbol
 
 
+def _bust_ticker_info_cache(symbol: str) -> None:
+    try:
+        from TerraFin.data.cache.registry import get_cache_manager
+        get_cache_manager().refresh_payload(f"market.ticker_info.{symbol}")
+    except Exception:
+        pass
+
+
 def _format_move_from_history(symbol: str) -> str:
-    data = get_data_factory().get_market_data(symbol)
-    closes = data["close"].dropna().tolist() if "close" in data.columns else []
-    if len(closes) < 2:
+    from TerraFin.data.providers.market.ticker_info import get_ticker_info
+    info = get_ticker_info(symbol) or {}
+    current = info.get("currentPrice") or info.get("regularMarketPrice")
+    prev_close = info.get("previousClose") or info.get("regularMarketPreviousClose")
+    if not current or not prev_close or prev_close == 0:
         return "--"
-    prev_close = float(closes[-2])
-    last_close = float(closes[-1])
-    if prev_close == 0:
-        return "--"
-    move_pct = ((last_close / prev_close) - 1.0) * 100.0
+    move_pct = ((current / prev_close) - 1.0) * 100.0
     return f"{move_pct:+.2f}%"
 
 
@@ -243,6 +248,7 @@ class WatchlistService:
                 if not symbol:
                     continue
                 try:
+                    _bust_ticker_info_cache(symbol)
                     fresh = _format_move_from_history(symbol)
                 except Exception:
                     log.exception("watchlist move recompute failed for %s", symbol)

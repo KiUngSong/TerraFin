@@ -145,12 +145,25 @@ def create_dashboard_data_router() -> APIRouter:
     watchlist_service = get_watchlist_service()
     cache_manager = get_cache_manager()
 
+    def _live_move(symbol: str) -> str:
+        try:
+            from TerraFin.data.providers.market.ticker_info import get_ticker_info
+            info = get_ticker_info(symbol) or {}
+            current = info.get("currentPrice") or info.get("regularMarketPrice")
+            prev = info.get("previousClose") or info.get("regularMarketPreviousClose")
+            if current and prev and prev != 0:
+                return f"{((current / prev) - 1.0) * 100.0:+.2f}%"
+        except Exception:
+            pass
+        return "--"
+
     def _watchlist_response(items: list[dict]) -> WatchlistSnapshotResponse:
         from TerraFin.interface.monitor.http_provider import is_signal_provider_configured
 
         backend_configured = watchlist_service.is_backend_configured()
+        live_items = [{**item, "move": _live_move(item["symbol"])} for item in items]
         return WatchlistSnapshotResponse(
-            items=[WatchlistItemResponse.model_validate(item) for item in items],
+            items=[WatchlistItemResponse.model_validate(item) for item in live_items],
             backendConfigured=backend_configured,
             mode="mongo" if backend_configured else "fallback",
             monitorEnabled=is_signal_provider_configured(),

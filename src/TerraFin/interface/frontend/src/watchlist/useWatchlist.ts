@@ -88,6 +88,57 @@ export function useWatchlist() {
   useEffect(() => {
     void refresh();
     void fetchGroups();
+
+    // Schedule a single refresh at the next post-close boundary so the UI
+    // picks up move% updates without polling every 5 minutes.
+    // Boundaries: KRX 17:30 KST (08:30 UTC), NYSE 18:00 ET (23:00 UTC).
+    // Deferred if the tab is hidden when the timer fires.
+    const BOUNDARIES_UTC: { hour: number; minute: number }[] = [
+      { hour: 8, minute: 30 },   // KRX close + 1h buffer
+      { hour: 23, minute: 0 },   // NYSE close + 1h buffer
+    ];
+
+    function msUntilNextBoundary(): number {
+      const now = new Date();
+      const nowMs = now.getTime();
+      let nearest = Infinity;
+      for (const { hour, minute } of BOUNDARIES_UTC) {
+        const candidate = new Date(now);
+        candidate.setUTCHours(hour, minute, 0, 0);
+        if (candidate.getTime() <= nowMs) {
+          candidate.setUTCDate(candidate.getUTCDate() + 1);
+        }
+        nearest = Math.min(nearest, candidate.getTime() - nowMs);
+      }
+      return nearest;
+    }
+
+    let timerId: ReturnType<typeof setTimeout> | null = null;
+
+    function scheduleNext(): void {
+      timerId = setTimeout(() => {
+        if (document.visibilityState === 'visible') {
+          void refresh();
+          void fetchGroups();
+        } else {
+          // Tab hidden — defer until visible
+          const onVisible = (): void => {
+            if (document.visibilityState === 'visible') {
+              document.removeEventListener('visibilitychange', onVisible);
+              void refresh();
+              void fetchGroups();
+              scheduleNext();
+            }
+          };
+          document.addEventListener('visibilitychange', onVisible);
+          return;
+        }
+        scheduleNext();
+      }, msUntilNextBoundary());
+    }
+
+    scheduleNext();
+    return () => { if (timerId !== null) clearTimeout(timerId); };
   }, [refresh, fetchGroups]);
 
   const addSymbol = useCallback(async (symbol: string, tags?: string[]) => {
