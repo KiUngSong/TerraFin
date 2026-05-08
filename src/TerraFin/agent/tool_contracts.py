@@ -68,6 +68,21 @@ HOSTED_TOOL_CONTRACTS: dict[str, dict[str, Any]] = {
         ),
         "response_model": "IndicatorsResponse",
     },
+    "patterns": {
+        "input_schema": _object_schema(
+            properties={
+                "name": {"type": "string", "minLength": 1},
+                "depth": {"type": "string", "enum": ["auto", "recent", "full"], "default": "auto"},
+                "view": {
+                    "type": "string",
+                    "enum": ["daily", "weekly", "monthly", "yearly"],
+                    "default": "daily",
+                },
+            },
+            required=["name"],
+        ),
+        "response_model": "PatternsResponse",
+    },
     "market_snapshot": {
         "input_schema": _object_schema(
             properties={

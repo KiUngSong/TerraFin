@@ -22,13 +22,12 @@ The artefacts use HTML comment sentinels:
 Hand-edited prose outside the sentinels is preserved verbatim.
 """
 
-from __future__ import annotations
-
 import argparse
 import json
 import sys
 from pathlib import Path
 from typing import Any
+
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SKILL_PATH = REPO_ROOT / "skills" / "terrafin" / "SKILL.md"
@@ -93,9 +92,7 @@ def render_skill_capability_list(caps: list[dict[str, Any]]) -> str:
     hosted_only = [c for c in caps if not c.get("http_route_path")]
 
     lines: list[str] = []
-    lines.append(
-        "Stateless data + analysis (each has a matching `/agent/api/*` HTTP route):"
-    )
+    lines.append("Stateless data + analysis (each has a matching `/agent/api/*` HTTP route):")
     lines.append("")
     for cap in stateless:
         name = cap["name"]
@@ -106,8 +103,7 @@ def render_skill_capability_list(caps: list[dict[str, Any]]) -> str:
 
     if hosted_only:
         lines.append(
-            "Hosted-runtime-only tools (require a live TerraFinAgentSession; "
-            "not exposed as stateless HTTP routes):"
+            "Hosted-runtime-only tools (require a live TerraFinAgentSession; not exposed as stateless HTTP routes):"
         )
         lines.append("")
         for cap in hosted_only:
@@ -180,9 +176,7 @@ def render_usage_route_summary(caps: list[dict[str, Any]]) -> str:
         matched.update(c["name"] for c in bucket)
         sections.append((label, bucket))
 
-    other = [
-        c for c in caps if c.get("http_route_path") and c["name"] not in matched
-    ]
+    other = [c for c in caps if c.get("http_route_path") and c["name"] not in matched]
     if other:
         other.sort(key=lambda c: c["name"])
         sections.append(("Other", other))
@@ -238,8 +232,7 @@ def _sync_skill_version(text: str, version: str) -> str:
     new_text, count = pattern.subn(replacement, text, count=1)
     if count == 0:
         raise SystemExit(
-            f"{SKILL_PATH}: missing `version: \"...\"` line in YAML frontmatter; "
-            "add it before running the generator."
+            f'{SKILL_PATH}: missing `version: "..."` line in YAML frontmatter; add it before running the generator.'
         )
     return new_text
 
@@ -252,13 +245,9 @@ def render_files(caps: list[dict[str, Any]]) -> dict[Path, str]:
     skill_text = SKILL_PATH.read_text(encoding="utf-8")
     usage_text = USAGE_PATH.read_text(encoding="utf-8")
 
-    new_skill = _replace_between_sentinels(
-        skill_text, *SKILL_SENTINELS, body=skill_body, file_label=str(SKILL_PATH)
-    )
+    new_skill = _replace_between_sentinels(skill_text, *SKILL_SENTINELS, body=skill_body, file_label=str(SKILL_PATH))
     new_skill = _sync_skill_version(new_skill, pyproject_version)
-    new_usage = _replace_between_sentinels(
-        usage_text, *USAGE_SENTINELS, body=usage_body, file_label=str(USAGE_PATH)
-    )
+    new_usage = _replace_between_sentinels(usage_text, *USAGE_SENTINELS, body=usage_body, file_label=str(USAGE_PATH))
 
     return {SKILL_PATH: new_skill, USAGE_PATH: new_usage}
 
@@ -268,10 +257,7 @@ def main() -> int:
     parser.add_argument(
         "--check",
         action="store_true",
-        help=(
-            "CI mode: do not write files. Exit 1 if the committed artefacts "
-            "differ from generated output."
-        ),
+        help=("CI mode: do not write files. Exit 1 if the committed artefacts differ from generated output."),
     )
     parser.add_argument(
         "--json-out",
