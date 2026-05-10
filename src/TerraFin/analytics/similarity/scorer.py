@@ -10,8 +10,14 @@ where sqrt(2*N) is the maximum possible z-norm Euclidean distance.
 
 import logging
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 import numpy as np
+
+
+if TYPE_CHECKING:
+    import pandas as pd
+
 
 log = logging.getLogger(__name__)
 
@@ -41,7 +47,6 @@ def score_pool(
         names:  Optional {symbol → display name} from SimilarityPool.names().
         top_n:  Number of results to return.
     """
-    import pandas as pd
 
     n = len(target)
     if n < 10:

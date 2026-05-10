@@ -220,6 +220,50 @@ emit the same `Signal` dataclass — only the trigger differs. See
 [architecture.md](./architecture.md#signal-pipeline) for the pipeline
 shape.
 
+## Chart similarity search
+
+`src/TerraFin/analytics/similarity/` — sliding-window template matching across a large stock universe.
+
+| Module | Role |
+|--------|------|
+| `pool.py` | Universe loading, per-symbol EOY price cache, process-level pool TTL |
+| `scorer.py` | STUMPY MASS distance profile, result ranking |
+
+### Algorithm
+
+1. **Target**: current close-price series for the query ticker, fetched via `DataFactory.get_recent_history()` (live, daily-TTL cache).
+2. **Pool**: full price history through end of last year for every symbol in the universe, stored as immutable parquet files at `~/.terrafin/cache/prices/{symbol}_eoy{year}.parquet`.
+3. **Transform**: both target and each pool subsequence are converted to cumulative log returns `log(p[t] / p[0])`, anchoring shape at 0 and removing trend / level bias.
+4. **Distance**: STUMPY `mass()` computes the z-normalized Euclidean distance profile — O(n log n) per symbol — sliding the target template across the full history of each pool series.
+5. **Score**: `max(0, 1 − min_dist / √(2N))` where `√(2N)` is the theoretical maximum z-norm Euclidean distance for length-N sequences.
+
+### Universes
+
+| Name | Symbols |
+|------|---------|
+| `sp500` | ~501 S&P 500 constituents |
+| `nasdaq100` | ~101 Nasdaq-100 constituents |
+| `kospi200` | ~199 KOSPI 200 constituents |
+| `sp500+nasdaq100+kospi200` | Union (~713 unique) — default |
+| `watchlist` | User's current watchlist (not cached; fetched per request) |
+
+### Cache behaviour
+
+EOY parquet files are **immutable** — year-end data never changes, so no TTL is applied.  On first run the pool downloads all symbols (prints `[pool] Downloading {sym} ({i}/{total})...` to stdout).  Pool objects are held in a process-level dict with a 6-hour TTL to avoid re-loading 713 series per request.
+
+### Python API
+
+```python
+from TerraFin.analytics.similarity.pool import get_pool
+from TerraFin.analytics.similarity.scorer import score_pool
+
+pool = get_pool("sp500+nasdaq100+kospi200")   # loads + caches full history
+results = score_pool(target_series, pool.prices(), names=pool.names(), top_n=20)
+# → list[SimilarityResult(symbol, name, score, match_start, match_end, overlap_days)]
+```
+
+See `notebooks/analytics/chart_similarity_scan.ipynb` for an interactive walkthrough with visualization (target + historical match + 1-month after-move).
+
 ## Simulation
 
 Simulation lives under `src/TerraFin/analytics/simulation/`.
@@ -247,6 +291,7 @@ This is the quickest way to understand what is already connected to the product:
 | Vol regime (percentile rank + hysteresis) | Stable — chart overlay and agent API |
 | LPPL (Bubble detection) | Calibrated default active in chart overlay and agent API; full article ladder remains available in the analytics helper for research/debug runs |
 | Spectral analysis | Experimental helper |
+| Chart similarity search | Stable agent API (`similarity_search`); notebook demo available |
 | Notebook demos | Supported but manual-only, not product-critical regression coverage |
 
 Notebook demos live in `notebooks/analytics/`.

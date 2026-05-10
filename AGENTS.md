@@ -17,9 +17,9 @@ TerraFin"):
 
 - Read [README.md](./README.md) for project shape, install, and the main documentation map.
 - Read [skills/terrafin/SKILL.md](./skills/terrafin/SKILL.md) for the
-  authoritative list of agent-callable capabilities (27 tools at last count
-  including the 14 stateless `/agent/api/*` routes added in the recent
-  agent-surface parity work).
+  authoritative list of agent-callable capabilities (30 tools — count is
+  auto-generated; run `python scripts/generate-agent-artefacts.py` after
+  adding capabilities to keep SKILL.md and this count in sync).
 
 ## Capability surface (current)
 
@@ -38,6 +38,8 @@ All of these have parity Python (`TerraFinAgentClient`), CLI
 - **SEC filings**: `sec_filings`, `sec_filing_document`, `sec_filing_section`
 - **Sentiment / breadth / market state**: `fear_greed`, `market_regime`,
   `market_breadth`, `trailing_forward_pe`, `top_companies`, `watchlist`
+- **Pattern / similarity**: `patterns`, `similarity_search`
+- **FCF detail**: `fcf_history`
 
 Hosted-runtime-only tools (no stateless HTTP route):
 
@@ -105,9 +107,9 @@ When you add a new capability:
    `src/TerraFin/agent/personas/` if it should be persona-callable.
 5. Run `python scripts/generate-agent-artefacts.py` to refresh the
    sentinel-bounded "Key client methods" list in SKILL.md and the "Route
-   summary" table in `docs/agent/usage.md`. CI fails (`pytest
-   tests/agent/test_generated_artefacts_match.py`) if you forget. Verify
-   externally with `terrafin-agent capabilities --name <new-cap>`.
+   summary" table in `docs/agent/usage.md`. The `package-smoke` CI job runs
+   `--check` mode and fails if artefacts are stale. Verify locally with
+   `terrafin-agent capabilities --name <new-cap>`.
 
 ### If you are adding or extending a feature
 

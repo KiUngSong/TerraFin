@@ -389,6 +389,31 @@ Use:
 
 - `top_companies()` — market-cap-ranked equity list driving Market Insights.
 
+### Chart similarity search
+
+Find historical periods where another stock's chart had the same shape as the target ticker's recent chart.
+
+Use:
+
+- `similarity_search(ticker, universe="sp500+nasdaq100+kospi200", period="1y", top_n=20)`
+
+Parameters:
+
+- `ticker` — the stock to match (required). Its recent close-price chart over `period` becomes the template.
+- `universe` — `"sp500"`, `"nasdaq100"`, `"kospi200"`, `"sp500+kospi200"`, `"sp500+nasdaq100+kospi200"` (default), or `"watchlist"`.
+- `period` — template length: `"1y"` (default), `"2y"`, `"6m"`.
+- `top_n` — number of results (1–50, default 20).
+
+Response fields per result: `symbol`, `name`, `score` ([0,1]), `matchStart`, `matchEnd`, `overlapDays`.
+
+Algorithm: STUMPY MASS sliding-window z-normalized Euclidean distance on cumulative log returns — shape-matching, not level or trend. Score of 1 = perfect shape match; scores above 0.70 are meaningful.
+
+```python
+client.similarity_search("NVDA", universe="sp500+nasdaq100+kospi200", period="1y", top_n=10)
+```
+
+Use the results to surface analogous historical episodes and estimate plausible forward price paths (look at `matchEnd + ~1 month` in those historical series).
+
 ### Read what the user is currently viewing
 
 Use:
@@ -427,6 +452,7 @@ Stateless data + analysis (each has a matching `/agent/api/*` HTTP route):
 - `resolve` — Resolve a free-form query into a TerraFin route. `GET /agent/api/resolve`
 - `market_data` — Chart-ready OHLC time series for one asset. `GET /agent/api/market-data`
 - `indicators` — Chart-matching technical indicators for one asset. `GET /agent/api/indicators`
+- `patterns` — Named market patterns matching the latest bar for one asset. `GET /agent/api/patterns`
 - `market_snapshot` — Compact market snapshot for one asset. `GET /agent/api/market-snapshot`
 - `lppl_analysis` — LPPL bubble analysis (super-exponential growth + log-periodic oscillation detection). `GET /agent/api/lppl`
 - `company_info` — Company profile and valuation fields for a ticker. `GET /agent/api/company`
@@ -439,7 +465,9 @@ Stateless data + analysis (each has a matching `/agent/api/*` HTTP route):
 - `fear_greed` — CNN Fear & Greed index — score, rating, history. `GET /agent/api/fear-greed`
 - `sp500_dcf` — Full S&P 500 DCF valuation (scenarios, sensitivity, methods). `GET /agent/api/sp500-dcf`
 - `beta_estimate` — 5-year monthly beta with adjusted beta, R², benchmark. `GET /agent/api/beta-estimate`
-- `top_companies` — Top companies (market-cap-ranked equity list). `GET /agent/api/top-companies`
+- `fcf_history` — FCF history + 3yr-avg / latest-annual / TTM candidates. `GET /agent/api/fcf-history`
+- `similarity_search` — Chart-pattern similarity search across a stock universe. `GET /agent/api/similarity-search`
+- `top_companies` — Top companies by market cap (private API or yfinance fallback). `GET /agent/api/top-companies`
 - `market_regime` — Market regime classification with confidence and signals. `GET /agent/api/market-regime`
 - `trailing_forward_pe` — S&P 500 trailing vs forward P/E spread (history + summary). `GET /agent/api/trailing-forward-pe`
 - `market_breadth` — Standalone market-breadth metrics (% advancing, new highs, etc.). `GET /agent/api/market-breadth`

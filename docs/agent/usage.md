@@ -164,6 +164,7 @@ Every structured research response includes a top-level `processing` object.
 | Sentiment / breadth | `fear_greed()`, `market_regime()`, `market_breadth()`, `trailing_forward_pe()` |
 | Calendar scan | `calendar_events(year=..., month=..., categories=..., limit=...)` |
 | Bubble analysis | `lppl_analysis(name, depth="auto", view="daily")` |
+| Chart similarity search | `similarity_search(ticker, universe="sp500+nasdaq100+kospi200", period="1y", top_n=20)` |
 | Open chart | `open_chart(...)` when the chart is explicitly useful |
 
 > The full per-capability call signature, parameter ranges, and worked
@@ -265,9 +266,15 @@ Sentiment / breadth / market state:
 - `GET /agent/api/fear-greed` — CNN Fear & Greed index — score, rating, history.
 - `GET /agent/api/market-breadth` — Standalone market-breadth metrics (% advancing, new highs, etc.).
 - `GET /agent/api/market-regime` — Market regime classification with confidence and signals.
-- `GET /agent/api/top-companies` — Top companies (market-cap-ranked equity list).
+- `GET /agent/api/top-companies` — Top companies by market cap (private API or yfinance fallback).
 - `GET /agent/api/trailing-forward-pe` — S&P 500 trailing vs forward P/E spread (history + summary).
 - `GET /agent/api/watchlist` — The user's current watchlist (read-only).
+
+Other:
+
+- `GET /agent/api/fcf-history` — FCF history + 3yr-avg / latest-annual / TTM candidates.
+- `GET /agent/api/patterns` — Named market patterns matching the latest bar for one asset.
+- `GET /agent/api/similarity-search` — Chart-pattern similarity search across a stock universe.
 
 <!-- generated:route-summary:end -->
 

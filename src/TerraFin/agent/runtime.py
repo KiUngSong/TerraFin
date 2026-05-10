@@ -717,13 +717,46 @@ def build_default_capability_registry(
                 response_model_name="BetaEstimateResponse",
             ),
             TerraFinCapability(
+                name="fcf_history",
+                description=(
+                    "Fetch FCF-per-share history and the three candidate base values "
+                    "(3yr_avg, latest_annual, TTM) that the DCF tool's `auto` cascade "
+                    "evaluates. Use this when the user asks which FCF figure is being "
+                    "used in the valuation or wants to inspect historical FCF trends."
+                ),
+                handler=resolved_service.fcf_history,
+                focus_extractor=_focus_from_input_keys("ticker"),
+                backgroundable=True,
+                summary="FCF history + 3yr-avg / latest-annual / TTM candidates.",
+                http_route_path="/agent/api/fcf-history",
+                response_model_name="FcfHistoryResponse",
+            ),
+            TerraFinCapability(
+                name="similarity_search",
+                description=(
+                    "Find stocks whose 1-year price chart most closely resembles the "
+                    "target ticker, ranked by normalized shape similarity. "
+                    "Searches across `universe` (sp500, kospi200, sp500+kospi200, or "
+                    "watchlist). Returns a ranked list of symbols with similarity scores "
+                    "in [0, 1] and the number of overlapping trading days. "
+                    "Computationally heavy — background when possible."
+                ),
+                handler=resolved_service.similarity_search,
+                focus_extractor=_focus_from_input_keys("ticker"),
+                backgroundable=True,
+                summary="Chart-pattern similarity search across a stock universe.",
+                http_route_path="/agent/api/similarity-search",
+                response_model_name="SimilaritySearchResponse",
+            ),
+            TerraFinCapability(
                 name="top_companies",
                 description=(
                     "Fetch the market-insights top-companies list — same data as "
-                    "`/market-insights/api/top-companies`."
+                    "`/market-insights/api/top-companies`. Falls back to a yfinance-"
+                    "computed market-cap ranking when the private API is unavailable."
                 ),
                 handler=resolved_service.top_companies,
-                summary="Top companies (market-cap-ranked equity list).",
+                summary="Top companies by market cap (private API or yfinance fallback).",
                 http_route_path="/agent/api/top-companies",
                 response_model_name="TopCompaniesResponse",
             ),

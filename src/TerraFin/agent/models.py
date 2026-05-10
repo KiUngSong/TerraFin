@@ -289,6 +289,14 @@ class WatchlistResponse(_PermissiveResponse):
     pass
 
 
+class FcfHistoryResponse(_PermissiveResponse):
+    ticker: str | None = None
+
+
+class SimilaritySearchResponse(_PermissiveResponse):
+    ticker: str | None = None
+
+
 class HostedToolDefinitionResponse(BaseModel):
     name: str
     capabilityName: str

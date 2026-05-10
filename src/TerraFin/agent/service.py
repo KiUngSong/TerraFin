@@ -12,7 +12,7 @@ from TerraFin.analytics.analysis.fundamental.screen import run_fundamental_scree
 from TerraFin.analytics.analysis.risk.profile import run_risk_profile
 from TerraFin.analytics.analysis.risk.returns import extract_close_series
 from TerraFin.analytics.analysis.technical import DEFAULT_MFD_WINDOWS
-from TerraFin.data import DataFactory, get_data_factory
+from TerraFin.data import DataFactory, get_data_factory, indicator_registry
 from TerraFin.data.contracts import TimeSeriesDataFrame
 from TerraFin.interface.chart.chart_view import apply_view
 from TerraFin.interface.chart.formatters import build_multi_payload
@@ -617,10 +617,7 @@ class TerraFinAgentService:
                 key=lambda e: e["charCount"],
                 reverse=True,
             )
-            top_hint = ", ".join(
-                f"{e['slug']} ({e['charCount']:,} chars, '{e['text']}')"
-                for e in sorted_entries[:5]
-            )
+            top_hint = ", ".join(f"{e['slug']} ({e['charCount']:,} chars, '{e['text']}')" for e in sorted_entries[:5])
             raise LookupError(
                 f"Section '{sectionSlug}' not found. "
                 f"Do NOT report 'section doesn't exist' — retry this tool with one of the available "
@@ -628,8 +625,7 @@ class TerraFinAgentService:
                 f"If the user asked about earnings/financials/MD&A and no slug matches those names "
                 f"directly, pick the LARGEST slug in Part II — 10-K parsers often leave MD&A and "
                 f"Financial Statements inside an oversized neighbor section. "
-                f"All {len(toc)} available slugs: "
-                + ", ".join(e["slug"] for e in toc)
+                f"All {len(toc)} available slugs: " + ", ".join(e["slug"] for e in toc)
             ) from exc
 
         # Upper bound = next raw TOC entry (by ascending lineIndex), so the body
@@ -964,10 +960,7 @@ class TerraFinAgentService:
             "relative": {
                 "trailingPE": trailing_pe,
                 "forwardPE": forward_pe,
-                "priceToBook": (
-                    round(current_price / bvps, 2)
-                    if current_price and bvps and bvps > 0 else None
-                ),
+                "priceToBook": (round(current_price / bvps, 2) if current_price and bvps and bvps > 0 else None),
             },
             "grahamNumber": graham_number,
             "marginOfSafetyPct": margin_of_safety,
@@ -1047,6 +1040,52 @@ class TerraFinAgentService:
                 view=None,
                 frame=None,
             ),
+        }
+
+    def fcf_history(self, ticker: str, years: int = 10) -> dict[str, Any]:
+        """FCF history candidates — matches `/agent/api/fcf-history`."""
+        from TerraFin.interface.stock.payloads import build_fcf_history_payload
+
+        return build_fcf_history_payload(ticker, years=years)
+
+    def similarity_search(
+        self,
+        ticker: str,
+        universe: str = "sp500+nasdaq100+kospi200",
+        period: str = "1y",
+        top_n: int = 20,
+    ) -> dict[str, Any]:
+        """Chart-pattern similarity search against a universe of stocks."""
+        from TerraFin.analytics.similarity.pool import get_pool
+        from TerraFin.analytics.similarity.scorer import score_pool
+
+        chunk = self._data_factory.get_recent_history(ticker, period=period)
+        if chunk.frame.empty:
+            raise ValueError(f"Insufficient price data for {ticker}")
+        target = chunk.frame.set_index("time")["close"].ffill().dropna()
+        if len(target) < 20:
+            raise ValueError(f"Insufficient price data for {ticker}")
+
+        pool = get_pool(universe)
+        prices = dict(pool.prices())  # copy — don't mutate cached dict
+        prices.pop(ticker, None)
+        results = score_pool(target, prices, names=pool.names(), top_n=top_n)
+        return {
+            "ticker": ticker,
+            "period": period,
+            "pool": pool.info(),
+            "results": [
+                {
+                    "symbol": r.symbol,
+                    "name": r.name,
+                    "score": r.score,
+                    "matchStart": r.match_start,
+                    "matchEnd": r.match_end,
+                    "overlapDays": r.overlap_days,
+                }
+                for r in results
+            ],
+            "count": len(results),
         }
 
     def market_regime(self) -> dict[str, Any]:

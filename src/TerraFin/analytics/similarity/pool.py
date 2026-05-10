@@ -16,6 +16,12 @@ import threading
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+
+if TYPE_CHECKING:
+    import pandas as pd
+
 
 log = logging.getLogger(__name__)
 
@@ -62,6 +68,7 @@ class SimilarityPool:
         combination of the above.
         """
         import csv
+
         from TerraFin.data.reference import UNIVERSES_DIR as universes_dir
         parts = [p.strip() for p in name.split("+")]
         symbols: list[str] = []

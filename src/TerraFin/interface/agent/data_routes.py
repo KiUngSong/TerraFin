@@ -900,6 +900,18 @@ def create_agent_data_router() -> APIRouter:
         except Exception as exc:
             _raise_http_error(exc)
 
+    @router.get(f"{AGENT_API_PREFIX}/similarity-search")
+    def api_agent_similarity_search(
+        ticker: str = Query(..., min_length=1),
+        universe: str = Query(default="sp500+nasdaq100+kospi200", pattern="^(sp500|nasdaq100|kospi200|sp500\\+kospi200|sp500\\+nasdaq100\\+kospi200|watchlist)$"),
+        period: str = Query(default="1y", pattern="^(1y|2y|6m)$"),
+        top_n: int = Query(default=20, ge=1, le=50),
+    ) -> dict:
+        try:
+            return service.similarity_search(ticker=ticker, universe=universe, period=period, top_n=top_n)
+        except Exception as exc:
+            _raise_http_error(exc)
+
     @router.get(f"{AGENT_API_PREFIX}/sp500-dcf")
     def api_agent_sp500_dcf() -> dict:
         try:
