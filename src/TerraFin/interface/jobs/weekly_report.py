@@ -15,15 +15,24 @@ from zoneinfo import ZoneInfo
 log = logging.getLogger(__name__)
 
 
-def _ensure_recent_report() -> None:
+def _ensure_recent_report(tz) -> None:
     from TerraFin.analytics.reports import list_reports
     from TerraFin.analytics.reports.weekly import _last_completed_friday, build_weekly_report
 
-    target = _last_completed_friday()
-    existing = list_reports(limit=8)
-    if any(r.as_of == target.isoformat() for r in existing):
-        return
-    build_weekly_report(as_of=target)
+    now = datetime.now(tz)
+    targets: set = {_last_completed_friday(now=now)}
+    # If booting on Friday at or past 16:30, also cover today — _last_completed_friday
+    # may have returned last week if clock was at 16:29:59 a moment ago.
+    if now.weekday() == 4:
+        close_dt = now.replace(hour=16, minute=30, second=0, microsecond=0)
+        if now >= close_dt:
+            targets.add(now.date())
+
+    existing_dates = {r.as_of for r in list_reports(limit=16)}
+    for target in sorted(targets):
+        if target.isoformat() not in existing_dates:
+            log.info("weekly-report: boot generating missing report for %s", target)
+            build_weekly_report(as_of=target)
 
 
 async def run() -> None:
@@ -37,7 +46,7 @@ async def run() -> None:
     log.info("weekly-report: scheduler enabled (Fri 16:30 ET)")
 
     try:
-        await loop.run_in_executor(None, _ensure_recent_report)
+        await loop.run_in_executor(None, _ensure_recent_report, tz)
     except Exception:
         log.exception("weekly-report: boot generation failed")
 
@@ -52,9 +61,10 @@ async def run() -> None:
             wait = (target - now).total_seconds()
             log.info("weekly-report: next run at %s (%.0fs)", target.isoformat(), wait)
             await asyncio.sleep(wait)
+            fire_date = target.date()
             from TerraFin.analytics.reports.weekly import build_weekly_report
-            await loop.run_in_executor(None, build_weekly_report)
-            log.info("weekly-report: generated")
+            await loop.run_in_executor(None, lambda: build_weekly_report(as_of=fire_date))
+            log.info("weekly-report: generated for %s", fire_date)
         except asyncio.CancelledError:
             raise
         except Exception:
