@@ -402,14 +402,20 @@ def _render(tickers: list[TickerReport], as_of: date, is_sample: bool = False) -
     lines.append("## This Week")
     if biggest:
         tail = " ⚠" if biggest.anomaly_flag else ""
-        lines.append(f"- Biggest mover: **{biggest.symbol}** {biggest.wow['wow_pct']:+.2f}%{tail}")
+        bname = f" ({biggest.name})" if biggest.name and biggest.name != biggest.symbol else ""
+        lines.append(f"- Biggest mover: **{biggest.symbol}**{bname} {biggest.wow['wow_pct']:+.2f}%{tail}")
     if earn_7d:
-        names = ", ".join(f"{t.symbol} ({t.days_to_earnings}d)" for t in earn_7d)
+        names = ", ".join(
+            f"{t.symbol} ({t.name}, {t.days_to_earnings}d)" if t.name and t.name != t.symbol
+            else f"{t.symbol} ({t.days_to_earnings}d)"
+            for t in earn_7d
+        )
         lines.append(f"- Earnings ≤7d (decide hold vs trim into print): {names}")
     elif upcoming:
         nxt = upcoming[0]
+        nname = f" ({nxt.name})" if nxt.name and nxt.name != nxt.symbol else ""
         lines.append(
-            f"- Next catalyst: **{nxt.symbol}** earnings in {nxt.days_to_earnings}d "
+            f"- Next catalyst: **{nxt.symbol}**{nname} earnings in {nxt.days_to_earnings}d "
             f"({nxt.recent_earnings.get('date','?')}, est {nxt.recent_earnings.get('epsEstimate','?')})"
         )
     avgs: dict[str, float] = {}
@@ -447,12 +453,13 @@ def _render(tickers: list[TickerReport], as_of: date, is_sample: bool = False) -
 
 
 def _render_ticker(t: TickerReport) -> str:
+    name_part = f" ({t.name})" if t.name and t.name != t.symbol else ""
     if not t.wow:
-        return f"- **{t.symbol}** — insufficient data\n"
+        return f"- **{t.symbol}**{name_part} — insufficient data\n"
     pct = t.wow["wow_pct"]
     flag = " ⚠" if t.anomaly_flag else ""
     out = [
-        f"- **{t.symbol}**{flag} — WoW: {pct:+.2f}% — {t.wow['last_close']} vs {t.wow['week_ago_close']} "
+        f"- **{t.symbol}**{name_part}{flag} — WoW: {pct:+.2f}% — {t.wow['last_close']} vs {t.wow['week_ago_close']} "
         f"({t.wow['week_ago_date']} → {t.wow['last_date']})"
     ]
     for c in t.catalysts:
