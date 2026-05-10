@@ -30,6 +30,7 @@ import pandas as pd
 
 from TerraFin.data.contracts import HistoryChunk, TimeSeriesDataFrame
 
+
 _logger = logging.getLogger(__name__)
 
 
@@ -255,14 +256,15 @@ class ColumnarTimeSeriesSerializer:
             result.chart_meta = chart_meta
         return result
 
-    def read_recent(self, path: Path, period: str, *, mmap: bool = True) -> tuple[TimeSeriesDataFrame, bool]:
+    def read_recent(self, path: Path, period: str, *, mmap: bool = True, max_age_seconds: int | None = None) -> tuple[TimeSeriesDataFrame, bool]:
         """Return the trailing slice of the artifact covering ``period``.
 
         Returns ``(frame, has_older)`` where ``has_older`` indicates whether
         the artifact contains rows before the slice (i.e. backfill exists).
+        Returns empty frame if artifact is older than ``max_age_seconds``.
         """
         path = Path(path)
-        meta = _read_meta(path)
+        meta = _read_meta(path, max_age_seconds=max_age_seconds)
         if meta is None:
             return TimeSeriesDataFrame.make_empty(), False
         try:

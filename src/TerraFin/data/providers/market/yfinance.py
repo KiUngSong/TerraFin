@@ -204,7 +204,7 @@ def get_yf_recent_history(ticker: str, *, period: str = "3y") -> HistoryChunk:
     serializer = ColumnarTimeSeriesSerializer()
     artifact_dir = _managed_cache_manager().artifact_path(_V2_NAMESPACE, f"{ticker}/full")
     if artifact_dir.exists():
-        recent_frame, has_older = serializer.read_recent(artifact_dir, period)
+        recent_frame, has_older = serializer.read_recent(artifact_dir, period, max_age_seconds=ttl_for("yfinance.full"))
         if not recent_frame.empty:
             normalized = _ts_to_market_frame(recent_frame)
             return _history_chunk_from_frame(
