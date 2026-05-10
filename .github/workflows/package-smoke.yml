@@ -32,3 +32,6 @@ jobs:
 
       - name: Run package smoke test
         run: .venv-smoke/bin/python scripts/package_smoke.py
+
+      - name: Check agent artefacts are up to date
+        run: .venv-smoke/bin/python scripts/generate-agent-artefacts.py --check

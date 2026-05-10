@@ -293,7 +293,7 @@ def _trailing_forward_pe_full_history_backfill(_key: str, *, loaded_start: str |
 
 
 def _spx_gex_frame() -> TimeSeriesDataFrame:
-    from TerraFin.analytics.data.spx_gex_history import get_spx_gex_history
+    from TerraFin.data.providers.market.spx_gex_history import get_spx_gex_history
 
     points = get_spx_gex_history()
     if not points:

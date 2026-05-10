@@ -14,7 +14,7 @@ from TerraFin.data.providers.economic.macro_calendar import get_macro_events_all
 from TerraFin.data.providers.economic.macro_values import enrich_macro_events_all
 from TerraFin.data.providers.private_access.client import PrivateAccessClient
 from TerraFin.data.providers.private_access.config import load_private_access_config
-from TerraFin.data.providers.private_access.fallbacks import get_calendar_fallback, get_market_breadth_fallback
+from TerraFin.data.providers.private_access.fallbacks import get_calendar_fallback, get_market_breadth_fallback, get_top_companies_fallback
 from TerraFin.data.providers.private_access.models import (
     CalendarEvent,
     CalendarResponse,
@@ -193,7 +193,7 @@ _PANEL_SPECS: tuple[CachePayloadSpec, ...] = (
         key="companies",
         ttl_seconds=ttl_for(SRC_TOP_COMPANIES),
         fetch_fn=_load_top_companies_panel,
-        fallback_fn=lambda: [],
+        fallback_fn=get_top_companies_fallback,
     ),
 )
 

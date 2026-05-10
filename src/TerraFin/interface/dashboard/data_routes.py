@@ -476,7 +476,7 @@ def create_dashboard_data_router() -> APIRouter:
 
     @router.get(f"{DASHBOARD_API_PREFIX}/spx-gex-history", response_model=SpxGexHistoryResponse)
     def api_get_spx_gex_history(force: bool = Query(default=False)):
-        from TerraFin.analytics.data.spx_gex_history import get_spx_gex_history
+        from TerraFin.data.providers.market.spx_gex_history import get_spx_gex_history
 
         points = get_spx_gex_history(force_refresh=force)
         return SpxGexHistoryResponse(

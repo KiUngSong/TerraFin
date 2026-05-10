@@ -4,6 +4,7 @@ import pandas as pd
 
 from TerraFin.env import apply_api_keys
 
+from .cache.registry import get_cache_manager
 from .contracts import (
     EventList,
     FilingDocument,
@@ -20,7 +21,6 @@ from .providers.economic import get_economic_indicator, get_fred_data
 from .providers.economic.macro_calendar import get_macro_events_all
 from .providers.market import INDEX_MAP, MARKET_INDICATOR_REGISTRY, get_market_data
 from .providers.market.yfinance import get_yf_data, get_yf_full_history_backfill, get_yf_recent_history
-from .cache.registry import get_cache_manager
 from .providers.private_access import PRIVATE_SERIES, get_private_series_current
 from .providers.private_access.panels import (
     PANEL_SOURCES,
@@ -54,9 +54,7 @@ class DataFactory:
     ) -> TimeSeriesDataFrame:
         """Validate that providers return TimeSeriesDataFrame; assign default name if missing."""
         if not isinstance(data, TimeSeriesDataFrame):
-            raise TypeError(
-                f"Provider {source_name} returned {type(data).__name__}, expected TimeSeriesDataFrame"
-            )
+            raise TypeError(f"Provider {source_name} returned {type(data).__name__}, expected TimeSeriesDataFrame")
         if not data.name:
             data.name = source_name.split(":", 1)[-1]
         return data
@@ -254,9 +252,7 @@ class DataFactory:
                 logger.exception("Falling back to full history slice for %s", name)
         return self._fallback_backfill_history(name, loaded_start, source_name=f"auto:{name}")
 
-    def get_corporate_data(
-        self, ticker: str, statement_type: str = "income", period: str = "annual"
-    ):
+    def get_corporate_data(self, ticker: str, statement_type: str = "income", period: str = "annual"):
         """Get corporate data — returns a FinancialStatementFrame."""
         return get_corporate_data(ticker, statement_type, period=period)
 
