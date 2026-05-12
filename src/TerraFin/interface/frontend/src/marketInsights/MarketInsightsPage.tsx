@@ -438,6 +438,7 @@ const MarketInsightsPage: React.FC = () => {
                   <PortfolioHoldingDetails
                     guru={positioning?.guru || selectedGuru}
                     period={positioning?.info?.Period}
+                    sourceUrl={positioning?.info?.Source}
                     rows={positioning?.rows || []}
                     topHoldings={positioning?.topHoldings || []}
                     activeRow={activeHolding}

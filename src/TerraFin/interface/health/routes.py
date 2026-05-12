@@ -127,14 +127,72 @@ async def _probe_signals_provider() -> dict[str, Any]:
 # --- Aggregation + caching -------------------------------------------------
 
 
+async def _probe_private_data() -> dict[str, Any]:
+    """Check DataFactory private data freshness.
+
+    Fetches fear-greed /current and verifies as_of is within 3 calendar days.
+    Catches the case where CNN bot-detection broke the DataFactory scraper
+    and history silently went stale.
+    """
+    try:
+        from TerraFin.configuration import load_terrafin_config
+        cfg = load_terrafin_config()
+        src = cfg.private_access
+        endpoint = src.endpoint or ""
+        access_key = src.access_key or "X-API-Key"
+        access_value = src.access_value or ""
+    except Exception:
+        endpoint = os.environ.get("TERRAFIN_PRIVATE_SOURCE_ENDPOINT", "")
+        access_key = os.environ.get("TERRAFIN_PRIVATE_SOURCE_ACCESS_KEY", "X-API-Key")
+        access_value = os.environ.get("TERRAFIN_PRIVATE_SOURCE_ACCESS_VALUE", "")
+
+    if not endpoint:
+        return {"status": "down", "detail": "TERRAFIN_PRIVATE_SOURCE_ENDPOINT not set"}
+
+    headers = {access_key: access_value} if access_key and access_value else {}
+    try:
+        import httpx
+        from datetime import datetime, timezone, timedelta
+
+        async with httpx.AsyncClient(timeout=_PROBE_TIMEOUT) as client:
+            r = await client.get(f"{endpoint.rstrip('/')}/series/fear-greed/current", headers=headers)
+        if r.status_code != 200:
+            return {"status": "down", "detail": f"DataFactory HTTP {r.status_code}"}
+        data = r.json()
+    except asyncio.TimeoutError:
+        return {"status": "down", "detail": f"DataFactory timeout >{_PROBE_TIMEOUT}s"}
+    except Exception as exc:
+        return {"status": "down", "detail": f"DataFactory error: {exc}"}
+
+    as_of_str = data.get("as_of") or ""
+    score = data.get("value")
+    detail = f"F&G {score} · as_of {as_of_str[:10] if as_of_str else '?'}"
+
+    if not as_of_str:
+        return {"status": "degraded", "detail": f"{detail} (no timestamp — staleness unknown)"}
+
+    try:
+        as_of = datetime.fromisoformat(as_of_str.replace("Z", "+00:00"))
+        age_days = (datetime.now(timezone.utc) - as_of).days
+        if age_days > 3:
+            return {"status": "degraded", "detail": f"{detail} — {age_days}d stale (scraper may be blocked)"}
+    except Exception:
+        return {"status": "degraded", "detail": f"{detail} (unparseable timestamp)"}
+
+    return {"status": "ok", "detail": detail}
+
+
 async def _gather_snapshot() -> dict[str, Any]:
     agent = _probe_agent()
-    telegram, signals = await asyncio.gather(_probe_telegram(), _probe_signals_provider())
+    telegram, signals, private_data = await asyncio.gather(
+        _probe_telegram(), _probe_signals_provider(), _probe_private_data()
+    )
     rank = {"ok": 0, "starting": 0, "degraded": 1, "down": 2}
     overall = max(
         rank.get(agent["status"], 2),
         rank.get(telegram["status"], 2),
         rank.get(signals["status"], 2),
+        rank.get(private_data["status"], 2),
     )
     overall_label = {0: "ok", 1: "degraded", 2: "down"}[overall]
     return {
@@ -144,6 +202,7 @@ async def _gather_snapshot() -> dict[str, Any]:
             "agent": agent,
             "telegram": telegram,
             "signals": signals,
+            "private_data": private_data,
         },
     }
 

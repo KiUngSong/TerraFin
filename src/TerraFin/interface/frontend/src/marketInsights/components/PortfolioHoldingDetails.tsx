@@ -16,6 +16,7 @@ import {
 interface PortfolioHoldingDetailsProps {
   guru: string;
   period?: string;
+  sourceUrl?: string;
   rows: PortfolioHoldingRow[];
   topHoldings: PortfolioHoldingRow[];
   activeRow: PortfolioHoldingRow | null;
@@ -46,6 +47,7 @@ const DESKTOP_SUMMARY_MIN_HEIGHT = 112;
 const PortfolioHoldingDetails: React.FC<PortfolioHoldingDetailsProps> = ({
   guru,
   period,
+  sourceUrl,
   rows,
   topHoldings,
   activeRow,
@@ -190,16 +192,34 @@ const PortfolioHoldingDetails: React.FC<PortfolioHoldingDetailsProps> = ({
               {guru || 'Investor Positioning'}
             </div>
           </div>
-            <div
-              style={{
-                fontSize: 10,
-                fontWeight: 700,
-                color: '#475569',
-                whiteSpace: isMobile ? 'normal' : 'nowrap',
-                textAlign: 'right',
-              }}
-            >
-              {period || 'Latest filing'}
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 3 }}>
+              <div
+                style={{
+                  fontSize: 10,
+                  fontWeight: 700,
+                  color: '#475569',
+                  whiteSpace: isMobile ? 'normal' : 'nowrap',
+                  textAlign: 'right',
+                }}
+              >
+                {period || 'Latest filing'}
+              </div>
+              {sourceUrl && (
+                <a
+                  href={sourceUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={{
+                    fontSize: 10,
+                    fontWeight: 700,
+                    color: '#1d4ed8',
+                    textDecoration: 'none',
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  View on EDGAR ↗
+                </a>
+              )}
             </div>
           </div>
 
