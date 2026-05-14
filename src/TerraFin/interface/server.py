@@ -9,7 +9,6 @@ import subprocess
 import sys
 import time
 from contextlib import asynccontextmanager
-from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -58,10 +57,11 @@ from TerraFin.interface.dashboard.routes import DASHBOARD_PATH, create_dashboard
 from TerraFin.interface.errors import AppRuntimeError, build_error_response
 from TerraFin.interface.frontend_assets import FrontendBuildError, validate_frontend_build
 from TerraFin.interface.health import create_health_router
-from TerraFin.interface.market_insights.data_routes import create_market_insights_data_router
-from TerraFin.interface.market_insights.routes import create_market_insights_router
 from TerraFin.interface.jobs import watchlist_refresh as _job_watchlist_refresh
 from TerraFin.interface.jobs import weekly_report as _job_weekly_report
+from TerraFin.interface.jobs import get_registered_jobs, load_entry_point_jobs
+from TerraFin.interface.market_insights.data_routes import create_market_insights_data_router
+from TerraFin.interface.market_insights.routes import create_market_insights_router
 from TerraFin.interface.monitor.heartbeat import registration_heartbeat
 from TerraFin.interface.monitor.http_provider import get_signal_provider_from_env
 from TerraFin.interface.monitor.routes import create_signals_router
@@ -80,7 +80,6 @@ SERVER_LOG_FILE = ROOT_DIR / "interface_server.log"
 
 def get_runtime_config():
     return load_runtime_config()
-
 
 
 def create_app(initial_data: TimeSeriesDataFrame | None = None, base_path: str = "") -> FastAPI:
@@ -108,10 +107,14 @@ def create_app(initial_data: TimeSeriesDataFrame | None = None, base_path: str =
         cache_manager = get_cache_manager()
         cache_manager.start()
 
+        load_entry_point_jobs()
+
         jobs: list[asyncio.Task] = [
             asyncio.create_task(_job_watchlist_refresh.run(), name="watchlist-refresh"),
             asyncio.create_task(_job_weekly_report.run(), name="weekly-report"),
         ]
+        for name, coro_fn in get_registered_jobs():
+            jobs.append(asyncio.create_task(coro_fn(), name=name))
         signal_provider = get_signal_provider_from_env()
         if signal_provider is not None:
             jobs.append(asyncio.create_task(registration_heartbeat(signal_provider), name="signal-heartbeat"))
