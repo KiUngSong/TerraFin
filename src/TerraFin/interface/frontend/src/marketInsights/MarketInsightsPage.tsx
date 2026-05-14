@@ -38,6 +38,7 @@ interface GuruListPayload {
 interface FilingSummary {
   filing_date: string;
   period: string;
+  accession: string;
 }
 
 const INVESTOR_POSITIONING_PANEL_HEIGHT = 520;
@@ -58,7 +59,7 @@ const MarketInsightsPage: React.FC = () => {
   const [isGexOpen, setIsGexOpen] = useState(false);
   const { data: gexData, loading: gexLoading, error: gexError } = useGex('SPX');
   const [filingHistory, setFilingHistory] = useState<FilingSummary[]>([]);
-  const [selectedFilingDate, setSelectedFilingDate] = useState<string | null>(null);
+  const [selectedAccession, setSelectedAccession] = useState<string | null>(null);
 
   useEffect(() => {
     if (!macroChartReady) return;
@@ -104,14 +105,14 @@ const MarketInsightsPage: React.FC = () => {
   useEffect(() => {
     if (!selectedGuru || !investorPositioningEnabled) {
       setFilingHistory([]);
-      setSelectedFilingDate(null);
+      setSelectedAccession(null);
       return;
     }
     fetch(`/market-insights/api/investor-positioning/history?guru=${encodeURIComponent(selectedGuru)}`)
       .then((res) => (res.ok ? res.json() : Promise.reject(new Error(`${res.status}`))))
       .then((data: { filings?: FilingSummary[] }) => setFilingHistory(data.filings || []))
       .catch(() => setFilingHistory([]));
-    setSelectedFilingDate(null);
+    setSelectedAccession(null);
   }, [investorPositioningEnabled, selectedGuru]);
 
   useEffect(() => {
@@ -122,15 +123,15 @@ const MarketInsightsPage: React.FC = () => {
     }
     setActiveHoldingKey(null);
     setIsLoading(true);
-    const url = selectedFilingDate
-      ? `/market-insights/api/investor-positioning/holdings?guru=${encodeURIComponent(selectedGuru)}&filing_date=${encodeURIComponent(selectedFilingDate)}`
+    const url = selectedAccession
+      ? `/market-insights/api/investor-positioning/holdings?guru=${encodeURIComponent(selectedGuru)}&accession=${encodeURIComponent(selectedAccession)}`
       : `/market-insights/api/investor-positioning/holdings?guru=${encodeURIComponent(selectedGuru)}`;
     fetch(url)
       .then((res) => (res.ok ? res.json() : Promise.reject(new Error(`${res.status}`))))
       .then((payload: InvestorPositioningPayload) => setPositioning(payload))
       .catch(() => setPositioning(null))
       .finally(() => setIsLoading(false));
-  }, [investorPositioningEnabled, macroChartReady, selectedGuru, selectedFilingDate]);
+  }, [investorPositioningEnabled, macroChartReady, selectedGuru, selectedAccession]);
 
   useEffect(() => {
     if (!activeHoldingKey) {
@@ -265,39 +266,31 @@ const MarketInsightsPage: React.FC = () => {
           </div>
         </div>
 
-        <InsightCard
+        <AdditionalFeatureToggle
           title="S&P 500 DCF"
           subtitle="Year-end target valuation range for the S&P 500."
-          allowOverflow
-          minHeight={sp500DcfOpen ? 156 : 96}
-        >
-          <div style={{ display: 'grid', gap: 12 }}>
-            <button
-              type="button"
-              onClick={() => setSp500DcfOpen((current) => !current)}
-              style={dcfToggleButtonStyle(sp500DcfOpen)}
-              aria-expanded={sp500DcfOpen}
-            >
-              <span>{sp500DcfOpen ? 'Hide S&P 500 DCF' : 'Show S&P 500 DCF'}</span>
-              <span style={{ fontSize: 15, lineHeight: 1 }}>{sp500DcfOpen ? '−' : '+'}</span>
-            </button>
-            {sp500DcfOpen ? (
-              <DcfWorkbench
-                mode="index"
-                endpoint="/market-insights/api/dcf/sp500"
-              />
-            ) : null}
-          </div>
-        </InsightCard>
-
-        <AdditionalFeatureToggle
-          title="SPX Gamma Exposure"
-          subtitle="Dealer net gamma positioning history (SqueezeMetrics, 2011–present). Long gamma suppresses volatility; short gamma amplifies it."
-          open={isGexOpen}
-          onToggle={() => setIsGexOpen((prev) => !prev)}
+          open={sp500DcfOpen}
+          onToggle={() => setSp500DcfOpen((prev) => !prev)}
         />
-        {isGexOpen && (
-          <SpxGexSnapshotCard data={gexData} loading={gexLoading} error={gexError} />
+        {sp500DcfOpen && (
+          <DcfWorkbench
+            mode="index"
+            endpoint="/market-insights/api/dcf/sp500"
+          />
+        )}
+
+        {!gexLoading && !gexError && gexData?.available === true && (
+          <>
+            <AdditionalFeatureToggle
+              title="SPX Gamma Exposure"
+              subtitle="Dealer net gamma positioning history (SqueezeMetrics, 2011–present). Long gamma suppresses volatility; short gamma amplifies it."
+              open={isGexOpen}
+              onToggle={() => setIsGexOpen((prev) => !prev)}
+            />
+            {isGexOpen && (
+              <SpxGexSnapshotCard data={gexData} loading={gexLoading} error={gexError} />
+            )}
+          </>
         )}
 
         <InsightCard title="Investor Positioning" subtitle="Guru portfolio concentration and top holdings.">
@@ -334,8 +327,8 @@ const MarketInsightsPage: React.FC = () => {
                   </label>
                   <select
                     id="period-selector"
-                    value={selectedFilingDate ?? ''}
-                    onChange={(e) => setSelectedFilingDate(e.target.value || null)}
+                    value={selectedAccession ?? ''}
+                    onChange={(e) => setSelectedAccession(e.target.value || null)}
                     disabled={isLoading || filingHistory.length === 0}
                     style={{
                       border: '1px solid #cbd5e1',
@@ -354,7 +347,7 @@ const MarketInsightsPage: React.FC = () => {
                       <>
                         <option value="">{filingHistory[0].period}</option>
                         {filingHistory.slice(1).map((f) => (
-                          <option key={f.filing_date} value={f.filing_date}>
+                          <option key={f.accession} value={f.accession}>
                             {f.period}
                           </option>
                         ))}
@@ -454,22 +447,5 @@ const MarketInsightsPage: React.FC = () => {
   );
 };
 
-function dcfToggleButtonStyle(open: boolean): React.CSSProperties {
-  return {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 12,
-    width: '100%',
-    borderRadius: 12,
-    border: '1px solid #cbd5e1',
-    background: open ? '#eff6ff' : '#ffffff',
-    color: '#0f172a',
-    padding: '12px 14px',
-    fontSize: 13,
-    fontWeight: 700,
-    cursor: 'pointer',
-  };
-}
 
 export default MarketInsightsPage;

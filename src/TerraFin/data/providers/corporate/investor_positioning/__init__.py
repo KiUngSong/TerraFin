@@ -41,16 +41,22 @@ def get_investor_positioning_capability() -> InvestorPositioningCapability:
     )
 
 
-def get_portfolio_data(guru_name: str, filing_date: str | None = None) -> PortfolioOutput:
+def get_portfolio_data(
+    guru_name: str,
+    filing_date: str | None = None,
+    *,
+    accession: str | None = None,
+) -> PortfolioOutput:
     """Get portfolio data for a guru via SEC EDGAR 13F.
 
-    When filing_date is None, returns the latest filing (fast path, 1 XML).
-    When filing_date is given, fetches exactly that quarter + previous (2 XMLs).
+    When neither is given, returns the latest filing (fast path, 1 XML).
+    Prefer ``accession`` over ``filing_date`` — multiple periods can share a
+    filing date (batch amendments), so accession is the unambiguous key.
     """
-    if filing_date is None:
-        info, rows = get_guru_holdings(guru_name)
+    if accession is not None or filing_date is not None:
+        info, rows = get_guru_holdings_for_date(guru_name, filing_date, accession=accession)
     else:
-        info, rows = get_guru_holdings_for_date(guru_name, filing_date)
+        info, rows = get_guru_holdings(guru_name)
     df = PortfolioDataFrame(pd.DataFrame(rows))
     df.guru_name = guru_name
     return PortfolioOutput(info=info, df=df)

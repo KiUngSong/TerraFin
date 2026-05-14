@@ -95,10 +95,11 @@ def create_market_insights_data_router() -> APIRouter:
     )
     def api_get_investor_positioning_holdings(
         guru: str = Query(..., min_length=1),
+        accession: str | None = Query(default=None),
         filing_date: str | None = Query(default=None),
     ):
         try:
-            output = get_data_factory().get_portfolio_data(guru, filing_date=filing_date)
+            output = get_data_factory().get_portfolio_data(guru, filing_date=filing_date, accession=accession)
         except Exception as exc:
             _raise_investor_positioning_error(exc, guru=guru)
         rows = output.df.to_dict(orient="records")
@@ -121,7 +122,7 @@ def create_market_insights_data_router() -> APIRouter:
             history = get_portfolio_history_data(guru)
         except Exception as exc:
             _raise_investor_positioning_error(exc, guru=guru)
-        filings = [{"filing_date": entry["filing_date"], "period": entry["period"]} for entry in history]
+        filings = [{"filing_date": entry["filing_date"], "period": entry["period"], "accession": entry["accession"]} for entry in history]
         if len(history) > 2:
             await _submit_prefetch(guru, history[2:])
         return {"filings": filings}

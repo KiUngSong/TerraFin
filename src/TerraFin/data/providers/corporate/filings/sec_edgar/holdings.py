@@ -81,32 +81,35 @@ def _get_sec_json(url: str, host_url: str = "data.sec.gov") -> dict:
         raise ValueError(f"SEC EDGAR returned non-JSON response for {url}") from exc
 
 
-def _iter_13f_from_block(block: dict) -> list[tuple[str, str]]:
-    """Extract (accession, filing_date) pairs from a submissions block."""
+def _iter_13f_from_block(block: dict) -> list[tuple[str, str, str]]:
+    """Extract (accession, filing_date, report_date) triples from a submissions block."""
     forms = block.get("form") or []
     accessions = block.get("accessionNumber") or []
     dates = block.get("filingDate") or []
-    # SEC JSON blocks keep parallel arrays; truncate to the shortest length to
-    # stay safe if the upstream response is ever malformed.
+    report_dates = block.get("reportDate") or []
     n = min(len(forms), len(accessions), len(dates))
     if n < max(len(forms), len(accessions), len(dates)):
         log.warning("SEC submissions block has misaligned column lengths; truncating to %d rows", n)
-    return [(accessions[i], dates[i]) for i in range(n) if forms[i] in _FILING_FORMS_13F]
+    return [
+        (accessions[i], dates[i], report_dates[i] if i < len(report_dates) else dates[i])
+        for i in range(n) if forms[i] in _FILING_FORMS_13F
+    ]
 
 
-def _find_latest_13f(cik: int, count: int = 1) -> list[tuple[str, str]]:
-    """Find the latest *count* 13F-HR filings. Returns [(accession, filing_date), ...].
+def _find_latest_13f(cik: int, count: int = 1) -> list[tuple[str, str, str]]:
+    """Find the latest *count* unique-period 13F filings.
 
-    Searches the `recent` block first and falls back to paginated history files
-    only when recent yields fewer than *count* hits (rare for active filers).
+    Returns [(accession, filing_date, report_date), ...] newest first.
+    Amendments (13F-HR/A) supersede the original for the same report_date;
+    only one entry per report_date is kept (the one with the latest filing_date).
     """
     url = f"https://data.sec.gov/submissions/CIK{str(cik).zfill(10)}.json"
     data = _get_sec_json(url)
 
     filings = data.get("filings", {})
-    results = _iter_13f_from_block(filings.get("recent", {}))
+    raw = _iter_13f_from_block(filings.get("recent", {}))
 
-    if len(results) < count:
+    if len(raw) < count:
         for file_info in filings.get("files", []) or []:
             name = file_info.get("name")
             if not name:
@@ -116,13 +119,19 @@ def _find_latest_13f(cik: int, count: int = 1) -> list[tuple[str, str]]:
             except (requests.RequestException, ValueError) as exc:
                 log.warning("Failed to load historical submissions file %s for CIK %s: %s", name, cik, exc)
                 continue
-            results.extend(_iter_13f_from_block(history))
-            if len(results) >= count:
-                break
+            raw.extend(_iter_13f_from_block(history))
 
-    if not results:
+    if not raw:
         raise ValueError(f"No 13F filing found for CIK {cik}")
-    return results[:count]
+
+    # Deduplicate by report_date: keep the latest filing per period (amendment wins).
+    seen: dict[str, tuple[str, str, str]] = {}
+    for acc, fd, rd in raw:
+        if rd not in seen or fd > seen[rd][1]:
+            seen[rd] = (acc, fd, rd)
+    # Sort by report_date descending (newest period first).
+    deduped = sorted(seen.values(), key=lambda x: x[2], reverse=True)
+    return deduped[:count]
 
 
 def _find_infotable_url(cik: int, accession: str) -> str:
@@ -315,8 +324,8 @@ def _ensure_index_registered(guru_name: str, cik: int) -> str:
                 key=f"{guru_name}__index",
                 ttl_seconds=ttl_for("portfolio.index"),
                 fetch_fn=lambda c=cik: [
-                    {"accession": acc, "filing_date": fd}
-                    for acc, fd in _find_latest_13f(c, count=_HISTORY_QUARTERS)
+                    {"accession": acc, "filing_date": fd, "report_date": rd}
+                    for acc, fd, rd in _find_latest_13f(c, count=_HISTORY_QUARTERS)
                 ],
             )
         )
@@ -374,22 +383,42 @@ def get_guru_filings_index(guru_name: str) -> list[dict]:
     result = []
     for entry in filings_index:
         filing_date = entry["filing_date"]
+        # Use report_date (quarter-end) for the period label; fall back to
+        # filing_date for older cached entries that pre-date this field.
+        period_date = entry.get("report_date") or filing_date
         try:
-            d = datetime.strptime(filing_date, "%Y-%m-%d")
+            d = datetime.strptime(period_date, "%Y-%m-%d")
             period = f"Q{(d.month - 1) // 3 + 1} {d.year}"
         except ValueError:
-            period = filing_date
-        result.append({"filing_date": filing_date, "period": period, "accession": entry["accession"]})
+            period = period_date
+        result.append({
+            "filing_date": filing_date,
+            "period": period,
+            "accession": entry["accession"],
+            "_sort_key": period_date,
+        })
+    result.sort(key=lambda x: x["_sort_key"], reverse=True)
+    for r in result:
+        r.pop("_sort_key")
     return result
 
 
-def get_guru_holdings_for_date(guru_name: str, filing_date: str) -> tuple[dict, list[dict]]:
-    """Fetch holdings for a specific filing date. Downloads exactly 2 XMLs (target + previous quarter).
+def get_guru_holdings_for_date(
+    guru_name: str,
+    filing_date: str | None = None,
+    *,
+    accession: str | None = None,
+) -> tuple[dict, list[dict]]:
+    """Fetch holdings for a specific filing. Downloads exactly 2 XMLs (target + previous quarter).
 
-    Uses the cached index to locate accession numbers without re-hitting EDGAR.
+    Prefer ``accession`` (guaranteed unique per period). Falls back to ``filing_date``
+    for backward-compat, but multiple periods can share a filing_date (e.g. batch
+    amendments), so that lookup is ambiguous and returns the first match.
     """
     if guru_name not in GURU_CIK:
         raise ValueError(f"Unknown guru: {guru_name}. Available: {list(GURU_CIK.keys())}")
+    if accession is None and filing_date is None:
+        raise ValueError("Either accession or filing_date must be provided")
 
     from TerraFin.data.cache.registry import get_cache_manager
 
@@ -397,12 +426,18 @@ def get_guru_holdings_for_date(guru_name: str, filing_date: str) -> tuple[dict, 
     source = _ensure_index_registered(guru_name, cik)
     filings_index = get_cache_manager().get_payload(source).payload or []
 
-    target_idx = next((i for i, e in enumerate(filings_index) if e["filing_date"] == filing_date), None)
-    if target_idx is None:
-        raise ValueError(f"No 13F filing found for {guru_name} on {filing_date}")
+    if accession is not None:
+        target_idx = next((i for i, e in enumerate(filings_index) if e["accession"] == accession), None)
+        if target_idx is None:
+            raise ValueError(f"No 13F filing found for {guru_name} with accession {accession}")
+    else:
+        target_idx = next((i for i, e in enumerate(filings_index) if e["filing_date"] == filing_date), None)
+        if target_idx is None:
+            raise ValueError(f"No 13F filing found for {guru_name} on {filing_date}")
 
     entry = filings_index[target_idx]
-    raw = _fetch_or_cached_raw(cik, guru_name, entry["accession"], filing_date)
+    entry_filing_date = entry["filing_date"]
+    raw = _fetch_or_cached_raw(cik, guru_name, entry["accession"], entry_filing_date)
 
     previous: dict[str, dict] | None = None
     if target_idx + 1 < len(filings_index):
@@ -412,14 +447,15 @@ def get_guru_holdings_for_date(guru_name: str, filing_date: str) -> tuple[dict, 
         except (requests.RequestException, ValueError) as exc:
             log.warning("Failed to fetch previous quarter for %s: %s; activity blank", guru_name, exc)
 
+    period_date = entry.get("report_date") or entry_filing_date
     try:
-        d = datetime.strptime(filing_date, "%Y-%m-%d")
+        d = datetime.strptime(period_date, "%Y-%m-%d")
         period = f"Q{(d.month - 1) // 3 + 1} {d.year}"
     except ValueError:
-        period = filing_date
+        period = period_date
 
     source_url = f"https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK={cik}&type=13F"
-    info = {"Period": period, "Portfolio Date": filing_date, "Source": source_url}
+    info = {"Period": period, "Portfolio Date": entry_filing_date, "Source": source_url}
     rows = _format_rows(raw, previous)
     return info, rows
 
@@ -454,11 +490,12 @@ def get_guru_holdings_history(guru_name: str) -> list[dict]:
         except (requests.RequestException, ValueError, DefusedXmlException) as exc:
             log.warning("Failed to fetch 13F for %s/%s: %s; using empty", guru_name, filing_date, exc)
             raw = {}
+        period_date = entry.get("report_date") or filing_date
         try:
-            d = datetime.strptime(filing_date, "%Y-%m-%d")
+            d = datetime.strptime(period_date, "%Y-%m-%d")
             period = f"Q{(d.month - 1) // 3 + 1} {d.year}"
         except ValueError:
-            period = filing_date
+            period = period_date
         all_raw.append((raw, accession, filing_date, period))
 
     # Build sparklines across all quarters
@@ -500,26 +537,27 @@ def get_guru_holdings(guru_name: str) -> tuple[dict, list[dict]]:
         _HISTORY_NAMESPACE, f"{guru_name}__index", ttl_for("portfolio.index")
     )
     if cached_index and len(cached_index) >= 1:
-        entries = [(e["accession"], e["filing_date"]) for e in cached_index[:2]]
+        entries = [(e["accession"], e["filing_date"], e.get("report_date")) for e in cached_index[:2]]
     else:
         entries = _find_latest_13f(cik, count=2)
 
-    accession, filing_date = entries[0]
+    accession, filing_date, report_date = entries[0]
     raw = _fetch_or_cached_raw(cik, guru_name, accession, filing_date)
 
     previous: dict[str, dict] | None = None
     if len(entries) >= 2:
-        prev_accession, prev_filing_date = entries[1]
+        prev_accession, prev_filing_date, _ = entries[1]
         try:
             previous = _fetch_or_cached_raw(cik, guru_name, prev_accession, prev_filing_date)
         except (requests.RequestException, ValueError) as exc:
             log.warning("Failed to fetch previous quarter for %s: %s; activity blank", guru_name, exc)
 
+    period_date = report_date or filing_date
     try:
-        d = datetime.strptime(filing_date, "%Y-%m-%d")
+        d = datetime.strptime(period_date, "%Y-%m-%d")
         period = f"Q{(d.month - 1) // 3 + 1} {d.year}"
     except ValueError:
-        period = filing_date
+        period = period_date
 
     source_url = f"https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK={cik}&type=13F"
     info = {"Period": period, "Portfolio Date": filing_date, "Source": source_url}

@@ -256,9 +256,15 @@ class DataFactory:
         """Get corporate data — returns a FinancialStatementFrame."""
         return get_corporate_data(ticker, statement_type, period=period)
 
-    def get_portfolio_data(self, guru_name: str, filing_date: str | None = None) -> PortfolioOutput:
+    def get_portfolio_data(
+        self,
+        guru_name: str,
+        filing_date: str | None = None,
+        *,
+        accession: str | None = None,
+    ) -> PortfolioOutput:
         """Get portfolio data from the data layer."""
-        return get_portfolio_data(guru_name, filing_date=filing_date)
+        return get_portfolio_data(guru_name, filing_date=filing_date, accession=accession)
 
     def get_filing(self, ticker: str, filing_type: str = "10-K") -> FilingDocument:
         """Return a parsed SEC filing as a FilingDocument."""
