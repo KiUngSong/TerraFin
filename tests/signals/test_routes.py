@@ -1,16 +1,14 @@
 """Tests for signal route helpers — proxy header handling, status codes."""
-from __future__ import annotations
 
-import hashlib
-import hmac
 from unittest.mock import MagicMock
 
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from TerraFin.interface.signals import webhook as wh
-from TerraFin.interface.signals.routes import _client_id, create_alerting_router
+from TerraFin.interface.monitor import webhook as wh
+from TerraFin.interface.monitor.routes import _client_id
+from TerraFin.interface.monitor.routes import create_signals_router as create_alerting_router
 
 
 @pytest.fixture(autouse=True)
@@ -108,25 +106,5 @@ def test_unauth_requests_do_not_pollute_rate_bucket(monkeypatch):
             headers={"x-signature": "deadbeef"},
         )
         assert resp.status_code == 401
-    # Round-3 invariant: unauth requests must not allocate any rate bucket
+    # Unauth requests must not allocate any rate bucket
     assert not wh._rate_buckets
-
-
-def test_legacy_alerting_path_still_routes(monkeypatch):
-    monkeypatch.setenv("TERRAFIN_SIGNALS_WEBHOOK_SECRET", "s3cret")
-    sent: list = []
-    monkeypatch.setattr(
-        "TerraFin.interface.signals.routes.forward_to_telegram",
-        lambda s: sent.append(s),
-    )
-    client = _client_with_router()
-    body = b'{"ticker":"AAPL","signal":"x"}'
-    sig = hmac.new(b"s3cret", body, hashlib.sha256).hexdigest()
-    resp = client.post(
-        "/alerting/api/signal",
-        content=body,
-        headers={"x-signature": sig, "content-type": "application/json"},
-    )
-    assert resp.status_code == 200
-    assert resp.json()["status"] == "ok"
-    assert len(sent) == 1

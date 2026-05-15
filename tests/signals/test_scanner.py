@@ -2,49 +2,44 @@
 import pandas as pd
 import pytest
 
-from TerraFin.signals.alerting.conditions import Signal
+from TerraFin.analytics.analysis.patterns import Signal
 
 
 def _make_ohlc(closes: list[float]) -> pd.DataFrame:
-    return pd.DataFrame({"close": closes})
+    return pd.DataFrame({
+        "open": closes, "high": closes, "low": closes,
+        "close": closes, "volume": [1_000_000] * len(closes),
+    })
 
 
 def test_scan_empty_watchlist(monkeypatch):
-    from TerraFin.signals.alerting import scanner as scanner_mod
+    import TerraFin.analytics.reports.scanner as sm
 
     class _FakeSvc:
         def get_watchlist_snapshot(self, group=None):
             return []
 
-    monkeypatch.setattr(scanner_mod, "get_watchlist_service", lambda: _FakeSvc())
-    from TerraFin.signals.alerting.scanner import scan
-
-    result = scan()
-    assert result == []
+    monkeypatch.setattr(sm, "get_watchlist_service", lambda: _FakeSvc())
+    assert sm.scan() == []
 
 
 def test_scan_returns_signals_for_items(monkeypatch):
-    from TerraFin.signals.alerting import scanner as scanner_mod
-    import TerraFin.signals.alerting.scanner as sm
+    import TerraFin.analytics.reports.scanner as sm
 
     class _FakeSvc:
         def get_watchlist_snapshot(self, group=None):
             return [{"symbol": "AAPL", "name": "Apple", "move": "+1%", "tags": []}]
 
-    rises = [100.0 + i * 2 for i in range(50)]
-    monkeypatch.setattr(scanner_mod, "get_watchlist_service", lambda: _FakeSvc())
-    monkeypatch.setattr(sm, "_fetch_ohlc", lambda ticker: _make_ohlc(rises))
+    monkeypatch.setattr(sm, "get_watchlist_service", lambda: _FakeSvc())
+    monkeypatch.setattr(sm, "_fetch_ohlc", lambda ticker: _make_ohlc([100.0 + i * 2 for i in range(50)]))
 
-    from TerraFin.signals.alerting.scanner import scan
-
-    signals = scan()
+    signals = sm.scan()
     assert isinstance(signals, list)
     assert all(s.ticker == "AAPL" for s in signals)
 
 
 def test_scan_group_filter_passed(monkeypatch):
-    from TerraFin.signals.alerting import scanner as scanner_mod
-    import TerraFin.signals.alerting.scanner as sm
+    import TerraFin.analytics.reports.scanner as sm
 
     seen_group = []
 
@@ -53,16 +48,13 @@ def test_scan_group_filter_passed(monkeypatch):
             seen_group.append(group)
             return []
 
-    monkeypatch.setattr(scanner_mod, "get_watchlist_service", lambda: _FakeSvc())
-    from TerraFin.signals.alerting.scanner import scan
-
-    scan(group="tech")
+    monkeypatch.setattr(sm, "get_watchlist_service", lambda: _FakeSvc())
+    sm.scan(group="tech")
     assert seen_group == ["tech"]
 
 
 def test_scan_skips_erroring_tickers(monkeypatch):
-    from TerraFin.signals.alerting import scanner as scanner_mod
-    import TerraFin.signals.alerting.scanner as sm
+    import TerraFin.analytics.reports.scanner as sm
 
     class _FakeSvc:
         def get_watchlist_snapshot(self, group=None):
@@ -76,11 +68,10 @@ def test_scan_skips_erroring_tickers(monkeypatch):
             raise RuntimeError("network error")
         return _make_ohlc([100.0 + i * 2 for i in range(50)])
 
-    monkeypatch.setattr(scanner_mod, "get_watchlist_service", lambda: _FakeSvc())
+    monkeypatch.setattr(sm, "get_watchlist_service", lambda: _FakeSvc())
     monkeypatch.setattr(sm, "_fetch_ohlc", _fake_fetch)
 
-    from TerraFin.signals.alerting.scanner import scan
-
-    signals = scan()
+    signals = sm.scan()
     tickers = {s.ticker for s in signals}
     assert "ERR" not in tickers
+    assert any(s.ticker == "OK" for s in signals)

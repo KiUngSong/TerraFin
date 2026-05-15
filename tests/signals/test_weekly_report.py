@@ -5,17 +5,14 @@ suite runs offline. Focus is on the deterministic skeleton: WoW math, event
 detection, headline attribution, action wording, render shape, and the M7
 fallback path.
 """
-from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime
 from unittest.mock import patch
-
-from datetime import datetime
 from zoneinfo import ZoneInfo
 
-from TerraFin.signals.reports.weekly import (
-    TickerReport,
+from TerraFin.analytics.reports.weekly import (
     _M7_FALLBACK,
+    TickerReport,
     _action_signal,
     _attribute,
     _compute_wow,
@@ -95,15 +92,12 @@ def test_compute_wow_uses_5_trading_day_window():
 def test_detect_events_skips_below_threshold_and_attaches_volume():
     rows = [
         # 21-day baseline so the 20-day rolling avg has data
-        *[
-            {"time": f"2026-03-{d:02d}", "close": 100.0, "volume": 1_000_000}
-            for d in range(1, 22)
-        ],
+        *[{"time": f"2026-03-{d:02d}", "close": 100.0, "volume": 1_000_000} for d in range(1, 22)],
         {"time": "2026-04-22", "close": 100.0, "volume": 1_000_000},
         {"time": "2026-04-23", "close": 100.5, "volume": 1_000_000},  # <4% noise
         {"time": "2026-04-24", "close": 105.0, "volume": 3_000_000},  # +4.5% on 3x vol
         {"time": "2026-04-25", "close": 104.0, "volume": 1_000_000},
-        {"time": "2026-04-28", "close": 95.0, "volume": 2_000_000},   # -8.7%
+        {"time": "2026-04-28", "close": 95.0, "volume": 2_000_000},  # -8.7%
     ]
     events = _detect_events(rows, threshold_pct=4.0)
     dates = {e["date"] for e in events}

@@ -1,13 +1,11 @@
 """Tests for the inbound signal webhook: secret enforcement, dedup, rate limit."""
-from __future__ import annotations
-
 import hashlib
 import hmac
 
 import pytest
 
-from TerraFin.data.contracts.alert_provider import InboundSignal
-from TerraFin.interface.signals import webhook as wh
+from TerraFin.data.contracts.signal_provider import InboundSignal
+from TerraFin.interface.monitor import webhook as wh
 
 
 @pytest.fixture(autouse=True)
