@@ -70,6 +70,8 @@ def _frame_to_capitalized(frame: pd.DataFrame) -> pd.DataFrame:
         df.index = pd.to_datetime(df.index, errors="coerce", utc=True)
     elif df.index.tz is None:
         df.index = df.index.tz_localize("UTC")
+    else:
+        df.index = df.index.tz_convert("UTC")
     df = df[~df.index.isna()]
     if df.empty:
         return pd.DataFrame()
