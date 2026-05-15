@@ -58,7 +58,7 @@ def test_market_insights_gurus_contract() -> None:
 
 def test_market_insights_holdings_contract(monkeypatch) -> None:
     class _FakeFactory:
-        def get_portfolio_data(self, guru: str, filing_date: str | None = None):
+        def get_portfolio_data(self, guru: str, filing_date: str | None = None, accession: str | None = None):
             assert guru == "Test Guru"
             return _FakePortfolioOutput()
 
@@ -91,7 +91,7 @@ def test_market_insights_holdings_requires_guru_query() -> None:
 
 def test_market_insights_holdings_returns_503_when_sec_edgar_is_not_configured(monkeypatch) -> None:
     class _FakeFactory:
-        def get_portfolio_data(self, guru: str, filing_date: str | None = None):
+        def get_portfolio_data(self, guru: str, filing_date: str | None = None, accession: str | None = None):
             _ = guru
             raise SecEdgarConfigurationError(
                 "SEC EDGAR access is unavailable until `TERRAFIN_SEC_USER_AGENT` is configured."

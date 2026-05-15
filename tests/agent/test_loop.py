@@ -53,6 +53,19 @@ class _FakeService:
     def market_data(self, name: str, *, depth: str = "auto", view: str = "daily") -> dict[str, object]:
         return {"ticker": name, "seriesType": "candlestick", "count": 1, "data": [], "processing": {**_processing(), "requestedDepth": depth, "view": view}}
 
+    def patterns(self, name: str, *, depth: str = "auto", view: str = "daily") -> dict[str, object]:
+        return {"ticker": name, "signals": [], "total": 0, "processing": {**_processing(), "requestedDepth": depth, "view": view}}
+
+    def fcf_history(self, ticker: str, years: int = 10) -> dict[str, object]:
+        return {
+            "ticker": ticker, "years": years, "rows": [],
+            "candidates": {"threeYearAvg": None, "latestAnnual": None, "ttm": None},
+            "autoSelectedSource": "annual", "processing": _processing(),
+        }
+
+    def similarity_search(self, ticker: str, universe: str = "sp500+nasdaq100+kospi200", period: str = "1y", top_n: int = 20) -> dict[str, object]:
+        return {"ticker": ticker, "period": period, "pool": {}, "results": [], "count": 0, "processing": _processing()}
+
     def indicators(
         self,
         name: str,

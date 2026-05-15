@@ -339,9 +339,9 @@ def test_build_multi_payload_assigns_price_scale_id_for_one_ohlc_plus_lines() ->
     assert payload["series"][0]["seriesType"] == "candlestick"
     assert payload["series"][0]["priceScaleId"] == "right"
     assert payload["series"][1]["seriesType"] == "line"
-    assert payload["series"][1]["priceScaleId"] == "overlay-0"
+    assert payload["series"][1]["priceScaleId"] == "left"
     assert payload["series"][2]["seriesType"] == "line"
-    assert payload["series"][2]["priceScaleId"] == "overlay-1"
+    assert payload["series"][2]["priceScaleId"] == "overlay-0"
 
 
 def test_build_multi_payload_assigns_separate_visible_scales_for_multi_line_series() -> None:

@@ -41,6 +41,9 @@ def test_top_companies_falls_back_to_empty_list(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr(cache_manager_module, "_FILE_CACHE_DIR", tmp_path)
     reset_cache_manager()
     _install_failing_client(monkeypatch)
+    # Prevent yfinance fallback from making network calls so the test stays offline.
+    import yfinance
+    monkeypatch.setattr(yfinance, "Tickers", lambda *a, **kw: (_ for _ in ()).throw(Exception("offline")))
     factory = DataFactory()
 
     factory.refresh_panel("top_companies")

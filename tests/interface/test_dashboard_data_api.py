@@ -1,9 +1,7 @@
-import pandas as pd
 from fastapi.testclient import TestClient
 
 import TerraFin.data.cache.manager as cache_manager_module
 import TerraFin.interface.watchlist_service as watchlist_service_module
-from TerraFin.data import DataFactory
 from TerraFin.data.cache.registry import reset_cache_manager
 from TerraFin.data.providers.private_access import PRIVATE_SERIES, clear_private_series_cache
 from TerraFin.data.providers.private_access.client import PrivateAccessClient
@@ -24,10 +22,6 @@ def _assert_breadth_metric_shape(metric: dict) -> None:
     assert isinstance(metric["label"], str)
     assert isinstance(metric["value"], str)
     assert isinstance(metric["tone"], str)
-
-
-def _fake_history_frame() -> pd.DataFrame:
-    return pd.DataFrame({"close": [100.0, 102.0]})
 
 
 def _reset_services() -> None:
@@ -177,11 +171,8 @@ def test_dashboard_watchlist_crud(monkeypatch, tmp_path) -> None:
 
     monkeypatch.setenv("TERRAFIN_MONGODB_URI", "mongodb://example.test")
     monkeypatch.setattr(cache_manager_module, "_FILE_CACHE_DIR", tmp_path)
-    monkeypatch.setattr(
-        DataFactory,
-        "get_market_data",
-        lambda self, symbol: _fake_history_frame(),
-    )
+    import TerraFin.data.providers.market.ticker_info as _ticker_info_module
+    monkeypatch.setattr(_ticker_info_module, "get_ticker_info", lambda symbol: {"currentPrice": 102.0, "previousClose": 100.0})
     monkeypatch.setattr(watchlist_service_module, "_resolve_company_name", lambda symbol: f"{symbol} Holdings")
     monkeypatch.setattr(watchlist_service_module, "MongoClient", _FakeMongoClient)
 
@@ -197,6 +188,9 @@ def test_dashboard_watchlist_crud(monkeypatch, tmp_path) -> None:
         "_id": "terrafin_watchlist",
         "Company List": [],
         "items": [],
+        "explicit_groups": [],
+        "group_order": [],
+        "item_order": {},
     }
 
     created = client.post("/dashboard/api/watchlist", json={"symbol": "meta"})

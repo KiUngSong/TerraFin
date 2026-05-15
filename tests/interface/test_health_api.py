@@ -7,13 +7,16 @@ import TerraFin.interface.server as server_module
 def test_health_endpoint_returns_stable_contract() -> None:
     client = TestClient(server_module.create_app())
 
-    response = client.get("/health")
+    response = client.get("/health.json")
     assert response.status_code == 200
     payload = response.json()
-    assert payload["status"] == "ok"
-    assert payload["alive"] is True
-    assert payload["service"] == "terrafin-interface"
-    assert "version" in payload
+    assert payload["status"] in {"ok", "degraded", "down"}
+    assert isinstance(payload["checked_at"], float)
+    assert "components" in payload
+    assert {"agent", "telegram", "signals", "private_data"}.issubset(payload["components"])
+    for comp in payload["components"].values():
+        assert "status" in comp
+        assert "detail" in comp
 
 
 def test_ready_returns_200_when_dependencies_are_available() -> None:

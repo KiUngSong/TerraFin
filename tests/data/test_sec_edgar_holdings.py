@@ -139,7 +139,7 @@ def test_iter_13f_from_block_handles_misaligned_columns(caplog) -> None:
     with caplog.at_level("WARNING", logger=holdings.log.name):
         pairs = holdings._iter_13f_from_block(block)
 
-    assert pairs == [("a1", "2025-01-01"), ("a3", "2025-03-01")]
+    assert pairs == [("a1", "2025-01-01", "2025-01-01"), ("a3", "2025-03-01", "2025-03-01")]
     assert any("misaligned" in record.message for record in caplog.records)
 
 

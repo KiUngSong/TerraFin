@@ -56,6 +56,9 @@ class _FakeService:
             "processing": {**_processing(), "requestedDepth": depth, "view": view, "indicatorQuery": indicators},
         }
 
+    def patterns(self, name: str, *, depth: str = "auto", view: str = "daily") -> dict[str, object]:
+        return {"ticker": name, "signals": [], "total": 0, "processing": {**_processing(), "requestedDepth": depth, "view": view}}
+
     def market_snapshot(self, name: str, *, depth: str = "auto", view: str = "daily") -> dict[str, object]:
         return {
             "ticker": name,
@@ -151,6 +154,25 @@ class _FakeService:
         self, ticker: str, accession: str, primaryDocument: str, sectionSlug: str, *, form: str = "10-Q"
     ) -> dict[str, object]:
         return {"ticker": ticker, "accession": accession, "sectionSlug": sectionSlug, "sectionTitle": "stub", "markdown": "", "charCount": 0, "documentUrl": "", "processing": _processing()}
+
+    def fcf_history(self, ticker: str, years: int = 10) -> dict[str, object]:
+        return {
+            "ticker": ticker,
+            "years": years,
+            "rows": [],
+            "candidates": {"threeYearAvg": None, "latestAnnual": None, "ttm": None},
+            "autoSelectedSource": "annual",
+            "processing": _processing(),
+        }
+
+    def similarity_search(
+        self,
+        ticker: str,
+        universe: str = "sp500+nasdaq100+kospi200",
+        period: str = "1y",
+        top_n: int = 20,
+    ) -> dict[str, object]:
+        return {"ticker": ticker, "period": period, "pool": {}, "results": [], "count": 0, "processing": _processing()}
 
     def fear_greed(self) -> dict[str, object]:
         return {"score": 50, "rating": "Neutral", "processing": _processing()}
