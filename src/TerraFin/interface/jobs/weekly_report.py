@@ -16,7 +16,7 @@ log = logging.getLogger(__name__)
 
 
 def _ensure_recent_report(tz) -> None:
-    from TerraFin.analytics.reports import list_reports
+    from TerraFin.analytics.reports import list_report_summaries
     from TerraFin.analytics.reports.weekly import _last_completed_friday, build_weekly_report
 
     now = datetime.now(tz)
@@ -28,7 +28,7 @@ def _ensure_recent_report(tz) -> None:
         if now >= close_dt:
             targets.add(now.date())
 
-    existing_dates = {r.as_of for r in list_reports(limit=16)}
+    existing_dates = {r["asOf"] for r in list_report_summaries(limit=16)}
     for target in sorted(targets):
         if target.isoformat() not in existing_dates:
             log.info("weekly-report: boot generating missing report for %s", target)

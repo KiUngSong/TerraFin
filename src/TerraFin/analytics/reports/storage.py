@@ -80,6 +80,28 @@ def load_report(as_of: str) -> StoredReport | None:
     )
 
 
+def list_report_summaries(limit: int | None = None) -> list[dict]:
+    """Metadata-only listing — no markdown read. Use for list views and boot checks."""
+    if not REPORT_DIR.exists():
+        return []
+    entries = []
+    for meta_path in sorted(REPORT_DIR.glob("*.json"), reverse=True):
+        try:
+            meta = json.loads(meta_path.read_text(encoding="utf-8"))
+            entries.append({
+                "asOf": meta.get("asOf") or meta.get("as_of") or meta_path.stem,
+                "generatedAt": meta.get("generatedAt") or meta.get("generated_at", ""),
+                "isSample": bool(meta.get("isSample", meta.get("is_sample", False))),
+                "universe": list(meta.get("universe") or []),
+                "tickers": len(meta.get("universe") or []),
+            })
+        except Exception:
+            continue
+        if limit is not None and len(entries) >= limit:
+            break
+    return entries
+
+
 def list_reports(limit: int | None = None) -> list[StoredReport]:
     if not REPORT_DIR.exists():
         return []

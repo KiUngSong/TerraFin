@@ -196,10 +196,20 @@ def create_dashboard_data_router() -> APIRouter:
         if provider is None:
             return
 
+        name = ""
+        try:
+            for item in watchlist_service.get_watchlist_snapshot():
+                if item.get("symbol") == symbol:
+                    name = (item.get("name") or "").strip()
+                    break
+        except Exception:
+            pass
+
         action = "registered to monitor list" if is_now_monitored else "removed from monitor list"
         if (await provider.health()) is None:
             await _notify_monitor_change(
                 symbol,
+                name=name,
                 ok=False,
                 action=action,
                 error=(
@@ -211,14 +221,6 @@ def create_dashboard_data_router() -> APIRouter:
             return
         try:
             if is_now_monitored:
-                name = ""
-                try:
-                    for item in watchlist_service.get_watchlist_snapshot():
-                        if item.get("symbol") == symbol:
-                            name = item.get("name") or ""
-                            break
-                except Exception:
-                    pass
                 await provider.register([symbol], names={symbol: name} if name and name != symbol else {})
             else:
                 await provider.unregister([symbol])
@@ -230,11 +232,11 @@ def create_dashboard_data_router() -> APIRouter:
                 symbol,
                 exc_info=True,
             )
-            await _notify_monitor_change(symbol, ok=False, action=action, error=str(exc))
+            await _notify_monitor_change(symbol, name=name, ok=False, action=action, error=str(exc))
             return
-        await _notify_monitor_change(symbol, ok=True, action=action, error=None)
+        await _notify_monitor_change(symbol, name=name, ok=True, action=action, error=None)
 
-    async def _notify_monitor_change(symbol: str, *, ok: bool, action: str, error: str | None) -> None:
+    async def _notify_monitor_change(symbol: str, *, name: str = "", ok: bool, action: str, error: str | None) -> None:
         """Best-effort Telegram confirmation for the monitor toggle round-trip."""
         import asyncio
         import logging
@@ -246,15 +248,6 @@ def create_dashboard_data_router() -> APIRouter:
         except Exception:
             return  # Telegram not configured — silently skip
 
-        name = ""
-        try:
-            items = watchlist_service.get_watchlist_snapshot()
-            for item in items:
-                if item.get("symbol") == symbol:
-                    name = (item.get("name") or "").strip()
-                    break
-        except Exception:
-            pass
         label = f"{name} <b>{symbol}</b>" if name and name != symbol else f"<b>{symbol}</b>"
 
         if ok:
@@ -409,10 +402,9 @@ def create_dashboard_data_router() -> APIRouter:
 
     @router.get(f"{DASHBOARD_API_PREFIX}/reports/weekly")
     def api_list_weekly_reports():
-        from TerraFin.analytics.reports import list_reports
+        from TerraFin.analytics.reports import list_report_summaries
 
-        reports = list_reports(limit=12)
-        return {"reports": [r.summary() for r in reports]}
+        return {"reports": list_report_summaries(limit=12)}
 
     @router.get(f"{DASHBOARD_API_PREFIX}/reports/weekly/{{as_of}}")
     def api_get_weekly_report(as_of: str):
@@ -427,15 +419,14 @@ def create_dashboard_data_router() -> APIRouter:
     async def api_run_weekly_report():
         import asyncio
 
-        from TerraFin.analytics.reports import list_reports
+        from TerraFin.analytics.reports import list_report_summaries
         from TerraFin.analytics.reports.weekly import _BUILD_LOCK, build_weekly_report
 
         if not _BUILD_LOCK.acquire(blocking=False):
             raise HTTPException(status_code=409, detail="weekly report build already in progress")
         _BUILD_LOCK.release()
         await asyncio.get_event_loop().run_in_executor(None, build_weekly_report)
-        latest = list_reports(limit=1)
-        return {"reports": [r.summary() for r in latest]}
+        return {"reports": list_report_summaries(limit=1)}
 
     @router.get(f"{DASHBOARD_API_PREFIX}/market-breadth", response_model=MarketBreadthResponse)
     def api_get_market_breadth():
