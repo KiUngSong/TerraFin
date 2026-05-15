@@ -9,6 +9,7 @@ The OHLC frame is expected to follow the ``TimeSeriesDataFrame`` contract
 functions are stateless: same input frame, same verdict.
 """
 
+import threading
 from dataclasses import dataclass, field
 from typing import Literal, NamedTuple
 
@@ -35,25 +36,53 @@ class Signal:
 # accessors are kept as a thin layer so pattern code reads
 # ``closes(ohlc)`` instead of ``ohlc["close"].dropna().astype(float).tolist()``
 # at every callsite, and so a future contract change has one place to land.
+#
+# When ``evaluate()`` in __init__ pre-populates ``ohlc.__dict__["_tf_ohlcv"]``
+# each accessor short-circuits to the cached list, avoiding 6× redundant
+# pandas series operations per ticker.
+
+_OHLCV_CACHE_KEY = "_tf_ohlcv"
 
 
 def closes(ohlc: TimeSeriesDataFrame) -> list[float]:
+    try:
+        return ohlc.__dict__[_OHLCV_CACHE_KEY]["closes"]
+    except (KeyError, TypeError):
+        pass
     return ohlc["close"].dropna().astype(float).tolist()
 
 
 def opens(ohlc: TimeSeriesDataFrame) -> list[float]:
+    try:
+        return ohlc.__dict__[_OHLCV_CACHE_KEY]["opens"]
+    except (KeyError, TypeError):
+        pass
     return ohlc["open"].dropna().astype(float).tolist()
 
 
 def highs(ohlc: TimeSeriesDataFrame) -> list[float]:
+    try:
+        return ohlc.__dict__[_OHLCV_CACHE_KEY]["highs"]
+    except (KeyError, TypeError):
+        pass
     return ohlc["high"].dropna().astype(float).tolist()
 
 
 def lows(ohlc: TimeSeriesDataFrame) -> list[float]:
+    try:
+        return ohlc.__dict__[_OHLCV_CACHE_KEY]["lows"]
+    except (KeyError, TypeError):
+        pass
     return ohlc["low"].dropna().astype(float).tolist()
 
 
 def volumes(ohlc: TimeSeriesDataFrame) -> list[float] | None:
+    try:
+        cache = ohlc.__dict__.get(_OHLCV_CACHE_KEY)
+        if cache is not None:
+            return cache["volumes"]
+    except (KeyError, TypeError):
+        pass
     if "volume" not in ohlc.columns:
         return None
     series = ohlc["volume"].dropna()
@@ -180,6 +209,7 @@ def _ensure_dt_index(df: pd.DataFrame) -> pd.DataFrame:
 
 
 _SPY_REGIME_CACHE: dict = {"date": None, "ok": None}
+_SPY_REGIME_LOCK = threading.Lock()
 
 
 def spy_trend_ok(period: int = 50) -> bool | None:
@@ -191,8 +221,9 @@ def spy_trend_ok(period: int = 50) -> bool | None:
     from datetime import date as _date
 
     today = _date.today()
-    if _SPY_REGIME_CACHE["date"] == today and _SPY_REGIME_CACHE["ok"] is not None:
-        return _SPY_REGIME_CACHE["ok"]
+    with _SPY_REGIME_LOCK:
+        if _SPY_REGIME_CACHE["date"] == today and _SPY_REGIME_CACHE["ok"] is not None:
+            return _SPY_REGIME_CACHE["ok"]
     try:
         from TerraFin.data import get_data_factory
 
@@ -204,8 +235,9 @@ def spy_trend_ok(period: int = 50) -> bool | None:
         ok = bool(cs[-1] > ma)
     except Exception:
         return None
-    _SPY_REGIME_CACHE["date"] = today
-    _SPY_REGIME_CACHE["ok"] = ok
+    with _SPY_REGIME_LOCK:
+        _SPY_REGIME_CACHE["date"] = today
+        _SPY_REGIME_CACHE["ok"] = ok
     return ok
 
 

@@ -809,6 +809,12 @@ def _safe_key(key: str) -> str:
 def _copy_payload(payload: CachePayload, *, frozen: bool = False) -> CachePayload:
     if frozen:
         return payload
+    try:
+        import pandas as pd
+        if isinstance(payload, pd.DataFrame):
+            return payload.copy(deep=True)
+    except Exception:
+        pass
     return copy.deepcopy(payload)
 
 

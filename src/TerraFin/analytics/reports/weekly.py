@@ -16,6 +16,7 @@ import re
 import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ET
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
@@ -146,30 +147,35 @@ def _matches_relevance(title_lower: str, terms: set[str]) -> bool:
 
 
 def _fetch_market(ticker: str, as_of: date) -> list[dict]:
-    """Fetch ~6 weeks ending as_of from yfinance."""
+    """Fetch ~6 weeks ending as_of from managed yfinance cache."""
     try:
-        import yfinance as yf
+        from TerraFin.data.providers.market.yfinance import get_yf_recent_history
     except ImportError:
         return []
-    end = as_of + timedelta(days=1)  # yfinance end is exclusive
-    start = as_of - timedelta(days=45)
+    start_str = (as_of - timedelta(days=45)).isoformat()
+    as_of_str = as_of.isoformat()
     try:
-        df = yf.Ticker(ticker).history(
-            start=start.isoformat(),
-            end=end.isoformat(),
-            auto_adjust=False,
-        )
+        chunk = get_yf_recent_history(ticker, period="3m")
+        df = chunk.frame
+        if df.empty:
+            return []
     except Exception as exc:
         log.debug("yfinance history fail for %s: %s", ticker, exc)
         return []
     records = []
-    for ts, row in df.iterrows():
+    has_volume = "volume" in df.columns
+    for _, row in df.iterrows():
+        t_str = row["time"].strftime("%Y-%m-%d")
+        if t_str < start_str or t_str > as_of_str:
+            continue
+        close = row["close"]
+        vol = row["volume"] if has_volume else None
         records.append({
-            "time": ts.strftime("%Y-%m-%d"),
-            "close": float(row["Close"]) if row["Close"] == row["Close"] else None,
-            "volume": int(row["Volume"]) if row["Volume"] == row["Volume"] else None,
+            "time": t_str,
+            "close": float(close) if close == close else None,
+            "volume": int(vol) if vol is not None and vol == vol else None,
         })
-    return [r for r in records if r["time"] <= as_of.isoformat()]
+    return records
 
 
 def _fetch_earnings(ticker: str) -> list[dict]:
@@ -498,7 +504,8 @@ def build_weekly_report(
     """
     anchor = as_of or _last_completed_friday()
     items, is_sample = _resolve_universe()
-    tickers = [_build_ticker(it, anchor) for it in items]
+    with ThreadPoolExecutor(max_workers=6) as pool:
+        tickers = list(pool.map(lambda it: _build_ticker(it, anchor), items))
     md = _render(tickers, anchor, is_sample=is_sample)
     if enrich:
         try:

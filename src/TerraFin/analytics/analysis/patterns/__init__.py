@@ -36,10 +36,26 @@ the package-level ``evaluate`` aggregates them.
 from TerraFin.data.contracts.dataframes import TimeSeriesDataFrame
 
 from . import breakout, meanrev, momentum, reversal, trend, volume
-from ._base import Severity, Signal
+from ._base import Severity, Signal, _OHLCV_CACHE_KEY
 
 
 _ACTIVE_SCHOOLS = (trend, breakout, meanrev, momentum, reversal, volume)
+
+
+def _preload_ohlcv(ohlc) -> None:
+    try:
+        cache: dict = {"closes": ohlc["close"].dropna().astype(float).tolist()}
+        for col, key in (("open", "opens"), ("high", "highs"), ("low", "lows")):
+            if col in ohlc.columns:
+                cache[key] = ohlc[col].dropna().astype(float).tolist()
+        if "volume" in ohlc.columns:
+            s = ohlc["volume"].dropna()
+            cache["volumes"] = s.astype(float).tolist() if not s.empty else None
+        else:
+            cache["volumes"] = None
+        ohlc.__dict__[_OHLCV_CACHE_KEY] = cache
+    except Exception:
+        pass
 
 
 def evaluate(ticker: str, ohlc: TimeSeriesDataFrame) -> list[Signal]:
@@ -49,6 +65,7 @@ def evaluate(ticker: str, ohlc: TimeSeriesDataFrame) -> list[Signal]:
     ``time / open / high / low / close / volume`` columns. Volume is
     optional; volume-school patterns short-circuit when it is missing.
     """
+    _preload_ohlcv(ohlc)
     out: list[Signal] = []
     for school in _ACTIVE_SCHOOLS:
         out.extend(school.evaluate(ticker, ohlc))

@@ -1,5 +1,7 @@
 """Volume conditions — capitulation, OBV divergence, CMF, MFI."""
 
+import numpy as np
+
 from ._base import (
     Signal,
 )
@@ -148,15 +150,19 @@ def _obv_trend_break(
 
     # Z-score gate: |obv_slope| must stand out vs recent rolling slopes.
     sample_count = lookback * 5
-    abs_slopes: list[float] = []
-    for end in range(lookback, len(obv) + 1):
-        abs_slopes.append(abs(_slope(obv[end - lookback : end])))
-    abs_slopes = abs_slopes[-sample_count:]
-    if len(abs_slopes) < lookback:
+    obv_tail = np.array(obv[-(sample_count + lookback):], dtype=float)
+    x = np.arange(lookback, dtype=float)
+    x -= x.mean()
+    denom = float((x * x).sum())
+    if not denom:
         return []
-    mean = sum(abs_slopes) / len(abs_slopes)
-    var = sum((v - mean) ** 2 for v in abs_slopes) / len(abs_slopes)
-    std = var**0.5
+    windows = np.lib.stride_tricks.sliding_window_view(obv_tail, lookback)
+    slopes_arr = np.abs(((windows - windows.mean(axis=1, keepdims=True)) * x).sum(axis=1) / denom)
+    abs_slopes_arr = slopes_arr[-sample_count:]
+    if len(abs_slopes_arr) < lookback:
+        return []
+    mean = float(abs_slopes_arr.mean())
+    std = float(abs_slopes_arr.std())
     if std > 0 and (abs(obv_slope) - mean) / std < min_obv_slope_z:
         return []
 

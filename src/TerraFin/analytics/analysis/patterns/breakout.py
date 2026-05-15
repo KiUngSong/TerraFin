@@ -1,6 +1,8 @@
 """Breakout conditions — Bollinger, Donchian, squeeze, swing pivot, Darvas,
 NR7/Inside Bar, Keltner channel, 52-week high proximity, Wyckoff Spring/Upthrust."""
 
+import numpy as np
+
 from TerraFin.analytics.analysis.technical.bollinger import bollinger_bands
 
 from ._base import (
@@ -290,6 +292,10 @@ def _darvas_box(
         return []
     n = len(cs)
     last_idx = n - 1
+    # Precompute 252-bar rolling high: rolling_hi252[i] = max(hs[i : i+252])
+    # → prior_high at top_idx = rolling_hi252[top_idx - 252]
+    hs_arr = np.array(hs, dtype=float)
+    rolling_hi252 = np.lib.stride_tricks.sliding_window_view(hs_arr, 252).max(axis=1)
     # Find a confirmed box top: the highest high in the trailing 252 bars
     # preceding ``last_idx - confirm_bars`` that has held for ``confirm_bars``
     # bars without being exceeded.
@@ -297,7 +303,7 @@ def _darvas_box(
         if top_idx < 252:
             break
         # Must be a 52-week new high at top_idx.
-        prior_high = max(hs[top_idx - 252 : top_idx])
+        prior_high = float(rolling_hi252[top_idx - 252])
         if hs[top_idx] <= prior_high:
             continue
         # Must hold for ``confirm_bars`` bars after.

@@ -142,18 +142,21 @@ class WatchlistService:
     def get_watchlist_snapshot(self, group: str | None = None) -> list[dict]:
         if self._items is None:
             self.refresh_snapshot()
-        items = [dict(item) for item in (self._items or [])]
+        with self._lock:
+            items = [dict(item) for item in (self._items or [])]
+            item_order = dict(self._item_order) if self._item_order else None
+            group_order = list(self._group_order) if self._group_order else None
         if group:
             tag = group.strip().lower()
             items = [item for item in items if tag in [t.lower() for t in item.get("tags", [])]]
             # Apply per-group item ordering (lazy: items not in order appended at end).
-            order = (self._item_order or {}).get(group) or (self._item_order or {}).get(tag) or []
+            order = (item_order or {}).get(group) or (item_order or {}).get(tag) or []
             if order:
                 sym_map = {i["symbol"]: i for i in items}
                 ordered = [sym_map.pop(s) for s in order if s in sym_map]
                 ordered.extend(sym_map.values())
                 items = ordered
-        elif self._item_order:
+        elif item_order:
             # Full fetch: apply group-ordered + within-group ordering so that a
             # page reload preserves the user's drag-drop arrangement.
             # Walk groups in _group_order sequence; within each group apply
@@ -162,11 +165,11 @@ class WatchlistService:
             seen: set[str] = set()
             ordered: list[dict] = []
             # Collect groups in display order (same logic as list_groups).
-            all_groups = list(self._item_order.keys())
-            go = [g for g in (self._group_order or []) if g in self._item_order]
+            all_groups = list(item_order.keys())
+            go = [g for g in (group_order or []) if g in item_order]
             remaining_groups = [g for g in all_groups if g not in go]
             for grp in go + remaining_groups:
-                for sym in (self._item_order.get(grp) or []):
+                for sym in (item_order.get(grp) or []):
                     if sym in sym_map and sym not in seen:
                         ordered.append(sym_map[sym])
                         seen.add(sym)
