@@ -5,14 +5,14 @@ import logging
 import shutil
 import sys
 import typing
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from threading import Event, Lock, Thread
-from time import sleep
-from collections.abc import Callable
 from typing import Any, Protocol, runtime_checkable
 from zoneinfo import ZoneInfo
+
 
 _logger = logging.getLogger(__name__)
 
@@ -98,6 +98,7 @@ def _decode_dataclass(raw: Any, target_type: Any) -> Any:
         return {key: _decode_dataclass(val, val_type) for key, val in raw.items()}
     return raw
 
+
 _FILE_CACHE_DIR = Path.home() / ".terrafin" / "cache"
 _STATE_FILE_NAME = ".cache_manager_state.json"
 
@@ -168,6 +169,7 @@ class CacheManager:
         self._payload_specs: dict[str, CachePayloadSpec] = {}
         self._memory_payloads: dict[str, _MemoryEntry] = {}
         self._lock = Lock()
+        self._memory_lock = Lock()
         self._fetch_locks: dict[str, Lock] = {}
         self._fetch_locks_mutex = Lock()
         self._runner: Thread | None = None
@@ -320,7 +322,9 @@ class CacheManager:
                             error=error,
                             result_kind="stale",
                         )
-                        return CachePayloadResult(payload=_copy_payload(stale, frozen=frozen), freshness="stale", error=error)
+                        return CachePayloadResult(
+                            payload=_copy_payload(stale, frozen=frozen), freshness="stale", error=error
+                        )
 
                 if allow_fallback and spec.fallback_fn is not None:
                     payload = spec.fallback_fn()
@@ -331,7 +335,9 @@ class CacheManager:
                         error=error,
                         result_kind="fallback",
                     )
-                    return CachePayloadResult(payload=_copy_payload(payload, frozen=frozen), freshness="fallback", error=error)
+                    return CachePayloadResult(
+                        payload=_copy_payload(payload, frozen=frozen), freshness="fallback", error=error
+                    )
 
                 self._record_source_state(
                     source,
@@ -360,7 +366,8 @@ class CacheManager:
         spec = self._payload_specs.get(source)
         if spec is None:
             return
-        self._memory_payloads.pop(source, None)
+        with self._memory_lock:
+            self._memory_payloads.pop(source, None)
         if not spec.frozen_payload:
             if spec.expected_type is not None and self._serializer_for_cls(spec.expected_type) is not None:
                 target = self.artifact_path(spec.namespace, spec.key)
@@ -493,7 +500,7 @@ class CacheManager:
         self.refresh_due_sources(force=False)
         while not self._stop_event.is_set():
             self.refresh_due_sources(force=False)
-            sleep(self._poll_seconds)
+            self._stop_event.wait(self._poll_seconds)
 
     def clear_all(self) -> None:
         with self._lock:
@@ -720,16 +727,17 @@ class CacheManager:
             pass
 
     def _read_memory_payload(self, source: str, ttl_seconds: int) -> CachePayload | None:
-        entry = self._memory_payloads.get(source)
-        if entry is None:
-            return None
-        now = datetime.now(UTC)
-        age = (now - entry.cached_at).total_seconds()
-        if age > ttl_seconds:
-            self._memory_payloads.pop(source, None)
-            return None
-        entry.last_accessed = now
-        return _copy_payload(entry.payload, frozen=entry.frozen)
+        with self._memory_lock:
+            entry = self._memory_payloads.get(source)
+            if entry is None:
+                return None
+            now = datetime.now(UTC)
+            age = (now - entry.cached_at).total_seconds()
+            if age > ttl_seconds:
+                self._memory_payloads.pop(source, None)
+                return None
+            entry.last_accessed = now
+            return _copy_payload(entry.payload, frozen=entry.frozen)
 
     def _write_memory_payload(
         self,
@@ -743,23 +751,23 @@ class CacheManager:
         now = cached_at or datetime.now(UTC)
         stored = payload if frozen else _copy_payload(payload, frozen=False)
         size = _estimate_size(stored, spec) if frozen else 0
-        self._memory_payloads[source] = _MemoryEntry(
-            payload=stored,
-            cached_at=now,
-            last_accessed=now,
-            frozen=frozen,
-            size=size,
-        )
-        if frozen:
-            self._evict_frozen_lru()
+        with self._memory_lock:
+            self._memory_payloads[source] = _MemoryEntry(
+                payload=stored,
+                cached_at=now,
+                last_accessed=now,
+                frozen=frozen,
+                size=size,
+            )
+            if frozen:
+                self._evict_frozen_lru_locked()
 
-    def _evict_frozen_lru(self) -> None:
+    def _evict_frozen_lru_locked(self) -> None:
+        # Caller must hold self._memory_lock.
         total = sum(e.size for e in self._memory_payloads.values() if e.frozen)
         if total <= MEMORY_LRU_FROZEN_MAX_BYTES:
             return
-        frozen_items = [
-            (src, entry) for src, entry in self._memory_payloads.items() if entry.frozen
-        ]
+        frozen_items = [(src, entry) for src, entry in self._memory_payloads.items() if entry.frozen]
         frozen_items.sort(key=lambda kv: kv[1].last_accessed)
         for src, entry in frozen_items:
             if total <= MEMORY_LRU_FROZEN_MAX_BYTES:
@@ -811,6 +819,7 @@ def _copy_payload(payload: CachePayload, *, frozen: bool = False) -> CachePayloa
         return payload
     try:
         import pandas as pd
+
         if isinstance(payload, pd.DataFrame):
             return payload.copy(deep=True)
     except Exception:

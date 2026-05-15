@@ -424,11 +424,16 @@ def create_dashboard_data_router() -> APIRouter:
         return {**rec.summary(), "markdown": rec.markdown}
 
     @router.post(f"{DASHBOARD_API_PREFIX}/reports/weekly/run")
-    def api_run_weekly_report():
-        from TerraFin.analytics.reports import list_reports
-        from TerraFin.analytics.reports.weekly import build_weekly_report
+    async def api_run_weekly_report():
+        import asyncio
 
-        build_weekly_report()
+        from TerraFin.analytics.reports import list_reports
+        from TerraFin.analytics.reports.weekly import _BUILD_LOCK, build_weekly_report
+
+        if not _BUILD_LOCK.acquire(blocking=False):
+            raise HTTPException(status_code=409, detail="weekly report build already in progress")
+        _BUILD_LOCK.release()
+        await asyncio.get_event_loop().run_in_executor(None, build_weekly_report)
         latest = list_reports(limit=1)
         return {"reports": [r.summary() for r in latest]}
 

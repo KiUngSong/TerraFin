@@ -13,6 +13,7 @@ Anchors to a configurable as_of date so backtests reproduce exactly.
 """
 import logging
 import re
+import threading
 import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ET
@@ -488,6 +489,9 @@ def _render_ticker(t: TickerReport) -> str:
     return "\n".join(out) + "\n"
 
 
+_BUILD_LOCK = threading.Lock()
+
+
 def build_weekly_report(
     as_of: date | None = None,
     persist: bool = True,
@@ -502,6 +506,15 @@ def build_weekly_report(
     TerraFin agent runtime is configured, an additional enrichment section is
     appended (macro/index context with tool-call provenance).
     """
+    with _BUILD_LOCK:
+        return _build_weekly_report(as_of=as_of, persist=persist, enrich=enrich)
+
+
+def _build_weekly_report(
+    as_of: date | None = None,
+    persist: bool = True,
+    enrich: bool = True,
+) -> str:
     anchor = as_of or _last_completed_friday()
     items, is_sample = _resolve_universe()
     with ThreadPoolExecutor(max_workers=6) as pool:
