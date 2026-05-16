@@ -1,3 +1,4 @@
+import functools
 from typing import Any
 
 from fastapi import HTTPException
@@ -13,10 +14,10 @@ from TerraFin.analytics.analysis.fundamental.dcf.inputs import (
 )
 from TerraFin.data import (
     SecEdgarError,
-    get_data_factory,
     build_toc,
     download_filing,
     get_company_filings,
+    get_data_factory,
     get_ticker_earnings,
     get_ticker_info,
     get_ticker_to_cik_dict_cached,
@@ -113,11 +114,7 @@ def build_fcf_history_payload(ticker: str, *, years: int = 10) -> dict[str, Any]
         return parsed
 
     history: list[dict[str, Any]] = []
-    if (
-        annual_series is not None
-        and cashflow_annual is not None
-        and len(cashflow_annual.columns) > 0
-    ):
+    if annual_series is not None and cashflow_annual is not None and len(cashflow_annual.columns) > 0:
         dates = [str(c) for c in cashflow_annual.columns]
         for date_value, fcf_value in zip(dates[:years], annual_series.head(years).tolist()):
             fcf_float = _finite_or_none(fcf_value)
@@ -158,11 +155,7 @@ def build_fcf_history_payload(ticker: str, *, years: int = 10) -> dict[str, Any]
 
     # (a) Annual year-ends. Walk oldest → newest so the resulting list is
     # chronological once we extend with quarterly points and sort.
-    if (
-        annual_series is not None
-        and cashflow_annual is not None
-        and len(cashflow_annual.columns) > 0
-    ):
+    if annual_series is not None and cashflow_annual is not None and len(cashflow_annual.columns) > 0:
         annual_dates = [str(c) for c in cashflow_annual.columns]
         for date_value, fcf_value in zip(
             reversed(annual_dates[:years]),
@@ -181,10 +174,7 @@ def build_fcf_history_payload(ticker: str, *, years: int = 10) -> dict[str, Any]
     # (b) Quarterly rolling windows.
     if cashflow_quarter is not None:
         quarter_series = _annual_fcf_series(cashflow_quarter)
-        if (
-            quarter_series is not None
-            and len(cashflow_quarter.columns) > 0
-        ):
+        if quarter_series is not None and len(cashflow_quarter.columns) > 0:
             quarter_dates = [str(c) for c in cashflow_quarter.columns]
             n = len(quarter_series)
             for end_idx in range(n - 4, -1, -1):
@@ -208,9 +198,7 @@ def build_fcf_history_payload(ticker: str, *, years: int = 10) -> dict[str, Any]
 
     # Which source would "auto" resolve to given current data? Used by the UI to show
     # "Auto → 3yr Avg" so the user knows what Auto is actually picking.
-    _, auto_selected_source = _select_stock_fcf_base(
-        cashflow_quarter, cashflow_annual, source="auto"
-    )
+    _, auto_selected_source = _select_stock_fcf_base(cashflow_quarter, cashflow_annual, source="auto")
 
     return {
         "ticker": normalized,
@@ -387,6 +375,7 @@ def build_filings_list_payload(ticker: str, *, limit: int = 20) -> dict[str, Any
     }
 
 
+@functools.lru_cache(maxsize=32)
 def build_filing_document_payload(
     ticker: str,
     accession: str,
