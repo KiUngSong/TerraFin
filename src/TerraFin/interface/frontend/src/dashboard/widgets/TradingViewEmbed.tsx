@@ -21,6 +21,12 @@ const TradingViewEmbed: React.FC<TradingViewEmbedProps> = ({
 }) => {
   const hostRef = useRef<HTMLDivElement | null>(null);
 
+  // Serialize the effective payload so parent re-renders that produce an
+  // identical config (common during resize / theme-toggle ping-pong) don't
+  // tear down + refetch the TradingView script. Reference-only deps would
+  // refire on every fresh useMemo result even when the values are equal.
+  const serialized = JSON.stringify({ scriptSrc, theme, config });
+
   useEffect(() => {
     const host = hostRef.current;
     if (host == null) return;
@@ -50,7 +56,7 @@ const TradingViewEmbed: React.FC<TradingViewEmbedProps> = ({
     return () => {
       host.innerHTML = '';
     };
-  }, [config, scriptSrc, theme]);
+  }, [serialized]);
 
   return (
     <div
