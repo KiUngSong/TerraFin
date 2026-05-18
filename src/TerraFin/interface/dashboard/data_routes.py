@@ -206,19 +206,6 @@ def create_dashboard_data_router() -> APIRouter:
             pass
 
         action = "registered to monitor list" if is_now_monitored else "removed from monitor list"
-        if (await provider.health()) is None:
-            await _notify_monitor_change(
-                symbol,
-                name=name,
-                ok=False,
-                action=action,
-                error=(
-                    "Monitor daemon unreachable on the configured URL. "
-                    "Start it with DataFactory's `scripts/start_monitor.sh` "
-                    "(or check that the host/port and bearer key match)."
-                ),
-            )
-            return
         try:
             if is_now_monitored:
                 await provider.register([symbol], names={symbol: name} if name and name != symbol else {})
@@ -227,12 +214,24 @@ def create_dashboard_data_router() -> APIRouter:
         except Exception as exc:
             import logging
 
+            import httpx
+
             logging.getLogger(__name__).warning(
                 "Immediate monitor push failed for %s (heartbeat will retry)",
                 symbol,
                 exc_info=True,
             )
-            await _notify_monitor_change(symbol, name=name, ok=False, action=action, error=str(exc))
+            # Connection-class failures = daemon is down; surface the prescriptive
+            # "start it" hint instead of the raw socket error.
+            if isinstance(exc, (httpx.ConnectError, httpx.ConnectTimeout, httpx.ReadTimeout)):
+                error_msg = (
+                    "Monitor daemon unreachable on the configured URL. "
+                    "Start it with DataFactory's `scripts/start_monitor.sh` "
+                    "(or check that the host/port and bearer key match)."
+                )
+            else:
+                error_msg = str(exc)
+            await _notify_monitor_change(symbol, name=name, ok=False, action=action, error=error_msg)
             return
         await _notify_monitor_change(symbol, name=name, ok=True, action=action, error=None)
 
