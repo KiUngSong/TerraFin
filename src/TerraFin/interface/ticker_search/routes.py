@@ -110,13 +110,13 @@ def _search_naver_kr(q: str) -> list[dict[str, Any]]:
 
     out: list[dict[str, Any]] = []
     for ans in data.get("answer", []):
-        # Row shape: ["20","<name> 주가","ansstk","","","<code>","<market>", ...]
+        # Row shape: ["20","<name> <stock-suffix>","ansstk","","","<code>","<market>", ...]
         if not isinstance(ans, list) or len(ans) < 7:
             continue
         code = str(ans[5] or "").strip()
         market = str(ans[6] or "").strip().upper()
         title = str(ans[1] or "").strip()
-        # Strip trailing " 주가" the autocomplete adds
+        # Strip the trailing stock-suffix the autocomplete appends to display titles
         name = re.sub(r"\s*주가$", "", title) or code
         if not code or not market:
             continue
@@ -198,9 +198,9 @@ def create_ticker_search_router() -> APIRouter:
             "|".join(e["symbol"] for e in indicators).encode()
         ).hexdigest()[:8]
 
-        # Curated US/intl aliases first (so a hand-picked entry like
-        # 애플 → AAPL wins over an accidental KRX collision); then the
-        # full KRX listing for KOSPI + KOSDAQ companies.
+        # Curated US/intl aliases first (so a hand-picked entry — e.g. a
+        # popular foreign-stock alias — wins over an accidental KRX collision);
+        # then the full KRX listing for KOSPI + KOSDAQ companies.
         kr_aliases = dict(load_kr_listings())
         kr_aliases.update(KR_ALIASES)
 
