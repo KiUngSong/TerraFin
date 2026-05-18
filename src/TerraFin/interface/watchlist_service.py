@@ -109,6 +109,21 @@ def _resolve_company_name(symbol: str) -> str:
     return str(info.get("shortName") or info.get("longName") or symbol).strip() or symbol
 
 
+def _per_symbol_sleep_seconds() -> float:
+    """Pause between consecutive watchlist symbol refreshes.
+
+    Yahoo throttles cloud egress aggressively. A small delay between
+    per-symbol fetches keeps the boot catch-up + periodic refresh under
+    the rate-limit threshold. Tunable via ``TERRAFIN_WATCHLIST_REFRESH_SLEEP_SEC``.
+    """
+    raw = os.environ.get("TERRAFIN_WATCHLIST_REFRESH_SLEEP_SEC", "0.25")
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        return 0.25
+    return max(0.0, value)
+
+
 def _bust_ticker_info_cache(symbol: str) -> None:
     try:
         from TerraFin.data.cache.registry import get_cache_manager
