@@ -15,9 +15,13 @@ import CompanyProfile from './components/CompanyProfile';
 import EarningsTable from './components/EarningsTable';
 import FcfHistoryChart from './components/FcfHistoryChart';
 import GexPanel from './components/GexPanel';
+// IncomeSankeyCard pulls in ~150KB gzipped of @nivo/sankey + @nivo/core.
+// The card is hidden behind a toggle (collapsed by default), so the bundle
+// is split into a chunk that only loads when the user opens the toggle.
+const IncomeSankeyCard = React.lazy(() => import('./components/IncomeSankeyCard'));
 import AdditionalFeatureToggle from './components/AdditionalFeatureToggle';
 import SecFilings from './components/SecFilings';
-import { useCompanyInfo, useEarnings, useFcfHistory, useGex } from './useStockData';
+import { useCompanyInfo, useEarnings, useFcfHistory, useGex, useIncomeSankey, type IncomeSankeyPeriod } from './useStockData';
 
 const TICKER_GROUPS = [
   {
@@ -89,6 +93,7 @@ const StockPage: React.FC = () => {
   const [readyTicker, setReadyTicker] = React.useState<string | null>(null);
   const [isReverseDcfOpen, setIsReverseDcfOpen] = React.useState(false);
   const [isGexOpen, setIsGexOpen] = React.useState(false);
+  const [isIncomeSankeyOpen, setIsIncomeSankeyOpen] = React.useState(false);
   const { isMobile, isTabletOrBelow } = useViewportTier();
   const [stockDcfState, setStockDcfState] = React.useState<{
     payload: DcfValuationPayload | null;
@@ -124,6 +129,12 @@ const StockPage: React.FC = () => {
   const isEquity = !companyInfo?.quoteType || companyInfo.quoteType === 'EQUITY';
   const { data: earnings, loading: earningsLoading } = useEarnings(ticker);
   const { data: fcfHistory, loading: fcfHistoryLoading, error: fcfHistoryError } = useFcfHistory(ticker, 10);
+  const [sankeyPeriod, setSankeyPeriod] = React.useState<IncomeSankeyPeriod>('quarter');
+  const { data: incomeSankey, loading: incomeSankeyLoading, error: incomeSankeyError } = useIncomeSankey(
+    ticker,
+    sankeyPeriod,
+    isEquity && isIncomeSankeyOpen,
+  );
   const { data: gex, loading: gexLoading, error: gexError } = useGex(ticker);
   // Cboe delayed-quotes only lists US-listed options. Hide the GEX
   // section entirely when the ticker has no chain (KOSPI/TSE, micro-caps).
@@ -132,6 +143,8 @@ const StockPage: React.FC = () => {
   React.useEffect(() => {
     setIsReverseDcfOpen(false);
     setIsGexOpen(false);
+    setIsIncomeSankeyOpen(false);
+    setSankeyPeriod('quarter');
   }, [ticker]);
 
   // SEC filings section hides itself for non-US tickers (KOSPI, TSE, etc.)
@@ -393,6 +406,29 @@ const StockPage: React.FC = () => {
             <FcfHistoryChart payload={fcfHistory} loading={fcfHistoryLoading} error={fcfHistoryError} />
           </InsightCard>
         </section>
+        ) : null}
+
+        {isEquity ? (
+          <AdditionalFeatureToggle
+            title="Income Statement Flow"
+            subtitle="Sankey diagram of revenue → margin → earnings, Y/Y vs same period prior year. Click to load."
+            open={isIncomeSankeyOpen}
+            onToggle={() => setIsIncomeSankeyOpen((current) => !current)}
+          />
+        ) : null}
+
+        {isEquity && isIncomeSankeyOpen ? (
+          <section>
+            <React.Suspense fallback={<div style={{ padding: 16, color: '#64748b', fontSize: 13 }}>Loading diagram...</div>}>
+              <IncomeSankeyCard
+                payload={incomeSankey}
+                loading={incomeSankeyLoading}
+                error={incomeSankeyError}
+                period={sankeyPeriod}
+                onPeriodChange={setSankeyPeriod}
+              />
+            </React.Suspense>
+          </section>
         ) : null}
 
         {isEquity ? (

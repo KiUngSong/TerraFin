@@ -1,4 +1,6 @@
 import functools
+import math
+from datetime import datetime
 from typing import Any
 
 from fastapi import HTTPException
@@ -426,4 +428,289 @@ def build_filing_document_payload(
         "charCount": len(markdown),
         "indexUrl": urls["indexUrl"],
         "documentUrl": urls["documentUrl"],
+    }
+
+
+# ---------------------------------------------------------------------------
+# Income statement Sankey
+# ---------------------------------------------------------------------------
+
+# yfinance label → canonical key. Order within a tuple = preference, so we can
+# fall back to alternative labels if yfinance changes its mind (it has, twice).
+_INCOME_FIELD_ALIASES: dict[str, tuple[str, ...]] = {
+    "revenue": ("Total Revenue", "Operating Revenue", "TotalRevenue"),
+    "costOfRevenue": ("Cost Of Revenue", "Reconciled Cost Of Revenue", "CostOfRevenue"),
+    "grossProfit": ("Gross Profit", "GrossProfit"),
+    "operatingExpense": ("Operating Expense", "OperatingExpense", "Total Operating Expenses"),
+    "researchAndDevelopment": ("Research And Development", "ResearchAndDevelopment"),
+    "sellingGeneralAdmin": ("Selling General And Administration", "SellingGeneralAndAdministration"),
+    "operatingIncome": ("Operating Income", "Total Operating Income As Reported", "OperatingIncome"),
+    "pretaxIncome": ("Pretax Income", "PretaxIncome"),
+    "taxProvision": ("Tax Provision", "TaxProvision", "Income Tax Expense Benefit"),
+    "netIncome": ("Net Income", "Net Income Common Stockholders", "NetIncome"),
+}
+
+
+def _pick_income_value(row_map: dict[str, float], canonical: str) -> float | None:
+    """Return the first non-null value among the aliases for ``canonical``."""
+    for label in _INCOME_FIELD_ALIASES.get(canonical, ()):
+        value = row_map.get(label)
+        if value is None:
+            continue
+        try:
+            parsed = float(value)
+        except (TypeError, ValueError):
+            continue
+        if math.isfinite(parsed):
+            return parsed
+    return None
+
+
+def _yoy_pct(current: float | None, prior: float | None) -> float | None:
+    """Year-over-year percent change. ``None`` when either side is missing or
+    when prior == 0 (division-by-zero would be infinity, not informative)."""
+    if current is None or prior is None:
+        return None
+    try:
+        if prior == 0:
+            return None
+        return ((current - prior) / abs(prior)) * 100.0
+    except (TypeError, ValueError, ZeroDivisionError):
+        return None
+
+
+def _income_frame_to_period_map(frame) -> tuple[list[str], dict[str, dict[str, float]]]:
+    """Reshape the corporate-data frame into ``(dates_newest_first, {date: {label: value}})``.
+
+    The corporate-data ``FinancialStatementFrame`` is indexed by line item
+    label with one column per report date. We index by date so we can compare
+    the same period this year vs last year without DataFrame gymnastics.
+    """
+    if frame is None or frame.empty:
+        return [], {}
+    dates = [str(c) for c in frame.columns]
+    by_date: dict[str, dict[str, float]] = {}
+    for date in dates:
+        col = frame[date]
+        by_date[date] = {str(label): value for label, value in col.items()}
+    # Newest-first: column 0 of FinancialStatementFrame is the most recent.
+    return dates, by_date
+
+
+def _sankey_metric(
+    current: float | None,
+    prior: float | None,
+) -> dict[str, Any]:
+    return {
+        "value": current,
+        "yoyPct": _yoy_pct(current, prior),
+    }
+
+
+def build_income_sankey_payload(ticker: str, *, period: str = "quarter") -> dict[str, Any]:
+    """Build the income-statement Sankey payload for a single ticker.
+
+    Returns ``nodes`` and ``links`` ready to feed @nivo/sankey, plus a flat
+    ``metrics`` map keyed by canonical line item so the UI can render the
+    summary KPI row without re-deriving values from the diagram. Each metric
+    carries the absolute value and Y/Y delta (vs the same-quarter-prior-year
+    when ``period == "quarter"``, vs the prior fiscal year for ``"annual"``).
+
+    Raises HTTPException(404) when no statement rows are available — typically
+    a non-equity ticker (ETF, index) or a name yfinance does not cover.
+    """
+    if period not in ("quarter", "annual"):
+        raise HTTPException(status_code=400, detail="period must be 'quarter' or 'annual'")
+    normalized = ticker.upper()
+
+    factory = get_data_factory()
+    frame = factory.get_corporate_data(normalized, "income", period=period)
+    dates, by_date = _income_frame_to_period_map(frame)
+    if not dates:
+        raise HTTPException(status_code=404, detail=f"No income statement data for '{ticker}'.")
+
+    current_date = dates[0]
+    current_row = by_date[current_date]
+    # Pick the prior period by DATE, not by index. Index-based lookup silently
+    # picks the wrong quarter for newly-listed names, after restated periods,
+    # or across 53-week fiscal years. Target = current_date − 1 year; accept
+    # the nearest available column within ±45 days, else leave priors empty
+    # so Y/Y deltas surface as null instead of misleading numbers.
+    try:
+        current_dt = datetime.fromisoformat(current_date)
+    except ValueError:
+        current_dt = None
+    prior_date: str | None = None
+    prior_row: dict[str, float] = {}
+    if current_dt is not None:
+        target_dt = current_dt.replace(year=current_dt.year - 1) if current_dt.month != 2 or current_dt.day != 29 else current_dt.replace(year=current_dt.year - 1, day=28)
+        best: tuple[int, str] | None = None  # (abs_days_off, date_str)
+        for candidate in dates[1:]:
+            try:
+                cand_dt = datetime.fromisoformat(candidate)
+            except ValueError:
+                continue
+            diff = abs((cand_dt - target_dt).days)
+            if diff > 45:
+                continue
+            if best is None or diff < best[0]:
+                best = (diff, candidate)
+        if best is not None:
+            prior_date = best[1]
+            prior_row = by_date[prior_date]
+
+    def _val(key: str, row: dict[str, float]) -> float | None:
+        return _pick_income_value(row, key)
+
+    revenue = _val("revenue", current_row)
+    cost_of_revenue = _val("costOfRevenue", current_row)
+    gross_profit = _val("grossProfit", current_row)
+    op_expense = _val("operatingExpense", current_row)
+    rd = _val("researchAndDevelopment", current_row)
+    sga = _val("sellingGeneralAdmin", current_row)
+    op_income = _val("operatingIncome", current_row)
+    pretax = _val("pretaxIncome", current_row)
+    tax = _val("taxProvision", current_row)
+    net_income = _val("netIncome", current_row)
+
+    # Derived fallbacks — yfinance occasionally omits one or two intermediate
+    # lines. Compute from the others rather than presenting a hole in the
+    # diagram (Sankey balance breaks if any one is missing).
+    if gross_profit is None and revenue is not None and cost_of_revenue is not None:
+        gross_profit = revenue - cost_of_revenue
+    if cost_of_revenue is None and revenue is not None and gross_profit is not None:
+        cost_of_revenue = revenue - gross_profit
+    if op_expense is None and rd is not None and sga is not None:
+        op_expense = rd + sga
+    if op_income is None and gross_profit is not None and op_expense is not None:
+        op_income = gross_profit - op_expense
+    # Tax is derived from Pretax − NI when yfinance omits the explicit line.
+    if tax is None and pretax is not None and net_income is not None:
+        tax = pretax - net_income
+    # Other income/expense net = Pretax − OpIncome. Usually small for industrials,
+    # large + negative for highly-leveraged names (interest expense). Carried as
+    # its own node when material so the diagram stays balanced.
+    other_net = None
+    if pretax is not None and op_income is not None:
+        other_net = pretax - op_income
+
+    if revenue is None or gross_profit is None or cost_of_revenue is None:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"Income statement for '{ticker}' is missing required fields "
+                "(revenue/gross profit/cost of revenue) — cannot build the Sankey."
+            ),
+        )
+
+    # ---- nodes ---------------------------------------------------------
+    # `kind` drives the frontend color palette: positive flow (revenue intake,
+    # margin retention, earnings) renders green; cost/leakage renders red;
+    # neutral (raw revenue, "other") renders grey.
+    def _node(node_id: str, label: str, value: float | None, prior: float | None, kind: str) -> dict[str, Any]:
+        return {
+            "id": node_id,
+            "label": label,
+            "value": value,
+            "yoyPct": _yoy_pct(value, prior),
+            "kind": kind,
+        }
+
+    nodes: list[dict[str, Any]] = [
+        _node("revenue", "Total revenue", revenue, _val("revenue", prior_row), "neutral"),
+        _node("grossProfit", "Gross profit", gross_profit, _val("grossProfit", prior_row), "good"),
+        _node("costOfRevenue", "Cost of sales", cost_of_revenue, _val("costOfRevenue", prior_row), "bad"),
+    ]
+    if op_income is not None:
+        nodes.append(_node("operatingIncome", "Operating income", op_income, _val("operatingIncome", prior_row), "good"))
+    if op_expense is not None:
+        nodes.append(_node("operatingExpense", "Operating expenses", op_expense, _val("operatingExpense", prior_row), "bad"))
+    if rd is not None:
+        nodes.append(_node("rd", "R&D", rd, _val("researchAndDevelopment", prior_row), "bad"))
+    if sga is not None:
+        nodes.append(_node("sga", "SG&A", sga, _val("sellingGeneralAdmin", prior_row), "bad"))
+    if net_income is not None:
+        nodes.append(_node("netIncome", "Net income", net_income, _val("netIncome", prior_row), "good"))
+    if tax is not None:
+        nodes.append(_node("tax", "Taxes", tax, _val("taxProvision", prior_row), "bad"))
+    # Only surface "Other" when the net is materially non-zero (>1% of revenue).
+    # Otherwise it adds clutter for no signal.
+    other_threshold = (revenue or 0) * 0.01
+    if other_net is not None and abs(other_net) > other_threshold:
+        kind = "good" if other_net > 0 else "bad"
+        nodes.append(_node("other", "Other income / expense", other_net, None, kind))
+
+    # ---- links ---------------------------------------------------------
+    # Sankey requires non-negative link values; for "Other income" we feed the
+    # signed magnitude into the diagram but flip the source so a negative
+    # entry (typical: net interest expense) flows OUT of operating income, and
+    # a positive entry flows IN to net income.
+    links: list[dict[str, Any]] = [
+        {"source": "revenue", "target": "grossProfit", "value": gross_profit},
+        {"source": "revenue", "target": "costOfRevenue", "value": cost_of_revenue},
+    ]
+
+    have_opincome = op_income is not None
+    have_opexpense = op_expense is not None
+
+    if have_opincome and have_opexpense:
+        links.append({"source": "grossProfit", "target": "operatingIncome", "value": op_income})
+        links.append({"source": "grossProfit", "target": "operatingExpense", "value": op_expense})
+
+    if op_expense is not None:
+        if rd is not None:
+            links.append({"source": "operatingExpense", "target": "rd", "value": rd})
+        if sga is not None:
+            links.append({"source": "operatingExpense", "target": "sga", "value": sga})
+        # Residual "other opex" — anything in operating expense not captured by
+        # R&D + SG&A. Apple has ~0 here; many industrials carry depreciation,
+        # restructuring, etc. Surface only when material (>5% of opex).
+        residual_opex = op_expense - ((rd or 0) + (sga or 0))
+        if residual_opex > op_expense * 0.05:
+            nodes.append(_node("otherOpex", "Other opex", residual_opex, None, "bad"))
+            links.append({"source": "operatingExpense", "target": "otherOpex", "value": residual_opex})
+
+    if have_opincome and net_income is not None:
+        # Split Operating income into Net income + Taxes (+ Other when material).
+        # When Other is present it routes either through OpIncome (negative net,
+        # e.g. interest expense reduces OpIncome → Pretax) or into NetIncome
+        # (positive net, e.g. interest income).
+        if other_net is not None and abs(other_net) > other_threshold:
+            if other_net < 0:
+                # Treat as a cost out of OpIncome.
+                links.append({"source": "operatingIncome", "target": "other", "value": abs(other_net)})
+            else:
+                # Treat as an inflow to Net income (rendered as a separate strand).
+                links.append({"source": "other", "target": "netIncome", "value": other_net})
+        if tax is not None:
+            links.append({"source": "operatingIncome", "target": "tax", "value": max(tax, 0.0)})
+        # Net income link value = whatever's left of OpIncome after taxes (+ any
+        # negative Other). Compute explicitly to keep the diagram balanced even
+        # when yfinance's NI doesn't match the arithmetic.
+        net_link = op_income - max(tax or 0, 0.0) - (abs(other_net) if (other_net or 0) < 0 else 0.0)
+        if net_link > 0:
+            links.append({"source": "operatingIncome", "target": "netIncome", "value": net_link})
+
+    # Flat metrics map for the summary KPI row above the diagram. Carries the
+    # same Y/Y deltas as the nodes for code-path consistency.
+    metrics = {
+        "revenue": _sankey_metric(revenue, _val("revenue", prior_row)),
+        "grossProfit": _sankey_metric(gross_profit, _val("grossProfit", prior_row)),
+        "costOfRevenue": _sankey_metric(cost_of_revenue, _val("costOfRevenue", prior_row)),
+        "operatingIncome": _sankey_metric(op_income, _val("operatingIncome", prior_row)),
+        "operatingExpense": _sankey_metric(op_expense, _val("operatingExpense", prior_row)),
+        "researchAndDevelopment": _sankey_metric(rd, _val("researchAndDevelopment", prior_row)),
+        "sellingGeneralAdmin": _sankey_metric(sga, _val("sellingGeneralAdmin", prior_row)),
+        "netIncome": _sankey_metric(net_income, _val("netIncome", prior_row)),
+        "taxProvision": _sankey_metric(tax, _val("taxProvision", prior_row)),
+    }
+
+    return {
+        "ticker": normalized,
+        "period": period,
+        "asOf": current_date,
+        "priorAsOf": prior_date,
+        "metrics": metrics,
+        "nodes": nodes,
+        "links": links,
     }

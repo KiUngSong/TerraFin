@@ -15,6 +15,7 @@ from TerraFin.interface.stock.payloads import (
     build_fcf_history_payload,
     build_filing_document_payload,
     build_filings_list_payload,
+    build_income_sankey_payload,
     resolve_ticker_query,
 )
 from TerraFin.interface.valuation_models import (
@@ -214,6 +215,35 @@ class GexWall(BaseModel):
     gex_b: float
 
 
+class IncomeSankeyMetric(BaseModel):
+    value: float | None = None
+    yoyPct: float | None = None
+
+
+class IncomeSankeyNode(BaseModel):
+    id: str
+    label: str
+    value: float | None = None
+    yoyPct: float | None = None
+    kind: str  # "good" | "bad" | "neutral"
+
+
+class IncomeSankeyLink(BaseModel):
+    source: str
+    target: str
+    value: float
+
+
+class IncomeSankeyResponse(BaseModel):
+    ticker: str
+    period: str  # "quarter" | "annual"
+    asOf: str
+    priorAsOf: str | None = None
+    metrics: dict[str, IncomeSankeyMetric]
+    nodes: list[IncomeSankeyNode]
+    links: list[IncomeSankeyLink]
+
+
 class GexResponse(BaseModel):
     available: bool
     ticker: str | None = None
@@ -251,6 +281,13 @@ def create_stock_data_router() -> APIRouter:
         years: int = Query(default=10, ge=1, le=20),
     ):
         return FcfHistoryResponse(**build_fcf_history_payload(ticker, years=years))
+
+    @router.get(f"{STOCK_API_PREFIX}/income-sankey", response_model=IncomeSankeyResponse)
+    def api_income_sankey(
+        ticker: str = Query(..., min_length=1),
+        period: str = Query(default="quarter", pattern="^(quarter|annual)$"),
+    ):
+        return IncomeSankeyResponse(**build_income_sankey_payload(ticker, period=period))
 
     @router.get(f"{STOCK_API_PREFIX}/beta-estimate", response_model=BetaEstimateResponse)
     def api_beta_estimate(ticker: str = Query(..., min_length=1)):

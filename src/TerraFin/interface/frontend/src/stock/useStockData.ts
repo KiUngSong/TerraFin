@@ -105,6 +105,37 @@ interface FcfHistoryResponse {
   history: FcfHistoryRow[];
 }
 
+export type IncomeSankeyPeriod = 'quarter' | 'annual';
+
+export interface IncomeSankeyMetric {
+  value: number | null;
+  yoyPct: number | null;
+}
+
+export interface IncomeSankeyNode {
+  id: string;
+  label: string;
+  value: number | null;
+  yoyPct: number | null;
+  kind: 'good' | 'bad' | 'neutral';
+}
+
+export interface IncomeSankeyLink {
+  source: string;
+  target: string;
+  value: number;
+}
+
+export interface IncomeSankeyResponse {
+  ticker: string;
+  period: IncomeSankeyPeriod;
+  asOf: string;
+  priorAsOf: string | null;
+  metrics: Record<string, IncomeSankeyMetric>;
+  nodes: IncomeSankeyNode[];
+  links: IncomeSankeyLink[];
+}
+
 export type { ChartPoint, CompanyInfo, EarningsRecord, FcfCandidates, FcfHistoryResponse, FcfHistoryRow, FilingDocument, FilingRow, FilingsListResponse, TocEntry };
 
 export interface GexBucket {
@@ -225,6 +256,36 @@ export function useFcfHistory(ticker: string, years = 10, enabled = true) {
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
   }, [enabled, ticker, years]);
+
+  return { data, loading, error };
+}
+
+export function useIncomeSankey(
+  ticker: string,
+  period: IncomeSankeyPeriod = 'quarter',
+  enabled = true,
+) {
+  const [data, setData] = useState<IncomeSankeyResponse | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!ticker || !enabled) {
+      setData(null);
+      setError(null);
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
+    setError(null);
+    // Period flip swaps the visible dataset — keep the stale frame visible
+    // until the new one arrives so the card doesn't collapse mid-toggle.
+    fetch(`/stock/api/income-sankey?ticker=${encodeURIComponent(ticker)}&period=${period}`)
+      .then((res) => (res.ok ? res.json() : Promise.reject(new Error(`${res.status}`))))
+      .then((d: IncomeSankeyResponse) => setData(d))
+      .catch((e) => setError(e.message))
+      .finally(() => setLoading(false));
+  }, [enabled, ticker, period]);
 
   return { data, loading, error };
 }

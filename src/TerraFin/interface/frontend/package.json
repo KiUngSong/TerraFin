@@ -11,6 +11,8 @@
     "@fullcalendar/interaction": "^6.1.20",
     "@fullcalendar/list": "^6.1.20",
     "@fullcalendar/react": "^6.1.20",
+    "@nivo/core": "^0.99.0",
+    "@nivo/sankey": "^0.99.0",
     "date-fns-tz": "^3.2.0",
     "lightweight-charts": "^5.1.0",
     "react": "^19.2.4",
