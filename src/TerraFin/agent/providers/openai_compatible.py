@@ -124,7 +124,10 @@ class OpenAICompatibleResponsesRunner:
             payload["previous_response_id"] = previous_response_id
         if not previous_response_id:
             payload["instructions"] = (
-                f"Stay within the hosted TerraFin agent definition '{agent.name}' and use tools when they improve accuracy."
+                f"You are '{agent.name}'. "
+                "Follow the user's format instructions exactly — do not add preamble, commentary, or conclusions outside the requested format. "
+                "Use tools only when the user's data is insufficient; if the user provides all necessary data inline, respond directly without tool calls. "
+                "Never fabricate specific numbers (prices, percentages, EPS values) not present in the provided data."
             )
         return payload
 
