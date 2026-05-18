@@ -104,6 +104,11 @@ export function localPrefixMatch(
     const n = normalize(trimmed);
     const exact: LocalHit[] = [];
     const prefix: LocalHit[] = [];
+    const substring: LocalHit[] = [];
+    // Single-char queries would substring-match a huge slice of the alias map
+    // and drown the prefix tier in noise. Gate the substring tier so the
+    // typical 2-3 char Korean shortname hits without 1-char false-positives.
+    const allowSubstring = n.length >= 2;
     for (const [alias, ticker] of Object.entries(reg.krAliases)) {
       const aliasNorm = normalize(alias);
       if (aliasNorm === n) {
@@ -111,10 +116,16 @@ export function localPrefixMatch(
         exact.push({ symbol: ticker, name: alias, category: 'stock' });
       } else if (aliasNorm.startsWith(n)) {
         prefix.push({ symbol: ticker, name: alias, category: 'stock' });
+      } else if (allowSubstring && aliasNorm.includes(n)) {
+        // Substring tier catches the common case where the user types only
+        // the distinctive part of the company name and drops the corp prefix
+        // (SK / LG / Hyundai / etc.).
+        substring.push({ symbol: ticker, name: alias, category: 'stock' });
       }
     }
     prefix.sort((a, b) => a.name.localeCompare(b.name));
-    stocks.push(...exact, ...prefix);
+    substring.sort((a, b) => a.name.localeCompare(b.name));
+    stocks.push(...exact, ...prefix, ...substring);
   }
 
   return {

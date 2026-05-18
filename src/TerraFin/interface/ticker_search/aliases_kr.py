@@ -261,19 +261,30 @@ def lookup_kr_alias(query: str) -> str | None:
 
 
 def prefix_match_kr_aliases(query: str, limit: int = 8) -> list[tuple[str, str]]:
-    """Return [(display_name, ticker), ...] for aliases starting with query.
+    """Return [(display_name, ticker), ...] for aliases matching query.
 
-    Exact matches rank first, then alphabetical prefix matches.
+    Ranking: exact > prefix > substring. The substring tier catches the
+    common case where the user drops the corp prefix (SK / LG / Hyundai
+    / etc.) and types only the distinctive part of the name.
     """
     n = normalize_query(query)
     if not n:
         return []
     exact: list[tuple[str, str]] = []
     prefix: list[tuple[str, str]] = []
+    substring: list[tuple[str, str]] = []
+    # Single-character queries would substring-match a huge slice of the alias
+    # map ("이" alone matches dozens of names) and drown the prefix tier in
+    # noise. Gate the substring tier at len >= 2 so the typical 2-3 char Korean
+    # company shortname still hits but 1-char accidents don't.
+    allow_substring = len(n) >= 2
     for norm, ticker in _NORMALIZED.items():
         if norm == n:
             exact.append((_NORMALIZED_DISPLAY[norm], ticker))
         elif norm.startswith(n):
             prefix.append((_NORMALIZED_DISPLAY[norm], ticker))
+        elif allow_substring and n in norm:
+            substring.append((_NORMALIZED_DISPLAY[norm], ticker))
     prefix.sort(key=lambda t: t[0])
-    return (exact + prefix)[:limit]
+    substring.sort(key=lambda t: t[0])
+    return (exact + prefix + substring)[:limit]
