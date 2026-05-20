@@ -88,6 +88,13 @@ async def _handle_signal(request: Request, x_signature: str):
         log.debug("Duplicate signal ignored: %s", payload.signal_id)
         return {"status": "duplicate"}
 
+    if payload.direction is None:
+        log.warning(
+            "Inbound signal missing 'direction' field (ticker=%s, signal=%r) — "
+            "sender should upgrade to typed direction contract",
+            payload.ticker, payload.signal,
+        )
+
     log.info("Signal received: %s — %s", payload.ticker, payload.signal)
     forward_to_telegram(payload)
     return {"status": "ok"}

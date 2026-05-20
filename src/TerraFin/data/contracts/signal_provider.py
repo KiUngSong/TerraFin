@@ -22,5 +22,8 @@ class InboundSignal(BaseModel):
     signal_id: str | None = None  # sender-provided UUID; used for dedup
     fired_at: datetime | None = None
     name: str = ""  # company/indicator display name; enriched by receiver if blank
-    direction: Literal["bull", "bear", "neutral"] | None = None  # set by the detector; drives ▲/▼/◆
+    # Set by the detector; drives ▲/▼/◆. Optional for back-compat with
+    # senders predating the typed-direction contract — when missing, the
+    # inbound handler logs a warning and falls back to "neutral".
+    direction: Literal["bull", "bear", "neutral"] | None = None
     snapshot: dict = {}  # detector context at fire time (OHLCV, indicator values, etc.)

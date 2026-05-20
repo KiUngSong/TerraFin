@@ -122,31 +122,9 @@ def _html_escape(s: str) -> str:
 # consumers; rendering is bucketed because most signals fire as "high" anyway.
 _SEVERITY_EMOJI = {"high": "🔴", "med": "🟡", "medium": "🟡", "low": "🟢"}
 
-_BULLISH_KEYWORDS = ("bull", "golden", " buy", "↑", "breakout", "bounce", "coppock", "above", "long")
-_BEARISH_KEYWORDS = ("bear", "death", " sell", "↓", "breakdown", "below", "short")
-
-
 def _signal_direction(signal_dict: dict) -> str:
-    """Return ▲/▼/◆ — explicit direction field first, then snapshot.side, then keyword heuristic."""
-    direction = signal_dict.get("direction")
-    if direction == "bull":
-        return "▲"
-    if direction == "bear":
-        return "▼"
-    if direction == "neutral":
-        return "◆"
-    snapshot = signal_dict.get("snapshot") or {}
-    side = snapshot.get("side")
-    if side == 1:
-        return "▲"
-    if side == -1:
-        return "▼"
-    text = (signal_dict.get("message") or signal_dict.get("signal") or "").lower()
-    if any(k in text for k in _BULLISH_KEYWORDS):
-        return "▲"
-    if any(k in text for k in _BEARISH_KEYWORDS):
-        return "▼"
-    return "—"
+    direction = signal_dict.get("direction", "neutral")
+    return {"bull": "▲", "bear": "▼", "neutral": "◆"}.get(direction, "—")
 
 
 _SNAPSHOT_DISPLAY = {"rsi", "macd", "signal", "hist", "atr", "bb", "adx", "cci", "obv", "mfi", "vwap"}
