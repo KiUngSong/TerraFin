@@ -1,75 +1,33 @@
+"""TerraFinHostedToolAdapter — surfaces capabilities as tool definitions and
+runs tool calls against the hosted runtime."""
 from collections.abc import Mapping
-from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any
 
-from TerraFin.interface.market_insights.payloads import canonical_macro_name, resolve_macro_type
-from TerraFin.interface.stock.payloads import resolve_ticker_query
-
-from .definitions import TerraFinAgentDefinition, is_internal_agent_definition
-from .hosted_runtime import (
-    TerraFinAgentApprovalRequiredError,
-    TerraFinHostedAgentRuntime,
+from ..contracts.definitions import TerraFinAgentDefinition, is_internal_agent_definition
+from ..contracts.tool_contracts import HOSTED_TOOL_CONTRACT_VERSION, get_hosted_tool_contract
+from ..runtime.capability import TerraFinCapability
+from ..runtime.errors import TerraFinAgentApprovalRequiredError
+from ..runtime.hosted import TerraFinHostedAgentRuntime
+from ..runtime.tasks import TerraFinTaskRecord
+from .normalize import (
+    _PERSONA_CONSULT_TOOLS,
+    _looks_like_descriptive_phrase,
+    _looks_like_equity_index_or_etf,
+    _normalize_common_alias_arguments,
+    _optional_string,
+    _repair_macro_focus_name,
+    _repair_symbol_or_name,
 )
-from .runtime import TerraFinCapability, TerraFinTaskRecord
-from .tool_contracts import HOSTED_TOOL_CONTRACT_VERSION, get_hosted_tool_contract
+from .types import (
+    ToolExecutionMode,
+    TerraFinToolDefinition,
+    TerraFinToolInvocationResult,
+    _ToolErrorDisposition,
+)
 
 
 if TYPE_CHECKING:
-    from .loop import TerraFinHostedAgentLoop
-
-
-ToolExecutionMode = Literal["invoke", "task"]
-
-
-@dataclass(frozen=True, slots=True)
-class TerraFinToolDefinition:
-    name: str
-    capability_name: str
-    description: str
-    input_schema: dict[str, Any]
-    execution_mode: ToolExecutionMode = "invoke"
-    side_effecting: bool = False
-    metadata: dict[str, Any] = field(default_factory=dict)
-
-    def as_function_tool(self) -> dict[str, Any]:
-        return {
-            "type": "function",
-            "function": {
-                "name": self.name,
-                "description": self.description,
-                "parameters": self.input_schema,
-            },
-        }
-
-
-@dataclass(frozen=True, slots=True)
-class TerraFinToolInvocationResult:
-    tool_name: str
-    capability_name: str
-    session_id: str
-    execution_mode: ToolExecutionMode
-    payload: dict[str, Any]
-    task: TerraFinTaskRecord | None = None
-    is_error: bool = False
-    retryable: bool = False
-    error_code: str | None = None
-    error_message: str | None = None
-
-
-@dataclass(frozen=True, slots=True)
-class _ToolErrorDisposition:
-    code: str
-    message: str
-    retryable: bool
-    expose_to_user: bool
-    model_hint: str | None = None
-
-
-_PERSONA_CONSULT_TOOLS = {
-    "consult_warren_buffett": "warren-buffett",
-    "consult_howard_marks": "howard-marks",
-    "consult_stanley_druckenmiller": "stanley-druckenmiller",
-}
+    from ..runtime.loop import TerraFinHostedAgentLoop
 
 
 class TerraFinHostedToolAdapter:
@@ -620,101 +578,3 @@ class TerraFinHostedToolAdapter:
                 model_hint="Correct the tool arguments and retry.",
             )
         return None
-
-
-def _optional_string(value: Any) -> str | None:
-    if value is None:
-        return None
-    text = str(value).strip()
-    return text or None
-
-
-_EQUITY_INDEX_ALIASES = {
-    "spx": "SPY",
-    "spx index": "SPY",
-    "sp500": "SPY",
-    "s&p 500": "SPY",
-    "ndx": "QQQ",
-    "ndx index": "QQQ",
-    "nasdaq-100": "QQQ",
-    "nasdaq 100": "QQQ",
-    "djia": "DIA",
-    "dji": "DIA",
-    "dow jones industrial average": "DIA",
-    "rty": "IWM",
-}
-
-
-def _normalize_common_alias_arguments(arguments: dict[str, Any]) -> dict[str, Any]:
-    normalized = dict(arguments)
-    for key in ("name", "ticker"):
-        value = normalized.get(key)
-        if value is None:
-            continue
-        alias = _EQUITY_INDEX_ALIASES.get(str(value).strip().casefold())
-        if alias:
-            normalized[key] = alias
-    return normalized
-
-
-def _repair_symbol_or_name(value: str | None, *, allow_macro: bool) -> str | None:
-    if not value:
-        return None
-    alias = _EQUITY_INDEX_ALIASES.get(str(value).strip().casefold())
-    if alias:
-        return alias
-    canonical = canonical_macro_name(value)
-    if allow_macro and resolve_macro_type(canonical) is not None:
-        return canonical
-    resolved = resolve_ticker_query(value)
-    resolved_type = str(resolved.get("type") or "").strip().lower()
-    resolved_name = _optional_string(resolved.get("name"))
-    if allow_macro and resolved_type == "macro" and resolved_name:
-        return resolved_name
-    if resolved_type == "stock" and resolved_name:
-        return resolved_name
-    return None
-
-
-def _repair_macro_focus_name(value: str | None) -> str | None:
-    if not value:
-        return None
-    canonical = canonical_macro_name(value)
-    return canonical if resolve_macro_type(canonical) is not None else None
-
-
-def _looks_like_equity_index_or_etf(value: str | None) -> bool:
-    text = (value or "").strip()
-    if not text:
-        return False
-    normalized = text.casefold()
-    if normalized in _EQUITY_INDEX_ALIASES:
-        return True
-    if normalized in {
-        "spy",
-        "qqq",
-        "dia",
-        "vt",
-        "iwm",
-        "s&p 500",
-        "nasdaq",
-        "nasdaq 100",
-        "dow",
-        "dow jones",
-        "dow jones industrial average",
-        "russell 2000",
-    }:
-        return True
-    try:
-        resolved = resolve_ticker_query(text)
-    except Exception:
-        return False
-    resolved_name = _optional_string(resolved.get("name"))
-    return (resolved_name or "").upper() in {"SPY", "QQQ", "DIA", "VT", "IWM"}
-
-
-def _looks_like_descriptive_phrase(value: str) -> bool:
-    text = (value or "").strip()
-    if not text:
-        return False
-    return " " in text

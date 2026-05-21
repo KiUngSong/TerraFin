@@ -73,7 +73,7 @@ notebooks = [
 ]
 
 [project.scripts]
-terrafin-agent = "TerraFin.agent.cli:main"
+terrafin-agent = "TerraFin.agent.cli.main:main"
 terrafin-signals = "TerraFin.signals.alerting.cli:main"
 # Legacy alias — `terrafin-alerting` predates the signals/ rename. New
 # usage should prefer `terrafin-signals`; this stays so existing scripts

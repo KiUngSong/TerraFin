@@ -1,178 +1,41 @@
-"""Hidden investor-persona subagents for the main ``TerraFin Agent``.
+"""Hidden persona-subagent worker loop and tool-selection helpers.
 
-The user-facing product surface stays as a single ``TerraFin Agent``. That
-main assistant acts as the **orchestrator**: it decides, per-turn, whether
-to consult one or more hidden investor-persona subagents (Warren Buffett,
-Howard Marks, Stanley Druckenmiller) by calling a ``consult_<persona>``
-tool. The LLM makes that decision with context in hand — this module no
-longer gates behaviour on a regex router; it exposes the memo-generation
-machinery the orchestrator drives via tool-calls.
-
-Public entry point: :func:`run_guru_consult`.
+`_execute_guru_worker` drives one persona session: it lets the model call
+TerraFin tools, validates the eventual `submit_guru_research_memo` payload,
+asks for one retry on persona-fit failure, and returns a validated
+`GuruResearchMemo` (or a failure reason) to the orchestrator.
 """
 
 import json
-import re
-from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Literal, Mapping
+from typing import TYPE_CHECKING, Any, Mapping
 
-from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
+from pydantic import ValidationError
 
-from .conversation import TerraFinConversationMessage, make_text_block, make_tool_result_block
-from .conversation_state import record_tool_call_history
-from .personas import GuruPersona, PersonaRegistry, build_default_persona_registry
-from .recovery import RecoveryTracker
-from .tools import TerraFinToolDefinition
+from ..contracts.conversation import (
+    TerraFinConversationMessage,
+    make_text_block,
+    make_tool_result_block,
+)
+from ..contracts.conversation_state import record_tool_call_history
+from ..runtime.recovery import RecoveryTracker
+from ..tools import TerraFinToolDefinition
+from .feedback import _is_broad_market_request, _normalize_text, _persona_fit_feedback
+from .memo import (
+    GuruResearchMemo,
+    GuruRoutePlan,
+    HOWARD_MARKS,
+    STANLEY_DRUCKENMILLER,
+    WARREN_BUFFETT,
+    _GURU_MEMO_TOOL_NAME,
+    _build_guru_memo_tool,
+    _validate_guru_memo_arguments,
+)
+from .personas import GuruPersona, PersonaRegistry
 
 
 if TYPE_CHECKING:
-    from .conversation import TerraFinHostedConversation
-    from .loop import TerraFinHostedAgentLoop
-
-
-GuruStance = Literal["bullish", "bearish", "neutral", "abstain"]
-# `consult` is the only route type today. It marks a hidden persona subagent
-# session that was spawned by a `consult_<persona>` tool-call from the main
-# orchestrator agent (see `docs/agent/architecture.md#orchestrator--persona-subagents`).
-# Legacy literal values stay in the type for transcript-log replay of sessions
-# created before the orchestrator-as-tool refactor.
-GuruRouteType = Literal["consult", "explicit", "portfolio", "macro", "valuation"]
-
-WARREN_BUFFETT = "warren-buffett"
-HOWARD_MARKS = "howard-marks"
-STANLEY_DRUCKENMILLER = "stanley-druckenmiller"
-
-
-@dataclass(frozen=True, slots=True)
-class GuruRoutePlan:
-    """Metadata threaded into a persona subagent's research prompt.
-
-    Under the orchestrator-as-tool architecture, each `consult_<persona>`
-    call produces one plan scoped to one guru (`selected_gurus` is always
-    length-1 for new-style plans). The shape is kept for transcript-log
-    continuity and to avoid rewriting `_run_guru_research_memo` /
-    `_build_guru_research_prompt` — they accept this dataclass.
-    """
-    route_type: GuruRouteType = "consult"
-    selected_gurus: tuple[str, ...] = ()
-    reason: str = ""
-    matched_terms: tuple[str, ...] = ()
-    view_context: dict[str, Any] | None = None
-
-
-class GuruResearchMemo(BaseModel):
-    guru: str
-    stance: GuruStance
-    confidence: int = Field(ge=0, le=100)
-    thesis: str = Field(min_length=1)
-    key_evidence: list[str] = Field(default_factory=list)
-    risks: list[str] = Field(default_factory=list)
-    open_questions: list[str] = Field(default_factory=list)
-    citations: list[str] = Field(default_factory=list)
-
-    @field_validator("key_evidence", "risks", "open_questions", "citations", mode="before")
-    @classmethod
-    def _normalize_string_list(cls, value: Any) -> list[str]:
-        if value is None:
-            return []
-        if isinstance(value, str):
-            return [value.strip()] if value.strip() else []
-        if isinstance(value, list):
-            return [str(item).strip() for item in value if str(item).strip()]
-        return [str(value).strip()] if str(value).strip() else []
-
-    @model_validator(mode="after")
-    def _clamp_unsupported_confidence(self) -> "GuruResearchMemo":
-        # A persona that claims high conviction without any citations is almost
-        # always overstating. Clamp to keep the orchestrator from treating an
-        # unsupported guess as a strong signal. The orchestrator surfaces the
-        # note appended to `thesis` so the user sees why confidence dropped.
-        if self.confidence >= 80 and not self.citations:
-            self.confidence = 60
-            note = "(confidence reduced: no citations supplied)"
-            if note not in self.thesis:
-                self.thesis = f"{self.thesis.rstrip()} {note}"
-        return self
-
-
-
-_GURU_MEMO_TOOL_NAME = "submit_guru_research_memo"
-_GURU_MEMO_TOOL_DESCRIPTION = "Submit the final structured guru research memo after you finish tool-based research."
-
-
-def run_guru_consult(
-    *,
-    loop: "TerraFinHostedAgentLoop",
-    parent_session_id: str,
-    guru_name: str,
-    question: str,
-    persona_registry: PersonaRegistry | None = None,
-) -> dict[str, Any]:
-    """Consult one hidden persona subagent and return its structured memo.
-
-    This is the single public entry point for the orchestrator-as-tool
-    architecture. The main orchestrator agent calls a
-    `consult_<persona>` tool, which dispatches here, which spins up a
-    hidden session running the persona-specific research loop and
-    returns the persona's `GuruResearchMemo` as a JSON-ready dict for
-    the orchestrator to read as its tool_result.
-
-    See `docs/agent/architecture.md#orchestrator--persona-subagents` for
-    the authoritative shape.
-    """
-    registry = persona_registry or build_default_persona_registry()
-    try:
-        registry.get(guru_name)
-    except KeyError:
-        return {
-            "status": "error",
-            "guru": guru_name,
-            "reason": f"Unknown persona: {guru_name!r}. "
-            f"Valid personas: {WARREN_BUFFETT}, {HOWARD_MARKS}, {STANLEY_DRUCKENMILLER}.",
-            "steps": 0,
-        }
-
-    view_context = loop.runtime.read_linked_view_context(parent_session_id)
-    route_plan = GuruRoutePlan(
-        route_type="consult",
-        selected_gurus=(guru_name,),
-        reason="Consulted by the main orchestrator via tool-call.",
-        matched_terms=(),
-        view_context=view_context if view_context.get("available") else None,
-    )
-
-    memo, steps, failure_reason = _run_guru_research_memo(
-        loop=loop,
-        parent_session_id=parent_session_id,
-        guru_name=guru_name,
-        user_message=question,
-        route_plan=route_plan,
-        persona_registry=registry,
-    )
-
-    if memo is None:
-        return {
-            "status": "failed",
-            "guru": guru_name,
-            "reason": failure_reason
-            or "The consulted persona could not produce a structured memo.",
-            "steps": steps,
-        }
-
-    return {
-        "status": "ok",
-        "guru": guru_name,
-        "stance": memo.stance,
-        "confidence": memo.confidence,
-        "thesis": memo.thesis,
-        "keyEvidence": list(memo.key_evidence),
-        "risks": list(memo.risks),
-        "openQuestions": list(memo.open_questions),
-        "citations": list(memo.citations),
-        "steps": steps,
-    }
-
-
+    from ..contracts.conversation import TerraFinHostedConversation
+    from ..runtime.loop import TerraFinHostedAgentLoop
 
 
 def _run_guru_research_memo(
@@ -285,30 +148,6 @@ def _build_guru_research_prompt(
         lines.extend(["", "Special handling guidance:"])
         lines.extend(f"- {item}" for item in special_guidance)
     return "\n".join(lines)
-
-
-def _build_guru_memo_tool() -> TerraFinToolDefinition:
-    schema = GuruResearchMemo.model_json_schema()
-    schema["additionalProperties"] = False
-    return TerraFinToolDefinition(
-        name=_GURU_MEMO_TOOL_NAME,
-        capability_name=_GURU_MEMO_TOOL_NAME,
-        description=_GURU_MEMO_TOOL_DESCRIPTION,
-        input_schema=schema,
-        execution_mode="invoke",
-        side_effecting=False,
-        metadata={"internalOnly": True, "role": "guruMemo"},
-    )
-
-
-def _validate_guru_memo_arguments(
-    *,
-    guru_name: str,
-    arguments: Mapping[str, Any],
-) -> GuruResearchMemo:
-    payload = dict(arguments)
-    payload["guru"] = guru_name
-    return GuruResearchMemo.model_validate(payload)
 
 
 def _execute_guru_worker(
@@ -477,7 +316,6 @@ def _execute_guru_worker(
     )
 
 
-
 def _special_guru_research_guidance(
     *,
     persona: GuruPersona,
@@ -544,11 +382,11 @@ def _select_guru_worker_tools(
         if tool.execution_mode == "invoke" and not (broad_market and tool.name == "resolve")
     ]
     # Persona tool allowlists are defined in the YAML files under
-    # `src/TerraFin/agent/personas/`. The runtime tool adapter already filters
-    # by `allowed_capabilities`, so this function intentionally does not impose
-    # a second hidden allowlist for the broad-market path — broad-market and
-    # ticker-specific guru sessions get the same toolset. To gain or lose
-    # access to a capability, edit the persona's YAML.
+    # `src/TerraFin/agent/guru/personas/`. The runtime tool adapter already
+    # filters by `allowed_capabilities`, so this function intentionally does
+    # not impose a second hidden allowlist for the broad-market path --
+    # broad-market and ticker-specific guru sessions get the same toolset. To
+    # gain or lose access to a capability, edit the persona's YAML.
     return tuple(tools) + (memo_tool,)
 
 
@@ -646,335 +484,3 @@ def _sanitize_guru_tool_message(
             ),
         ),
     )
-
-
-def _normalize_text(value: str) -> str:
-    return " ".join(str(value or "").lower().split())
-
-
-def _contains_any(text: str, terms: tuple[str, ...]) -> bool:
-    return any(term in text for term in terms)
-
-
-def _flatten_view_context(view_context: Mapping[str, Any]) -> str:
-    if not view_context.get("available"):
-        return ""
-    parts: list[str] = []
-
-    def _walk(value: Any) -> None:
-        if value is None:
-            return
-        if isinstance(value, str):
-            if value.strip():
-                parts.append(value.strip())
-            return
-        if isinstance(value, Mapping):
-            for item in value.values():
-                _walk(item)
-            return
-        if isinstance(value, list):
-            for item in value:
-                _walk(item)
-            return
-        parts.append(str(value))
-
-    _walk(
-        {
-            "route": view_context.get("route"),
-            "pageType": view_context.get("pageType"),
-            "title": view_context.get("title"),
-            "summary": view_context.get("summary"),
-            "selection": view_context.get("selection"),
-            "entities": view_context.get("entities"),
-        }
-    )
-    return " ".join(parts)
-
-
-def _macro_chart_context(view_context: Mapping[str, Any]) -> bool:
-    if not view_context.get("available"):
-        return False
-    if str(view_context.get("pageType") or "").strip().lower() != "chart":
-        return False
-    context_text = _normalize_text(_flatten_view_context(view_context))
-    return _contains_any(context_text, ("dxy", "vix", "tnx", "rates", "yield", "macro"))
-
-
-def _is_broad_market_request(text: str, *, view_context: Mapping[str, Any] | None) -> bool:
-    broad_market_terms = (
-        "current market",
-        "market status",
-        "market cycle",
-        "overall market",
-        "broad market",
-        "stock market",
-        "market environment",
-        "market setup",
-        "equity market",
-        "market trade",
-        "where are we in the cycle",
-        "the cycle right now",
-        "s&p 500",
-        "nasdaq",
-        "dow",
-        "spy",
-        "qqq",
-        "dia",
-        "vt",
-        "index",
-        "indices",
-    )
-    if _contains_any(text, broad_market_terms):
-        return True
-    if not view_context or not view_context.get("available"):
-        return False
-    page_type = str(view_context.get("pageType") or "").strip().lower()
-    if page_type in {"market-insights", "chart"}:
-        context_text = _normalize_text(_flatten_view_context(view_context))
-        return _contains_any(context_text, broad_market_terms)
-    return False
-
-
-def _persona_fit_feedback(
-    *,
-    persona: GuruPersona,
-    route_plan: GuruRoutePlan,
-    memo: GuruResearchMemo,
-    user_message: str | None = None,
-) -> str | None:
-    thesis = _normalize_text(memo.thesis)
-    combined = _normalize_text(
-        " ".join(
-            [
-                memo.thesis,
-                *memo.key_evidence,
-                *memo.risks,
-                *memo.open_questions,
-                *memo.citations,
-            ]
-        )
-    )
-    technical_terms = ("rsi", "bollinger", "macd", "upper band", "overbought")
-    technical_hits = sum(1 for term in technical_terms if term in combined)
-    signature_hits = sum(1 for term in persona.signature_concepts if term.lower() in combined)
-    # Broad-market detection needs the raw question text — legacy routes
-    # stashed signal into `route_plan.matched_terms` / `route_plan.reason`,
-    # but `consult_<persona>` tool calls leave both empty. Prefer the
-    # user_message when supplied; fall back to the route-plan fields for
-    # transcript-replay of legacy plans.
-    broad_market_text = _normalize_text(
-        user_message
-        if user_message is not None
-        else " ".join(route_plan.matched_terms) + " " + route_plan.reason
-    )
-    broad_market = _is_broad_market_request(
-        broad_market_text,
-        view_context=route_plan.view_context,
-    ) or route_plan.route_type in {"explicit", "macro"}
-
-    if broad_market and technical_hits >= 2 and signature_hits == 0:
-        return (
-            "The memo relies on shared technical-analysis language but does not surface this investor's signature concepts."
-        )
-    narrative_feedback = _narrative_quality_feedback([memo.thesis, *memo.key_evidence, *memo.risks])
-    if narrative_feedback:
-        return narrative_feedback
-    question_feedback = _open_question_quality_feedback(memo.open_questions)
-    if question_feedback:
-        return question_feedback
-    if persona.name == WARREN_BUFFETT:
-        worldview_feedback = _worldview_sentence_feedback(
-            thesis=thesis,
-            combined=combined,
-            primary_terms=("business", "businesses", "owner", "price", "valuation", "wonderful business"),
-            secondary_terms=("margin of safety", "patience", "cash", "optionality"),
-            failure_text="A Buffett memo should open from the perspective of a long-term business owner and price discipline, not just valuation math.",
-        )
-        if worldview_feedback:
-            return worldview_feedback
-        if broad_market and technical_hits >= 1 and technical_hits >= max(signature_hits, 1):
-            return "A Buffett broad-market answer cannot lean on RSI, MACD, or short-term tape language as primary evidence."
-        if broad_market and signature_hits == 0:
-            return "A Buffett broad-market answer should sound patient, valuation-disciplined, and anchored in margin of safety or cash/optionality."
-    if persona.name == HOWARD_MARKS:
-        worldview_feedback = _worldview_sentence_feedback(
-            thesis=thesis,
-            combined=combined,
-            primary_terms=("cycle", "pendulum", "psychology", "optimism", "fear", "euphoria"),
-            secondary_terms=("risk premium", "paid enough for the risk", "second-level", "prepare"),
-            failure_text="A Howard Marks memo should sound like cycle position, psychology, and risk compensation are the center of gravity.",
-        )
-        if worldview_feedback:
-            return worldview_feedback
-        if broad_market and signature_hits == 0:
-            return "A Howard Marks answer should foreground cycle position, psychology, risk premium, or second-level thinking."
-    if persona.name == STANLEY_DRUCKENMILLER:
-        worldview_feedback = _worldview_sentence_feedback(
-            thesis=thesis,
-            combined=combined,
-            primary_terms=("liquidity", "rates", "yield", "bond yields", "macro tradeoff"),
-            secondary_terms=("earnings", "tape", "animal spirits", "individual stock", "edge"),
-            failure_text="A Druckenmiller memo should open with the macro tradeoff between rates/liquidity and what earnings or the tape are saying.",
-        )
-        if worldview_feedback:
-            return worldview_feedback
-        if broad_market and memo.stance == "abstain":
-            return "A Druckenmiller broad-market answer should usually weigh the macro tradeoff explicitly instead of defaulting to abstain."
-        if broad_market and signature_hits == 0:
-            return "A Druckenmiller answer should sound macro-driven, with liquidity, yields, growth, animal spirits, or stock-selection tradeoffs."
-    return None
-
-
-def _worldview_sentence_feedback(
-    *,
-    thesis: str,
-    combined: str,
-    primary_terms: tuple[str, ...],
-    secondary_terms: tuple[str, ...],
-    failure_text: str,
-) -> str | None:
-    if not any(term in thesis for term in primary_terms):
-        return failure_text
-    if not any(term in combined for term in secondary_terms):
-        return failure_text
-    return None
-
-
-def _open_question_quality_feedback(open_questions: list[str]) -> str | None:
-    allowed_starts = {
-        "what",
-        "which",
-        "whether",
-        "how",
-        "why",
-        "will",
-        "would",
-        "could",
-        "can",
-        "is",
-        "are",
-        "should",
-        "do",
-        "does",
-        "to",
-        "where",
-        "when",
-        "if",
-    }
-    for question in open_questions:
-        normalized = _normalize_text(question)
-        if not normalized:
-            continue
-        words = normalized.split()
-        if len(words) > 30:
-            return "The memo's open questions should stay plain and concrete rather than sprawling or fragmentary."
-        if any(marker in question for marker in ("[[", "]]", "{{", "}}", "__", "]]>", "<![", "=>")):
-            return "The memo's open questions should read like real investor follow-up questions, not fragments."
-        if words[0] not in allowed_starts and len(words) <= 4:
-            return "The memo's open questions should read like real investor follow-up questions, not fragments."
-    return None
-
-
-def _narrative_quality_feedback(texts: list[str]) -> str | None:
-    severe_garble = re.compile(r"(\[\[|\]\]|\{\{|\}\}|__|[A-Za-z]+_[A-Za-z]+|[A-Za-z]{4,}\]\)|\)\][A-Za-z]{2,})")
-    for text in texts:
-        stripped = text.strip()
-        if not stripped:
-            continue
-        if '\\"' in stripped or '".' in stripped or '."' in stripped:
-            return "The memo contains garbled quoted fragments rather than clean investor prose."
-        if severe_garble.search(stripped):
-            return "The memo contains garbled fragments rather than clean investor prose."
-        for raw_word in stripped.replace(",", " ").replace(";", " ").split():
-            cleaned = raw_word.strip("?.!()[]{}:;\"'")
-            if raw_word.count("-") >= 2 and len(cleaned) > 18:
-                return "The memo contains garbled compound phrasing rather than clean investor prose."
-    return None
-
-
-def _displayable_open_questions(open_questions: list[str]) -> list[str]:
-    if _open_question_quality_feedback(open_questions):
-        return []
-    allowed_caps = {"SPY", "QQQ", "DIA", "VT", "IWM", "M2", "CPI", "VIX", "DXY", "Fed", "Federal", "Reserve", "Treasury", "Apple", "Buffett", "Marks", "Druckenmiller"}
-    displayable: list[str] = []
-    for question in open_questions:
-        stripped = question.strip()
-        if not stripped.endswith("?"):
-            continue
-        bad_wording = False
-        for raw_word in stripped.replace(",", " ").replace(";", " ").split():
-            if "-" in raw_word and not any(ch.isdigit() for ch in raw_word):
-                bad_wording = True
-                break
-            cleaned = raw_word.strip("?.!()[]{}:;\"'")
-            if cleaned and cleaned[0].isupper() and cleaned not in allowed_caps and raw_word != stripped.split()[0]:
-                bad_wording = True
-                break
-        if not bad_wording:
-            displayable.append(question)
-    return displayable
-
-
-def _displayable_memo_points(
-    *,
-    persona: GuruPersona,
-    items: list[str],
-    point_type: str,
-) -> list[str]:
-    keyword_priority: dict[str, tuple[tuple[str, ...], ...]] = {
-        WARREN_BUFFETT: (
-            ("moat", "pricing power", "brand", "ecosystem", "cash", "owner", "management", "capital allocation"),
-            ("margin of safety", "intrinsic value", "price", "valuation", "discount", "premium", "pe", "multiple"),
-        ),
-        HOWARD_MARKS: (
-            ("cycle", "psychology", "sentiment", "optimism", "euphoria", "fear", "fomo", "pendulum"),
-            ("risk premium", "paid enough for the risk", "valuation", "breadth", "second-level", "downside"),
-        ),
-        STANLEY_DRUCKENMILLER: (
-            ("liquidity", "rates", "yield", "bond", "earnings", "tape", "momentum", "animal spirits"),
-            ("breadth", "volatility", "macro", "risk-reward", "valuation", "tradeoff", "edge"),
-        ),
-    }
-    tiers = keyword_priority.get(persona.name, ((),))
-    scored: list[tuple[int, str]] = []
-    fallback: list[str] = []
-    for item in items:
-        stripped = item.strip()
-        if not stripped:
-            continue
-        if _narrative_quality_feedback([stripped]):
-            continue
-        if any(marker in stripped for marker in ("[[", "]]", "{{", "}}", "__", "....", "=>")):
-            continue
-        normalized = _normalize_text(stripped)
-        words = normalized.split()
-        if len(words) < 4:
-            continue
-        score = 0
-        for index, tier in enumerate(tiers):
-            if any(term in normalized for term in tier):
-                score = max(score, len(tiers) - index)
-        if point_type == "evidence" and score == 0 and persona.name == STANLEY_DRUCKENMILLER:
-            if any(term in normalized for term in ("spy", "qqq", "s&p", "nasdaq")):
-                score = 1
-        if score > 0:
-            scored.append((score, stripped))
-        else:
-            fallback.append(stripped)
-    scored.sort(key=lambda item: (-item[0], items.index(item[1])))
-    selected = [item for _, item in scored[:3]]
-    if not selected:
-        selected = fallback[:3]
-    return selected
-
-
-
-__all__ = [
-    "GuruResearchMemo",
-    "GuruRoutePlan",
-    "WARREN_BUFFETT",
-    "HOWARD_MARKS",
-    "STANLEY_DRUCKENMILLER",
-    "_select_guru_worker_tools",
-    "run_guru_consult",
-]

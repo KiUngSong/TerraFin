@@ -1,7 +1,7 @@
 """Agent-facing client, service, and task helpers for TerraFin."""
 
-from .client import TerraFinAgentClient
-from .definitions import (
+from .service.client import TerraFinAgentClient
+from .contracts.definitions import (
     DEFAULT_HOSTED_AGENT_DESCRIPTION,
     DEFAULT_HOSTED_AGENT_NAME,
     TerraFinAgentDefinition,
@@ -14,22 +14,29 @@ from .guru import (
     GuruRoutePlan,
     run_guru_consult,
 )
-from .hosted_runtime import (
+from .runtime import (
     TerraFinAgentApprovalRequiredError,
+    TerraFinAgentContext,
     TerraFinAgentPolicyError,
-    TerraFinHostedAgentRuntime,
-)
-from .loop import (
+    TerraFinAgentSession,
+    TerraFinArtifact,
+    TerraFinCapability,
+    TerraFinCapabilityRegistry,
     TerraFinConversationMessage,
     TerraFinHostedAgentLoop,
+    TerraFinHostedAgentRuntime,
     TerraFinHostedConversation,
     TerraFinHostedModelClient,
     TerraFinHostedRunResult,
     TerraFinModelTurn,
+    TerraFinTaskRecord,
+    TerraFinTaskRegistry,
     TerraFinToolCall,
+    build_default_capability_registry,
     build_default_system_prompt,
+    create_agent_context,
 )
-from .model_runtime import (
+from .models.runtime import (
     TerraFinModelConfigError,
     TerraFinModelProvider,
     TerraFinModelProviderRegistry,
@@ -37,13 +44,13 @@ from .model_runtime import (
     TerraFinProviderRoutedModelClient,
     TerraFinRuntimeModel,
 )
-from .openai_model import (
+from .models.providers.openai import (
     TerraFinOpenAIConfigError,
     TerraFinOpenAIModelConfig,
     TerraFinOpenAIResponseError,
     TerraFinOpenAIResponsesModelClient,
 )
-from .providers import (
+from .models.providers import (
     TerraFinGithubCopilotConfig,
     TerraFinGithubCopilotConfigError,
     TerraFinGithubCopilotResponseError,
@@ -54,28 +61,21 @@ from .providers import (
     TerraFinGoogleResponsesProvider,
     TerraFinOpenAIResponsesProvider,
 )
-from .runtime import (
-    TerraFinAgentContext,
-    TerraFinAgentSession,
-    TerraFinArtifact,
-    TerraFinCapability,
-    TerraFinCapabilityRegistry,
-    TerraFinTaskRecord,
-    TerraFinTaskRegistry,
-    build_default_capability_registry,
-    create_agent_context,
-)
-from .runtime_helpers import TerraFinRuntimeSessionClient, ask_agent, create_runtime_session
 from .service import TerraFinAgentService
-from .session_store import (
+from .service.client_helpers import TerraFinRuntimeSessionClient, ask_agent, create_runtime_session
+from .storage import (
+    HostedSessionIndexEntry,
     HostedSessionStore,
+    HostedTranscriptReader,
+    HostedTranscriptStore,
     InMemoryHostedSessionStore,
     SQLiteHostedSessionStore,
     TerraFinHostedApprovalRequest,
     TerraFinHostedPermissionEvent,
     TerraFinHostedSessionRecord,
+    TerraFinHostedViewContextRecord,
 )
-from .tasks import (
+from .cli.tasks import (
     calendar_scan,
     compare_assets,
     macro_context,
@@ -139,12 +139,16 @@ __all__ = [
     "TerraFinTaskRegistry",
     "TerraFinTaskRecord",
     "TerraFinArtifact",
+    "HostedSessionIndexEntry",
     "HostedSessionStore",
+    "HostedTranscriptReader",
+    "HostedTranscriptStore",
     "InMemoryHostedSessionStore",
     "SQLiteHostedSessionStore",
     "TerraFinHostedApprovalRequest",
     "TerraFinHostedPermissionEvent",
     "TerraFinHostedSessionRecord",
+    "TerraFinHostedViewContextRecord",
     "build_default_agent_definition_registry",
     "build_guru_agent_definitions",
     "build_default_capability_registry",

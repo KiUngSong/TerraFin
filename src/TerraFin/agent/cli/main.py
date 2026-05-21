@@ -6,9 +6,9 @@ from typing import Any
 
 from TerraFin.env import load_entrypoint_dotenv
 
-from .client import TerraFinAgentClient
-from .hosted_service import build_hosted_model_provider_registry
-from .model_management import (
+from ..service.client import TerraFinAgentClient
+from ..service.hosted import build_hosted_model_provider_registry
+from ..models.management import (
     build_provider_auth_status,
     get_provider_catalog,
     get_saved_provider_credentials,
@@ -18,7 +18,7 @@ from .model_management import (
     set_saved_default_model_ref,
     set_saved_provider_credentials,
 )
-from .providers.github_copilot import (
+from ..models.providers.github_copilot import (
     poll_github_copilot_device_access_token,
     request_github_copilot_device_code,
 )
@@ -497,7 +497,7 @@ def _capabilities_payload(
     `--with-schema` additionally pulls the input JSON Schema for each capability
     from the FastAPI app's OpenAPI document.
     """
-    from .runtime import build_default_capability_registry
+    from ..runtime.capability import build_default_capability_registry
 
     registry = build_default_capability_registry()
     schemas: dict[str, Any] = {}
