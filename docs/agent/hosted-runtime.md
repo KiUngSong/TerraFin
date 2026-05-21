@@ -102,25 +102,30 @@ runtime/session store. Only conversation history moved to transcript files.
 
 ## Important files
 
+Module paths use the post-refactor canonical locations. Old top-level paths
+(e.g. `agent/loop.py`, `agent/transcript_store.py`) remain as compatibility
+shims — see [architecture.md § Current code map](./architecture.md#current-code-map)
+for the full old → new mapping.
+
 | File | What it owns |
 |------|---------------|
-| `src/TerraFin/agent/runtime.py` | capability registry, session context, task registry, artifact tracking |
-| `src/TerraFin/agent/definitions.py` | hosted agent definitions and allowlists |
-| `src/TerraFin/agent/hosted_runtime.py` | session lifecycle, policy enforcement, task dispatch, transcript-aware session access |
-| `src/TerraFin/agent/loop.py` | hosted loop, immediate message append flow, provider state persistence |
-| `src/TerraFin/agent/conversation.py` | internal message/block protocol and conversation dataclasses |
-| `src/TerraFin/agent/guru.py` | route planning, hidden guru execution, and structured memo synthesis |
-| `src/TerraFin/agent/tool_execution.py` | structured tool execution outcomes and tool-result message creation |
-| `src/TerraFin/agent/transcript_normalizer.py` | transcript repair, tool-use/tool-result pairing, internal/public view split |
-| `src/TerraFin/agent/context_budget.py` | proactive prompt-budget estimation and compaction levels |
-| `src/TerraFin/agent/recovery.py` | per-turn recovery budget / repeated-error policy |
-| `src/TerraFin/agent/transcript_store.py` | append-only transcript store, `sessions.json` index, transcript readers, archive/rewrite helpers |
-| `src/TerraFin/agent/session_store.py` | non-transcript hosted state: tasks, approvals, audit, view context, transient conversation attachment |
-| `src/TerraFin/agent/model_runtime.py` | provider registry, runtime-model binding, canonical `provider/model` refs |
-| `src/TerraFin/agent/providers/*.py` | provider adapters for OpenAI, Gemini, and GitHub Copilot |
-| `src/TerraFin/agent/tools.py` | function-callable tool definitions and tool execution bridge |
-| `src/TerraFin/agent/client.py` | Python transport adapter |
-| `src/TerraFin/agent/cli.py` | CLI adapter |
+| `src/TerraFin/agent/runtime/capability.py` | capability registry, session context, task registry, artifact tracking |
+| `src/TerraFin/agent/contracts/definitions.py` | hosted agent definitions and allowlists |
+| `src/TerraFin/agent/runtime/hosted.py` | session lifecycle, policy enforcement, task dispatch, transcript-aware session access |
+| `src/TerraFin/agent/runtime/loop.py` | hosted loop, immediate message append flow, provider state persistence |
+| `src/TerraFin/agent/contracts/conversation.py` | internal message/block protocol and conversation dataclasses |
+| `src/TerraFin/agent/guru/worker.py` | route planning, hidden guru execution, and structured memo synthesis |
+| `src/TerraFin/agent/tools/execution.py` | structured tool execution outcomes and tool-result message creation |
+| `src/TerraFin/agent/runtime/transcript_normalizer.py` | transcript repair, tool-use/tool-result pairing, internal/public view split |
+| `src/TerraFin/agent/runtime/context_budget.py` | proactive prompt-budget estimation and compaction levels |
+| `src/TerraFin/agent/runtime/recovery.py` | per-turn recovery budget / repeated-error policy |
+| `src/TerraFin/agent/storage/transcript_store.py` | append-only transcript store, `sessions.json` index, transcript readers, archive/rewrite helpers |
+| `src/TerraFin/agent/storage/session_store.py` | non-transcript hosted state: tasks, approvals, audit, view context, transient conversation attachment |
+| `src/TerraFin/agent/models/runtime.py` | provider registry, runtime-model binding, canonical `provider/model` refs |
+| `src/TerraFin/agent/models/providers/*.py` | provider adapters for OpenAI, Gemini, and GitHub Copilot |
+| `src/TerraFin/agent/tools/adapter.py` | function-callable tool definitions and tool execution bridge |
+| `src/TerraFin/agent/service/client.py` | Python transport adapter (`TerraFinAgentClient`) |
+| `src/TerraFin/agent/cli/main.py` | CLI adapter (`terrafin-agent`) |
 | `src/TerraFin/interface/agent/data_routes.py` | HTTP runtime endpoints |
 | `src/TerraFin/interface/frontend/src/agent/GlobalAgentWidget.tsx` | floating assistant widget |
 | `src/TerraFin/interface/frontend/src/AppRouter.tsx` | mounts the widget across the main pages |

@@ -1,7 +1,7 @@
 # TerraFin
 
 **TerraFin** — *terraform finance*. An **agent-friendly** financial-research
-toolkit: 27 capabilities (DCF with turnaround mode, reverse DCF, FCF history,
+toolkit: 30 capabilities (DCF with turnaround mode, reverse DCF, FCF history,
 SEC filings TOC + section bodies, sentiment widgets, market breadth, guru
 portfolios, view-context reader) callable from Claude Code, Codex, opencode,
 or TerraFin's own hosted agent.

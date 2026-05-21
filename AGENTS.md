@@ -2,6 +2,15 @@
 
 Read this file first when working inside the TerraFin repository.
 
+**Agent / worker dropping in?** Start at [docs/agent/index.md](./docs/agent/index.md)
+for the glossary + start-here map, then
+[docs/agent/usage.md](./docs/agent/usage.md) for the **"If you want to do X,
+use this tool"** index and the **"Don't roll your own"** anti-pattern tables.
+Hand-rolling `urllib`/`requests`/regex against SEC EDGAR (or against any of
+TerraFin's already-shipped capabilities) is almost always the wrong move —
+the helpers carry rate-limit, cache, and parser semantics the manual path
+doesn't.
+
 TerraFin is an **agent-friendly** financial-research toolkit with two
 supported usage modes (see [README.md](./README.md) "Two ways to use
 TerraFin"):
@@ -54,13 +63,17 @@ Hosted-runtime-only tools (no stateless HTTP route):
 ## Persona allowlists
 
 Persona tool access is defined in YAML files under
-[`src/TerraFin/agent/personas/`](./src/TerraFin/agent/personas/). The
+[`src/TerraFin/agent/guru/personas/`](./src/TerraFin/agent/guru/personas/). The
 `allowed_capabilities` field on each persona is the **single source of
-truth** — there is no longer a hidden `_select_guru_worker_tools`
-broad-market override (removed in the recent agent-friendly cleanup).
+truth**. `_select_guru_worker_tools` (in `agent/guru/worker.py`) still exists
+but intentionally does not impose a second hidden allowlist — broad-market
+and ticker-specific guru sessions get the same persona-filtered toolset.
 
 To grant or revoke a capability for Buffett / Marks / Druckenmiller, edit
 the corresponding YAML.
+
+(`src/TerraFin/agent/personas/` remains as a compatibility shim that
+re-exports `agent.guru.personas`.)
 
 ## Choose the right path
 
@@ -93,19 +106,22 @@ Use this when changing:
 
 When you add a new capability:
 
-1. Register it in `src/TerraFin/agent/runtime.py` capability list. Populate
-   `summary`, `cli_subcommand_name` (if exposed via the CLI), `http_route_path`,
-   and `response_model_name` so downstream artefacts can derive accurate
-   metadata.
-2. Add a parity HTTP route to
+1. Register it in `src/TerraFin/agent/runtime/capability.py`
+   (`build_default_capability_registry`). Populate `summary`,
+   `cli_subcommand_name` (if exposed via the CLI), `http_route_path`, and
+   `response_model_name` so downstream artefacts can derive accurate metadata.
+2. Add the tool input schema in `src/TerraFin/agent/contracts/tool_contracts.py`
+   (`HOSTED_TOOL_CONTRACTS`).
+3. Add a parity HTTP route to
    `src/TerraFin/interface/agent/data_routes.py` (the `http_route_path` you
    declared above).
-3. Add the recipe / worked example to
+4. Add the recipe / worked example to
    [skills/terrafin/SKILL.md](./skills/terrafin/SKILL.md) — recipe sections
-   stay hand-edited.
-4. Update the relevant persona YAML in
-   `src/TerraFin/agent/personas/` if it should be persona-callable.
-5. Run `python scripts/generate-agent-artefacts.py` to refresh the
+   stay hand-edited. Also add a row to the "If you want to do X" table in
+   [docs/agent/usage.md](./docs/agent/usage.md).
+5. Update the relevant persona YAML in
+   `src/TerraFin/agent/guru/personas/` if it should be persona-callable.
+6. Run `python scripts/generate-agent-artefacts.py` to refresh the
    sentinel-bounded "Key client methods" list in SKILL.md and the "Route
    summary" table in `docs/agent/usage.md`. The `package-smoke` CI job runs
    `--check` mode and fails if artefacts are stale. Verify locally with

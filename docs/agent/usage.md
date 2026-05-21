@@ -22,6 +22,113 @@ That means:
 If you are maintaining the runtime itself, read [hosted-runtime.md](./hosted-runtime.md)
 and [architecture.md](./architecture.md). This document is the usage guide.
 
+## If you want to do X, use this tool
+
+Scan this table **first** before reaching for `requests` / `urllib` /
+`yfinance` / pandas-html / regex parsers. Every row below is already shipped
+with rate-limit, retry, cache, and progressive-history handling.
+
+| If you want to...                                          | Use this tool                                                       |
+| ---------------------------------------------------------- | ------------------------------------------------------------------- |
+| Resolve a ticker/name into a TerraFin route                | `resolve(query)`                                                    |
+| Get a chart-ready OHLC series                              | `market_data(name, depth, view)`                                    |
+| Get a one-asset snapshot (price action + indicators)       | `market_snapshot(name, depth, view, force_refresh=False)` — response `asof` is the ISO date of the last bar served; pass `force_refresh=True` only for time-sensitive snapshots (mid-session, freshly-closed bar) to bypass the 24h `yfinance.full` cache |
+| Get company profile / valuation fields                     | `company_info(ticker)`                                              |
+| Get earnings history (estimate / reported / surprise)      | `earnings(ticker)`                                                  |
+| Get income / balance / cashflow statement                  | `financials(ticker, statement, period)`                             |
+| List a ticker's recent 10-K / 10-Q / 8-K filings           | `sec_filings(ticker)`                                               |
+| Get a single filing's TOC (no full body)                   | `sec_filing_document(ticker, accession, primaryDocument, form)`     |
+| Pull one filing section's markdown body                    | `sec_filing_section(..., sectionSlug, form)`                        |
+| Run DCF / reverse DCF / Graham / relative valuation        | `valuation(ticker, ...)` (see SKILL.md for turnaround inputs)       |
+| Inspect FCF base candidates (3yr_avg / annual / TTM)       | `fcf_history(ticker, years)`                                        |
+| Get S&P 500 index-level DCF                                | `sp500_dcf()`                                                       |
+| Get 5y monthly beta vs mapped benchmark                    | `beta_estimate(ticker)`                                             |
+| Get statistical risk profile (tail risk, drawdown, regime) | `risk_profile(name)`                                                |
+| Run a fundamental quality / moat screen                    | `fundamental_screen(ticker)`                                        |
+| Get guru portfolio holdings (Buffett / Marks / Druck.)     | `portfolio(guru)`                                                   |
+| Get FRED-backed economic indicator series                  | `economic(indicators)`                                              |
+| Get macro summary + chart-ready series                     | `macro_focus(name, depth, view)`                                    |
+| Scan calendar events for a month                           | `calendar_events(year, month, categories, limit)`                   |
+| Detect bubble (super-exp growth + log-periodic osc.)       | `lppl_analysis(name, depth, view)`                                  |
+| Find chart-shape-similar historical episodes               | `similarity_search(ticker, universe, period, top_n)`                |
+| Get market temperature signals                             | `fear_greed()`, `market_regime()`, `market_breadth()`, `trailing_forward_pe()` |
+| Get top companies by market cap                            | `top_companies()`                                                   |
+| Read the user's watchlist                                  | `watchlist()`                                                       |
+| Get chart-matching technical indicators                    | `indicators(name, indicators, depth, view)`                         |
+| Get named pattern signals matching the latest bar          | `patterns(name, depth, view)`                                       |
+| Read which panel/form the user is currently looking at     | `current_view_context()` (hosted runtime only)                      |
+| Open a chart artifact bound to the session                 | `open_chart(name)` (hosted runtime only)                            |
+| List / authenticate / switch hosted models                 | `terrafin-agent models ...` (see [models.md](./models.md))          |
+| Discover capability schemas programmatically               | `GET /openapi.json` — filter `paths` to `/agent/api/*`              |
+
+Capability signatures with full parameter ranges and worked examples live in
+[`skills/terrafin/SKILL.md`](https://github.com/KiUngSong/TerraFin/blob/main/skills/terrafin/SKILL.md).
+The route summary further down this page is auto-generated and lists every
+HTTP route.
+
+## Don't roll your own
+
+Reach for the TerraFin helper before hand-rolling any of the patterns below.
+Each one has been a real source of breakage (rate-limit, cache miss,
+parser inconsistency, hidden-API drift).
+
+### SEC EDGAR — don't roll your own scrape
+
+If you find yourself reaching for `urllib.request.urlopen("https://www.sec.gov/...")`,
+regex-parsing the accession folder index, or stripping `<html>` tags by hand —
+stop. The same content is one tool call away through the parsed + cached path:
+
+| Manual approach (DON'T)                                              | TerraFin tool (DO)                                                                          |
+| -------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| `urlopen("https://www.sec.gov/Archives/edgar/data/<cik>/<acc>/")` to list exhibits | `sec_filing_document(ticker, accession, primaryDocument, form="8-K")` → `toc` carries `exhibit-991-press-release` / `exhibit-992-supplemental-material` slugs |
+| `urlopen("https://www.sec.gov/.../q1fy27pr.htm")` to grab the earnings PR | `sec_filing_section(..., sectionSlug="exhibit-991-press-release", form="8-K")` → returns parsed markdown body |
+| Strip `<p>` / `<table>` / `&nbsp;` with regex                        | already done — `sec_filing_section` returns clean markdown                                  |
+| Strip the `/ix?doc=` viewer wrapper off `documentUrl`                | use `sec_filing_document` / `sec_filing_section` instead of dereferencing the URL yourself |
+
+Why this matters:
+- SEC rate-limits aggressively (~10 req/s per IP). The TerraFin helpers
+  share a single `SECClient` with rate-limit + retry; raw `urllib` does not.
+- Parsed markdown is cached 30 days under `sec.parsed`; raw fetches re-pull
+  every newsletter run.
+- Bypassing the cache risks SEC IP-banning the host.
+
+The `form` arg is required for 8-K exhibit content — service defaults to
+`"10-Q"`, and 8-Ks called without `form="8-K"` produce only the 4 KB cover
+sheet stub (no exhibits appended). Pull `form` from
+`sec_filings(...)["latestByForm"][...]["form"]` (or from any flat-list entry)
+and pass it through every call.
+
+### 8-K exhibits — don't bypass `fetch_and_parse_filing`
+
+If you're tempted to call `download_filing(...)` then `parse_sec_filing(...)`
+yourself for an 8-K, you'll get the 4 KB cover sheet with **no exhibits
+appended**. The exhibit-appending logic lives only in
+`fetch_and_parse_filing(cik, accession, doc, "8-K", include_images)`.
+
+| Manual approach (DON'T)                                                                | TerraFin tool (DO)                                                                  |
+| -------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
+| `parse_sec_filing(download_filing(cik, acc, doc), "8-K")`                              | `fetch_and_parse_filing(cik, acc, doc, "8-K", include_images=False)` — appends every `EX-99.x` exhibit |
+| Manually loop `list_filing_files()` → `download_exhibit()` → `parse_sec_filing()`      | `fetch_and_parse_filing(...)` — already does this with per-exhibit error markers    |
+| Call `sec_filing_section` without `form="8-K"`                                         | always pass `form="8-K"` — service defaults to `"10-Q"`                             |
+
+The agent-facing path (`sec_filing_section`) wraps `fetch_and_parse_filing`
+under the cache; only fall through to `fetch_and_parse_filing` directly when
+writing non-agent data-layer code (route handlers, batch ingestion).
+
+### Model catalog — don't reach into `_PROVIDER_CATALOG`
+
+The provider catalog is a public function, not a private dict.
+
+| Manual approach (DON'T)                                                   | TerraFin tool (DO)                                                       |
+| ------------------------------------------------------------------------- | ------------------------------------------------------------------------ |
+| `from TerraFin.agent.models.management import _PROVIDER_CATALOG`          | `from TerraFin.agent.models.management import list_provider_catalog`     |
+| `_PROVIDER_CATALOG["openai"].featured_model_refs`                         | `get_provider_catalog("openai").featured_model_refs`                     |
+| Iterate the private dict to discover providers                            | `for entry in list_provider_catalog(): ...`                              |
+
+The private `_PROVIDER_CATALOG` mapping may be renamed or reshaped without
+notice; `list_provider_catalog()` / `get_provider_catalog(provider_id)` are
+the stable surface.
+
 ## Choose a surface
 
 There are two agent-facing HTTP families:
@@ -83,7 +190,7 @@ called out to downstream product surfaces, integrators, and end users:
 - a `confidence` score ≥ 80 returned by a persona consult carries at least one
   citation — the `GuruResearchMemo` validator clamps unsupported high-confidence
   memos to 60 before returning them to the orchestrator (see
-  [guru.py](https://github.com/KiUngSong/TerraFin/blob/main/src/TerraFin/agent/guru.py))
+  [guru/memo.py](https://github.com/KiUngSong/TerraFin/blob/main/src/TerraFin/agent/guru/memo.py))
 
 The orchestrator's system prompt carries a matching `DISCLOSURE` paragraph so the
 model stays inside this framing. Product surfaces that embed the widget or call
@@ -150,14 +257,23 @@ Every structured research response includes a top-level `processing` object.
 
 ## Common tasks
 
+Multi-step task recipes. For a one-row "what tool do I need" lookup, scan the
+[tool-index table at the top](#if-you-want-to-do-x-use-this-tool) instead.
+
+Rows marked **(helper)** are composed module-level functions exported from
+`from TerraFin.agent import …` — not registered capabilities. They wrap
+one or more capabilities (e.g. `compare_assets` calls `resolve` + `market_snapshot`
+under the hood). They're not in the 30-row capability table because they
+don't appear in the agent capability registry.
+
 | Task | Recommended entrypoint |
 |------|------------------------|
 | Ticker brief | `resolve(...)` then `market_snapshot(...)` |
 | Market snapshot | `market_snapshot(name, depth="auto", view="daily")` |
-| Compare assets | `compare_assets([...], depth="auto", view="daily")` |
-| Macro context | `macro_context(name, depth="auto", view="daily")` |
-| Portfolio context | `portfolio_context(guru)` |
-| Stock fundamentals | `stock_fundamentals(ticker, statement="income", period="annual")` |
+| Compare assets | `compare_assets([...], depth="auto", view="daily")` **(helper)** |
+| Macro context | `macro_context(name, depth="auto", view="daily")` **(helper)** |
+| Portfolio context | `portfolio_context(guru)` **(helper)** |
+| Stock fundamentals | `stock_fundamentals(ticker, statement="income", period="annual")` **(helper)** |
 | Stock DCF | `valuation(ticker, projection_years=..., fcf_base_source=..., breakeven_year=..., breakeven_cash_flow_per_share=..., post_breakeven_growth_pct=...)` |
 | FCF history candidates | `fcf_history(ticker, years=10)` |
 | SEC filings | `sec_filings(ticker)` → `sec_filing_document(..., form=...)` → `sec_filing_section(..., sectionSlug=..., form=...)`. **Pass the actual `form` string** ("10-K" / "10-Q" / "8-K" / "8-K/A") on every call — service defaults to "10-Q". For 8-K, the TOC includes `exhibit-991-press-release` / `exhibit-992-supplemental-material` slugs holding the earnings PR + CFO commentary bodies. |
@@ -166,6 +282,11 @@ Every structured research response includes a top-level `processing` object.
 | Bubble analysis | `lppl_analysis(name, depth="auto", view="daily")` |
 | Chart similarity search | `similarity_search(ticker, universe="sp500+nasdaq100+kospi200", period="1y", top_n=20)` |
 | Open chart | `open_chart(...)` when the chart is explicitly useful |
+
+> See [Don't roll your own → SEC EDGAR](#sec-edgar--dont-roll-your-own-scrape)
+> for the anti-pattern table and why the helper exists. The summary: pass
+> `form="8-K"` explicitly (service defaults to `"10-Q"`), pull it from
+> `sec_filings(...)["latestByForm"][...]["form"]`.
 
 > The full per-capability call signature, parameter ranges, and worked
 > examples (including DCF turnaround mode) live in
@@ -223,10 +344,10 @@ Use the TerraFin Agent button in the lower-right corner.
 
 Stateless capability routes (every hosted-runtime tool also has a parity HTTP
 route under `/agent/api/*` — see `skills/terrafin/SKILL.md` for the full
-27-capability table with Python / CLI signatures).
+30-capability table with Python / CLI signatures).
 
 <!-- The route table below is auto-generated from
-     src/TerraFin/agent/runtime.py by
+     src/TerraFin/agent/runtime/capability.py by
      `python scripts/generate-agent-artefacts.py`. Edit the registry, not
      this section. Hand-edits will be overwritten. -->
 

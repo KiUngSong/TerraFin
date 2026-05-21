@@ -396,23 +396,36 @@ Shape:
 
 ## Current code map
 
-| File | Role |
-|------|------|
-| `src/TerraFin/agent/runtime.py` | shared kernel primitives |
-| `src/TerraFin/agent/service.py` | capability implementation layer |
-| `src/TerraFin/agent/definitions.py` | hosted agent definition registry |
-| `src/TerraFin/agent/guru.py` | hidden persona subagent runner and structured research-memo schema (see [Orchestrator + persona subagents](#orchestrator-persona-subagents)) |
-| `src/TerraFin/agent/hosted_runtime.py` | hosted runtime controller and policy layer |
-| `src/TerraFin/agent/transcript_store.py` | append-only transcript store and session index |
-| `src/TerraFin/agent/session_store.py` | non-transcript hosted state, approvals, tasks, audit, and view context |
-| `src/TerraFin/agent/model_runtime.py` | provider registry, canonical model refs, and runtime model binding |
-| `src/TerraFin/agent/model_management.py` | saved model/auth state and CLI-facing provider catalog |
-| `src/TerraFin/agent/providers/*.py` | provider adapters for OpenAI, Gemini, and GitHub Copilot |
-| `src/TerraFin/agent/tools.py` | hosted tool adapter |
-| `src/TerraFin/agent/loop.py` | provider-agnostic hosted loop and transcript append flow |
-| `src/TerraFin/agent/openai_model.py` | compatibility re-export for the OpenAI provider module |
-| `src/TerraFin/interface/agent/data_routes.py` | HTTP adapter |
-| `src/TerraFin/interface/frontend/src/agent/GlobalAgentWidget.tsx` | browser widget over the hosted runtime |
+The agent package was split into sub-packages — compatibility shims at the
+old top-level paths re-export the new locations so external imports keep
+working, but new code should target the canonical paths below.
+
+| Module (canonical)                                                  | Role                                                                                          | Shim at                                  |
+|----------------------------------------------------------------------|-----------------------------------------------------------------------------------------------|------------------------------------------|
+| `agent/runtime/capability.py`                                        | capability registry + `build_default_capability_registry`                                     | (re-exported via `agent/runtime/__init__.py`) |
+| `agent/runtime/hosted.py`                                            | hosted runtime controller and policy layer                                                    | `agent/hosted_runtime.py`                |
+| `agent/runtime/loop.py`                                              | provider-agnostic hosted loop and transcript append flow                                      | `agent/loop.py`                          |
+| `agent/runtime/context.py`, `session.py`, `tasks.py`, `artifacts.py` | session context, task registry, artifact tracking                                             | —                                        |
+| `agent/runtime/transcript_normalizer.py`, `context_budget.py`, `recovery.py` | normalization, prompt-budget estimation, per-turn recovery                            | —                                        |
+| `agent/contracts/tool_contracts.py`                                  | LLM-facing tool input schemas                                                                 | `agent/tool_contracts.py`                |
+| `agent/contracts/definitions.py`                                     | hosted agent definition registry                                                              | `agent/definitions.py`                   |
+| `agent/contracts/conversation.py`, `conversation_state.py`           | message/block protocol + conversation dataclasses                                             | `agent/conversation.py`, `conversation_state.py` |
+| `agent/service/service.py`                                           | capability implementation layer (`TerraFinAgentService`)                                      | —                                        |
+| `agent/service/hosted.py`                                            | hosted-service wiring                                                                         | `agent/hosted_service.py`                |
+| `agent/service/client.py`                                            | Python transport adapter (`TerraFinAgentClient`)                                              | `agent/client.py`                        |
+| `agent/service/client_helpers.py`                                    | helpers used by client + CLI                                                                  | `agent/runtime_helpers.py`               |
+| `agent/storage/transcript_store.py`                                  | append-only transcript store + `sessions.json` index                                          | `agent/transcript_store.py`              |
+| `agent/storage/session_store.py`                                     | non-transcript hosted state: tasks, approvals, audit, view context                            | `agent/session_store.py`                 |
+| `agent/models/management.py`                                         | saved model/auth state + CLI-facing provider catalog (`list_provider_catalog`)                | `agent/model_management.py`              |
+| `agent/models/runtime.py`                                            | provider registry, runtime-model binding, canonical `provider/model` refs                     | `agent/model_runtime.py`                 |
+| `agent/models/providers/*.py`                                        | provider adapters for OpenAI, Gemini, GitHub Copilot                                          | `agent/providers/*.py`                   |
+| `agent/tools/adapter.py`, `execution.py`, `normalize.py`             | hosted tool adapter + structured tool execution outcomes                                      | `agent/tools.py`, `tool_execution.py`    |
+| `agent/guru/worker.py`                                               | hidden persona subagent runner, persona prompts, `_select_guru_worker_tools`                  | (re-exported via `agent/guru/__init__.py`) |
+| `agent/guru/memo.py`, `consult.py`, `feedback.py`                    | `GuruResearchMemo` schema, `consult_<persona>` glue, persona-fit feedback                     | —                                        |
+| `agent/guru/personas/*.yaml`                                         | persona YAMLs (Buffett / Marks / Druckenmiller) — single source of truth for allowlists       | `agent/personas/` (re-export shim)       |
+| `agent/cli/main.py`                                                  | CLI adapter (`terrafin-agent`)                                                                | (none — `agent/cli/` package replaces the old `agent/cli.py` module) |
+| `interface/agent/data_routes.py`                                     | HTTP adapter                                                                                  | —                                        |
+| `interface/frontend/src/agent/GlobalAgentWidget.tsx`                 | browser widget over the hosted runtime                                                        | —                                        |
 
 ## Guardrails
 

@@ -35,11 +35,17 @@ The following parts are TerraFin-specific:
 
 Implementation lives in TerraFin's own code:
 
-- `src/TerraFin/agent/model_management.py`
-- `src/TerraFin/agent/model_runtime.py`
-- `src/TerraFin/agent/providers/github_copilot.py`
-- `src/TerraFin/agent/providers/google.py`
-- `src/TerraFin/agent/providers/openai.py`
+- `src/TerraFin/agent/models/management.py` (public surface:
+  `list_provider_catalog()`, `get_provider_catalog(provider_id)` — do not
+  reach into the private `_PROVIDER_CATALOG` dict)
+- `src/TerraFin/agent/models/runtime.py`
+- `src/TerraFin/agent/models/providers/github_copilot.py`
+- `src/TerraFin/agent/models/providers/google.py`
+- `src/TerraFin/agent/models/providers/openai.py`
+
+The old top-level paths (`agent/model_management.py`, `agent/model_runtime.py`,
+`agent/providers/*`) remain as compatibility shims that re-export the new
+locations.
 
 ## What it manages
 

@@ -1,6 +1,6 @@
 """Regenerate agent-surface documentation from the capability registry.
 
-The capability list lives in `src/TerraFin/agent/runtime.py` (the
+The capability list lives in `src/TerraFin/agent/runtime/capability.py` (the
 `build_default_capability_registry()` function). All downstream artefacts
 that mirror the public agent surface — `skills/terrafin/SKILL.md`'s "Key
 client methods" section and `docs/agent/usage.md`'s "Route summary" —

@@ -91,11 +91,11 @@ Put the feature here when it is about:
 
 Typical files:
 
-- `src/TerraFin/agent/service.py`
-- `src/TerraFin/agent/models.py`
-- `src/TerraFin/agent/client.py`
-- `src/TerraFin/agent/tasks.py`
-- `src/TerraFin/agent/cli.py`
+- `src/TerraFin/agent/service/service.py` (capability methods; old `agent/service.py` shim still resolves)
+- `src/TerraFin/agent/contracts/schemas.py` (Pydantic response/request DTOs; old `agent/models.py` shim still resolves)
+- `src/TerraFin/agent/service/client.py` (old `agent/client.py` shim still resolves)
+- `src/TerraFin/agent/cli/tasks.py` (old `agent/tasks.py` shim still resolves)
+- `src/TerraFin/agent/cli/main.py` (old `agent/cli.py` is now the `cli/` package)
 - `src/TerraFin/interface/agent/data_routes.py`
 
 Important rule:
@@ -289,15 +289,15 @@ When a feature becomes public, check each box deliberately.
 
 ### Agent pipeline
 
-- `src/TerraFin/agent/service.py` updated if the feature should be available to agents
-- `models.py` updated if the public response shape changed
-- `client.py` updated if there is a new stable method or parameter
-- `tasks.py` updated if the feature becomes part of a standard task recipe
-- `cli.py` updated if the feature deserves first-class shell access
-- `tool_contracts.py` schema updated for any new params (input enums, ranges, required fields)
-- `runtime.py` capability registration with a description that names the new behaviour (the LLM reads this)
+- `agent/service/service.py` updated if the feature should be available to agents
+- `agent/contracts/schemas.py` updated if the public response shape changed
+- `agent/service/client.py` updated if there is a new stable method or parameter
+- `agent/cli/tasks.py` updated if the feature becomes part of a standard task recipe
+- `agent/cli/main.py` updated if the feature deserves first-class shell access
+- `agent/contracts/tool_contracts.py` schema updated for any new params (input enums, ranges, required fields)
+- `agent/runtime/capability.py` capability registration with a description that names the new behaviour (the LLM reads this)
 - `interface/agent/data_routes.py` updated if HTTP exposure is required (every internal capability should have a parity `/agent/api/*` route — external HTTP-only agents depend on it)
-- `src/TerraFin/agent/personas/*.yaml` updated if the capability should be persona-callable (Buffett / Marks / Druckenmiller). YAML allowlists are the **single source of truth** — no hidden override layer.
+- `src/TerraFin/agent/guru/personas/*.yaml` updated if the capability should be persona-callable (Buffett / Marks / Druckenmiller). YAML allowlists are the **single source of truth** — no hidden override layer.
 
 ### Skill and docs
 
@@ -390,10 +390,10 @@ Layer-by-layer landing zone:
 | Interface | New `/stock/api/fcf-history` endpoint for the FCF Base Source picker (returns 3yr-avg / latest-annual / TTM candidates + which one `auto` picks). | `src/TerraFin/interface/stock/data_routes.py`, `src/TerraFin/interface/stock/payloads.py` |
 | Frontend | DCF Workbench: Forecast Horizon segmented control, Turnaround Mode toggle, FCF Base Source segmented control with auto-fill + revert chip, Explain inputs toggle. | `src/TerraFin/interface/frontend/src/dcf/DcfWorkbench.tsx` |
 | Frontend | New `FcfHistoryChart` (right-gutter TTM callout, 3yr Avg dashed line) and `ProjectedFcfChart` (bar / line+band based on horizon, bear/bull whiskers, hover tooltips). | `src/TerraFin/interface/frontend/src/stock/components/{FcfHistoryChart,ProjectedFcfChart}.tsx` |
-| Agent service | `valuation()` accepts `projection_years`, `fcf_base_source`, and the three turnaround fields as keyword args. | `src/TerraFin/agent/service.py` |
-| Agent runtime | `valuation` capability description rewritten to teach the LLM when to use turnaround mode. Schema for new params in `tool_contracts.py`. | `src/TerraFin/agent/runtime.py`, `src/TerraFin/agent/tool_contracts.py` |
+| Agent service | `valuation()` accepts `projection_years`, `fcf_base_source`, and the three turnaround fields as keyword args. | `src/TerraFin/agent/service/service.py` |
+| Agent runtime | `valuation` capability description rewritten to teach the LLM when to use turnaround mode. Schema for new params in `contracts/tool_contracts.py`. | `src/TerraFin/agent/runtime/capability.py`, `src/TerraFin/agent/contracts/tool_contracts.py` |
 | Agent HTTP | `GET /agent/api/valuation` and `/agent/api/fcf-history` HTTP routes (parity with internal tool). | `src/TerraFin/interface/agent/data_routes.py` |
-| Persona | Druckenmiller / Marks / Buffett persona YAML allowlists keep `valuation` accessible (the hidden broad-market override layer was deleted in this batch — YAML is now the single source of truth). | `src/TerraFin/agent/personas/*.yaml` |
+| Persona | Druckenmiller / Marks / Buffett persona YAML allowlists keep `valuation` accessible (the hidden broad-market override layer was deleted in this batch — YAML is now the single source of truth). | `src/TerraFin/agent/guru/personas/*.yaml` |
 | Skill | New "DCF turnaround mode" recipe in SKILL.md with a copy-paste MOH example. | `skills/terrafin/SKILL.md` |
 | Docs | Turnaround math + base FCF source cascade in Analytics Notes. New POST fields documented in API Reference. New stock page layout + DCF Workbench controls in Interface Overview. | `docs/analytics-notes.md`, `docs/api-reference.md`, `docs/interface.md` |
 | View context | Frontend publishes `turnaroundMode`, `breakevenYear`, etc. through the existing `publishAgentViewContext` so `current_view_context()` already exposes them — no separate work. | `src/TerraFin/interface/frontend/src/dcf/DcfWorkbench.tsx` (sanitizeStockFormState) |

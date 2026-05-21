@@ -441,7 +441,7 @@ as complete from the start.
 
 ## Key client methods
 
-<!-- The two lists below are auto-generated from src/TerraFin/agent/runtime.py
+<!-- The two lists below are auto-generated from src/TerraFin/agent/runtime/capability.py
      by `python scripts/generate-agent-artefacts.py`. Edit the registry, not
      these lines. Hand-edits here will be overwritten on the next regen. -->
 
