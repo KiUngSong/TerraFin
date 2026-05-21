@@ -160,7 +160,7 @@ Every structured research response includes a top-level `processing` object.
 | Stock fundamentals | `stock_fundamentals(ticker, statement="income", period="annual")` |
 | Stock DCF | `valuation(ticker, projection_years=..., fcf_base_source=..., breakeven_year=..., breakeven_cash_flow_per_share=..., post_breakeven_growth_pct=...)` |
 | FCF history candidates | `fcf_history(ticker, years=10)` |
-| SEC filings | `sec_filings(ticker)` → `sec_filing_document(...)` → `sec_filing_section(...)` |
+| SEC filings | `sec_filings(ticker)` → `sec_filing_document(..., form=...)` → `sec_filing_section(..., sectionSlug=..., form=...)`. **Pass the actual `form` string** ("10-K" / "10-Q" / "8-K" / "8-K/A") on every call — service defaults to "10-Q". For 8-K, the TOC includes `exhibit-991-press-release` / `exhibit-992-supplemental-material` slugs holding the earnings PR + CFO commentary bodies. |
 | Sentiment / breadth | `fear_greed()`, `market_regime()`, `market_breadth()`, `trailing_forward_pe()` |
 | Calendar scan | `calendar_events(year=..., month=..., categories=..., limit=...)` |
 | Bubble analysis | `lppl_analysis(name, depth="auto", view="daily")` |

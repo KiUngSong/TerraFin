@@ -445,7 +445,14 @@ For supported tickers the card surfaces:
 The parsed markdown is cached for 30 days via the shared `sec_filings`
 CacheManager namespace (see [caching.md](./caching.md)), so reopening a filing
 is free across sessions. See [data-layer.md](./data-layer.md) for the
-underlying `parse_sec_filing` / `build_toc` / `get_sec_data` helpers.
+underlying `parse_sec_filing` / `build_toc` / `fetch_and_parse_filing` helpers.
+
+For 8-K (and 8-K/A) filings, the route returns the parsed cover doc plus any
+EX-99.x exhibits (earnings press release as `## Exhibit 99.1 — Press Release`,
+CFO commentary as `## Exhibit 99.2 — ...`, etc.) so the substantive content is
+reachable from the sidebar TOC. The sidebar bumps to `max_level=3` for 8-Ks so
+exhibit-body subheadings (e.g. `### Q1 FY27 Summary`) surface as navigable
+entries.
 
 ### Agent integration
 
