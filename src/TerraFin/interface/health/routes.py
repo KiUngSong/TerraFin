@@ -50,7 +50,7 @@ _cache_lock = asyncio.Lock()
 def _probe_agent() -> dict[str, Any]:
     """Static: at least one provider has its auth env var set."""
     try:
-        from TerraFin.agent.model_management import _CATALOGS  # type: ignore
+        from TerraFin.agent.models.management import list_provider_catalog
     except Exception:
         # Fallback: hard-code the well-known env vars.
         env_groups = [
@@ -60,7 +60,7 @@ def _probe_agent() -> dict[str, Any]:
             ("GitHub Copilot", ("COPILOT_GITHUB_TOKEN", "GH_TOKEN", "GITHUB_TOKEN")),
         ]
     else:
-        env_groups = [(c.label if hasattr(c, "label") else c.id, c.auth_env_vars) for c in _CATALOGS]
+        env_groups = [(c.provider_label, c.auth_env_vars) for c in list_provider_catalog()]
     found: list[str] = []
     for label, env_vars in env_groups:
         if any(os.environ.get(v) for v in env_vars):

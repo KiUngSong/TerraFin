@@ -1,16 +1,16 @@
 from fastapi import APIRouter, HTTPException, Query
 
-from TerraFin.agent.conversation import is_internal_only_message
-from TerraFin.agent.conversation_state import RUNTIME_MODEL_METADATA_KEY
-from TerraFin.agent.definitions import is_internal_agent_definition
-from TerraFin.agent.hosted_runtime import (
+from TerraFin.agent.contracts.conversation import is_internal_only_message
+from TerraFin.agent.contracts.conversation_state import RUNTIME_MODEL_METADATA_KEY
+from TerraFin.agent.contracts.definitions import is_internal_agent_definition
+from TerraFin.agent.runtime.hosted import (
     TerraFinAgentApprovalRequiredError,
     TerraFinAgentPolicyError,
     TerraFinAgentSessionConflictError,
 )
-from TerraFin.agent.hosted_service import get_hosted_agent_loop
-from TerraFin.agent.loop import TerraFinConversationMessage, TerraFinHostedRunResult
-from TerraFin.agent.model_runtime import TerraFinModelConfigError, TerraFinModelResponseError
+from TerraFin.agent.service.hosted import get_hosted_agent_loop
+from TerraFin.agent.runtime.loop import TerraFinConversationMessage, TerraFinHostedRunResult
+from TerraFin.agent.models.runtime import TerraFinModelConfigError, TerraFinModelResponseError
 from TerraFin.agent.models import (
     CalendarResponse,
     CompanyInfoResponse,
@@ -51,10 +51,10 @@ from TerraFin.agent.models import (
     PortfolioResponse,
     ResolveResponse,
 )
-from TerraFin.agent.openai_model import TerraFinOpenAIConfigError, TerraFinOpenAIResponseError
+from TerraFin.agent.models.providers.openai import TerraFinOpenAIConfigError, TerraFinOpenAIResponseError
 from TerraFin.agent.runtime import TerraFinArtifact, TerraFinCapabilityCall, TerraFinTaskRecord
 from TerraFin.agent.service import TerraFinAgentService
-from TerraFin.agent.session_store import (
+from TerraFin.agent.storage.session_store import (
     TerraFinHostedApprovalRequest,
     TerraFinHostedPermissionEvent,
     TerraFinHostedSessionRecord,
