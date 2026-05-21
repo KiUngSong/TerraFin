@@ -78,6 +78,10 @@ def test_cli_supports_runtime_create_session(monkeypatch, capsys) -> None:
 
 def test_cli_models_list_all_reports_featured_models(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("TERRAFIN_AGENT_MODELS_PATH", str(tmp_path / "agent-models.json"))
+    # Block .env autoload + drop the var so a developer's local
+    # TERRAFIN_OPENAI_MODEL doesn't leak into the registry-default assertion.
+    monkeypatch.setenv("TERRAFIN_DISABLE_DOTENV", "1")
+    monkeypatch.delenv("TERRAFIN_OPENAI_MODEL", raising=False)
 
     payload = agent_cli._models_list_payload(include_models=True)
     assert payload["current"]["modelRef"] == "openai/gpt-4.1-mini"
@@ -92,6 +96,8 @@ def test_cli_models_list_all_reports_featured_models(monkeypatch, tmp_path) -> N
 
 def test_cli_models_list_all_human_output_is_table(monkeypatch, capsys, tmp_path) -> None:
     monkeypatch.setenv("TERRAFIN_AGENT_MODELS_PATH", str(tmp_path / "agent-models.json"))
+    monkeypatch.setenv("TERRAFIN_DISABLE_DOTENV", "1")
+    monkeypatch.delenv("TERRAFIN_OPENAI_MODEL", raising=False)
 
     exit_code = agent_cli.main(["models", "list", "--all"])
 
