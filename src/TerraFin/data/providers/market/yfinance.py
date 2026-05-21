@@ -1,8 +1,16 @@
+import json
+from datetime import UTC, datetime
+
 import pandas as pd
 import yfinance as yf
 
 from TerraFin.data.cache.policy import ttl_for
 from TerraFin.data.contracts import HistoryChunk, TimeSeriesDataFrame
+from TerraFin.data.providers.market.session_calendar import (
+    is_cache_stale_by_session,
+    latest_expected_close,
+    resolve_exchange,
+)
 
 
 _V2_NAMESPACE = "yfinance_v2"
@@ -182,40 +190,242 @@ def _ts_to_market_frame(payload) -> pd.DataFrame:
     return _normalize_market_frame(df)
 
 
-def _get_yf_full(ticker: str) -> pd.DataFrame:
+def _last_bar_utc(frame: pd.DataFrame) -> datetime | None:
+    """Naive-UTC datetime of the last bar in a normalized OHLCV frame."""
+    if frame is None or frame.empty:
+        return None
+    try:
+        ts = pd.Timestamp(frame.index[-1])
+    except (IndexError, ValueError):
+        return None
+    if pd.isna(ts):
+        return None
+    if ts.tz is None:
+        ts = ts.tz_localize(UTC)
+    else:
+        ts = ts.tz_convert(UTC)
+    return ts.to_pydatetime()
+
+
+def _get_yf_full(ticker: str, *, force_refresh: bool = False) -> pd.DataFrame:
     source = _ensure_full_payload_registered(ticker)
-    result = _managed_cache_manager().get_payload(source)
-    return _ts_to_market_frame(result.payload)
+    manager = _managed_cache_manager()
+    now_utc = datetime.now(UTC)
+
+    # Session-aware staleness gate. ``get_payload`` only consults the
+    # wall-clock TTL — on a fresh-by-TTL but session-stale artifact it
+    # would return the prior frame, leaving callers (charts, indicators)
+    # one session behind. Peek at the cached artifact's rightmost bar
+    # first; if it predates the most-recent expected session close,
+    # promote to force_refresh so the upstream is consulted.
+    #
+    # Only the LAST bar matters for staleness. A 5y historical tail is
+    # otherwise indistinguishable from a 1y tail by this check: we look
+    # solely at the artifact's right edge.
+    #
+    # Holiday short-circuit: if a prior auto-stale fetch found no new
+    # bar (last_bar unchanged), the serializer's meta records a
+    # ``last_session_check_at`` sentinel. As long as that check timestamp
+    # is at-or-after the current expected close AND the wall-clock TTL
+    # is fresh, skip the re-fetch — we already verified upstream has
+    # nothing newer than the cached bar.
+    session_stale = False
+    # Always peek so we can detect the holiday case after an externally
+    # forced re-fetch (e.g. ``get_yf_recent_history`` triggered it).
+    pre_last_bar, last_check_at = _peek_artifact_state(ticker)
+    if not force_refresh and pre_last_bar is not None and is_cache_stale_by_session(
+        pre_last_bar, ticker, now_utc=now_utc
+    ):
+        schedule = resolve_exchange(ticker)
+        expected = latest_expected_close(schedule, now_utc=now_utc)
+        ttl_fresh = _artifact_within_ttl(ticker)
+        if (
+            last_check_at is not None
+            and expected is not None
+            and last_check_at >= expected
+            and ttl_fresh
+        ):
+            # Sentinel says we already verified after the latest expected
+            # close — serve cache without re-fetching.
+            session_stale = False
+        else:
+            session_stale = True
+
+    fetch_force = force_refresh or session_stale
+    result = manager.get_payload(source, force_refresh=fetch_force)
+    frame = _ts_to_market_frame(result.payload)
+
+    # If an auto-stale (or upstream-forced) fetch returned the same last
+    # bar as before — and the bar is still session-stale by calendar —
+    # drop a sentinel into the artifact meta so subsequent calls within
+    # the TTL window skip the re-fetch (holiday short-circuit).
+    if fetch_force and pre_last_bar is not None:
+        new_last_bar = _last_bar_utc(frame)
+        if (
+            new_last_bar is not None
+            and new_last_bar.date() == pre_last_bar.date()
+            and is_cache_stale_by_session(new_last_bar, ticker, now_utc=now_utc)
+        ):
+            _write_session_check_sentinel(ticker, checked_at=now_utc)
+
+    return frame
 
 
-def get_yf_data(ticker: str) -> pd.DataFrame:
+def _peek_artifact_state(ticker: str) -> tuple[datetime | None, datetime | None]:
+    """Read just the rightmost bar timestamp + sentinel from the artifact.
+
+    Returns ``(last_bar_utc, last_session_check_at)``. Either may be None.
+    Used by the session-staleness gate — we only need the last bar +
+    sentinel, never the body of the frame, so this avoids a full
+    deserialization on every read.
+    """
+    import numpy as np
+
+    artifact_dir = _managed_cache_manager().artifact_path(_V2_NAMESPACE, f"{ticker}/full")
+    time_path = artifact_dir / "time_i64.npy"
+    if not time_path.exists():
+        return None, None
+    last_bar: datetime | None = None
+    try:
+        time_values = np.load(time_path, mmap_mode="r")
+        if len(time_values) > 0:
+            last_bar = datetime.fromtimestamp(int(time_values[-1]), tz=UTC)
+    except Exception:
+        last_bar = None
+
+    last_check_at: datetime | None = None
+    meta_path = artifact_dir / "meta.json"
+    if meta_path.exists():
+        try:
+            meta = json.loads(meta_path.read_text())
+            raw = meta.get("last_session_check_at")
+            if raw:
+                last_check_at = datetime.fromisoformat(raw)
+                if last_check_at.tzinfo is None:
+                    last_check_at = last_check_at.replace(tzinfo=UTC)
+        except Exception:
+            last_check_at = None
+
+    return last_bar, last_check_at
+
+
+def _peek_artifact_last_bar(ticker: str) -> datetime | None:
+    """Back-compat shim — returns just the last bar without the sentinel."""
+    last_bar, _ = _peek_artifact_state(ticker)
+    return last_bar
+
+
+def _artifact_within_ttl(ticker: str) -> bool:
+    """True iff the artifact's ``cached_at`` is within the yfinance.full TTL."""
+    artifact_dir = _managed_cache_manager().artifact_path(_V2_NAMESPACE, f"{ticker}/full")
+    meta_path = artifact_dir / "meta.json"
+    if not meta_path.exists():
+        return False
+    try:
+        meta = json.loads(meta_path.read_text())
+        cached_at = meta.get("cached_at")
+        if not cached_at:
+            return False
+        cached_dt = datetime.fromisoformat(cached_at)
+        if cached_dt.tzinfo is None:
+            cached_dt = cached_dt.replace(tzinfo=UTC)
+        age = (datetime.now(UTC) - cached_dt).total_seconds()
+        return age <= ttl_for("yfinance.full")
+    except Exception:
+        return False
+
+
+def _write_session_check_sentinel(ticker: str, *, checked_at: datetime) -> None:
+    """Stamp ``last_session_check_at`` into the artifact's meta.json.
+
+    Best-effort: meta-write failures are swallowed so a cosmetic update
+    never breaks the data path. The sentinel is optional — readers that
+    don't see it fall back to the existing staleness check.
+    """
+    artifact_dir = _managed_cache_manager().artifact_path(_V2_NAMESPACE, f"{ticker}/full")
+    meta_path = artifact_dir / "meta.json"
+    if not meta_path.exists():
+        return
+    try:
+        meta = json.loads(meta_path.read_text())
+        meta["last_session_check_at"] = checked_at.astimezone(UTC).isoformat()
+        meta_path.write_text(json.dumps(meta, indent=2))
+    except Exception:
+        pass
+
+
+def get_yf_data(ticker: str, *, force_refresh: bool = False) -> pd.DataFrame:
     """
     Get the data from yfinance by its name
     :param ticker: str, ticker or index name
+    :param force_refresh: when True, bypass the 24h yfinance.full cache READ
+        and re-fetch from upstream. The on-disk artifact is preserved on
+        fetch failure so subsequent non-force callers still see the prior
+        value.
     :return: DataFrame, indicator data
     """
-    return _get_yf_full(ticker.upper()).copy()
+    return _get_yf_full(ticker.upper(), force_refresh=force_refresh).copy()
 
 
-def get_yf_recent_history(ticker: str, *, period: str = "3y") -> HistoryChunk:
+def get_yf_recent_history(ticker: str, *, period: str = "3y", force_refresh: bool = False) -> HistoryChunk:
     ticker = ticker.upper()
     from TerraFin.data.cache.serializers import ColumnarTimeSeriesSerializer
 
     serializer = ColumnarTimeSeriesSerializer()
     artifact_dir = _managed_cache_manager().artifact_path(_V2_NAMESPACE, f"{ticker}/full")
-    if artifact_dir.exists():
+    # Skip the artifact short-circuit when force_refresh is set so we always
+    # go through manager.get_payload(force_refresh=True). The artifact is
+    # NOT deleted — get_payload simply re-fetches and overwrites atomically.
+    cached_chunk: HistoryChunk | None = None
+    session_stale = False
+    if not force_refresh and artifact_dir.exists():
         recent_frame, has_older = serializer.read_recent(artifact_dir, period, max_age_seconds=ttl_for("yfinance.full"))
         if not recent_frame.empty:
             normalized = _ts_to_market_frame(recent_frame)
-            return _history_chunk_from_frame(
+            cached_chunk = _history_chunk_from_frame(
                 normalized,
                 period=period,
                 has_older=has_older,
                 is_complete=not has_older,
                 source_version="managed-artifact-tail",
             )
+            # Session-aware staleness: the artifact's last bar predates
+            # the most-recent expected session close for this exchange,
+            # so a newer bar should exist upstream — fall through to a
+            # forced re-fetch (which will overwrite the artifact). If
+            # the re-fetch fails we serve the cached chunk anyway, since
+            # a stale-but-readable answer beats no answer.
+            now_utc = datetime.now(UTC)
+            session_stale = is_cache_stale_by_session(
+                _last_bar_utc(normalized), ticker, now_utc=now_utc
+            )
+            if session_stale:
+                # Holiday short-circuit: a prior auto-stale fetch may have
+                # already verified upstream has no new bar. The serializer
+                # writes ``last_session_check_at`` into meta.json in that
+                # case; serve cache without re-fetching as long as the
+                # sentinel covers the current expected close.
+                _, last_check_at = _peek_artifact_state(ticker)
+                if last_check_at is not None:
+                    schedule = resolve_exchange(ticker)
+                    expected = latest_expected_close(schedule, now_utc=now_utc)
+                    if expected is not None and last_check_at >= expected:
+                        session_stale = False
+            if not session_stale:
+                return cached_chunk
 
-    full_df = _get_yf_full(ticker)
+    fetch_force = force_refresh or session_stale
+    try:
+        full_df = _get_yf_full(ticker, force_refresh=fetch_force)
+    except Exception:
+        if session_stale and cached_chunk is not None and not force_refresh:
+            # Caller didn't explicitly opt into freshness verification —
+            # serve the cached chunk despite the failed re-fetch. Mark
+            # the source_version so callers can distinguish a clean cache
+            # hit from a stale-on-fetch-failure fallback.
+            cached_chunk.source_version = "managed-artifact-tail-stale"
+            return cached_chunk
+        raise
     if full_df.empty:
         return _empty_history_chunk(period=period, source_version="managed-download", is_complete=True)
     recent = _slice_recent_frame(full_df, period)

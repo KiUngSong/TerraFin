@@ -30,8 +30,8 @@ class _FakeDataFactory:
     def get(self, name: str):
         return _make_frame(name, periods=180)
 
-    def get_recent_history(self, name: str, period: str = "3y"):
-        _ = period
+    def get_recent_history(self, name: str, period: str = "3y", *, force_refresh: bool = False):
+        _ = period, force_refresh
         frame = _make_frame(name, periods=90)
         return HistoryChunk(
             frame=frame,
@@ -300,6 +300,71 @@ def test_market_snapshot_no_longer_bundles_whole_market_widgets(monkeypatch) -> 
 
     assert "market_breadth" not in snapshot
     assert "watchlist" not in snapshot
+
+
+def test_market_snapshot_exposes_asof_from_loaded_end(monkeypatch) -> None:
+    """`asof` is the top-level freshness signal — mirrors
+    ``processing.loadedEnd`` so the worker's freshness gate doesn't need
+    to dig through processing metadata to detect a stale-by-one-session
+    payload."""
+    monkeypatch.setattr(agent_service, "get_data_factory", lambda: _FakeDataFactory())
+    service = agent_service.TerraFinAgentService()
+
+    snapshot = service.market_snapshot("TEST")
+
+    assert "asof" in snapshot
+    assert snapshot["asof"] == snapshot["processing"]["loadedEnd"]
+    assert snapshot["asof"] is not None
+
+
+def test_market_snapshot_default_threads_force_refresh_false(monkeypatch) -> None:
+    """Default `force_refresh=False` must propagate through to the data
+    factory so the cache layer can serve a hot read — that's the
+    contract that keeps upstream load flat."""
+    monkeypatch.setattr(agent_service, "get_data_factory", lambda: _FakeDataFactory())
+    service = agent_service.TerraFinAgentService()
+
+    calls: list[dict] = []
+    original = service._data_factory.get_recent_history
+
+    def _spy(name, *, period="3y", force_refresh=False):
+        calls.append({"name": name, "force_refresh": force_refresh})
+        return original(name, period=period)
+
+    monkeypatch.setattr(service._data_factory, "get_recent_history", _spy)
+
+    service.market_snapshot("TEST")
+
+    assert len(calls) == 1
+    assert calls[0]["force_refresh"] is False
+
+
+def test_market_snapshot_force_refresh_threads_kwarg_to_data_factory(monkeypatch) -> None:
+    """`force_refresh=True` must reach `data_factory.get_recent_history`
+    so the kwarg lands on `manager.get_payload(force_refresh=True)` —
+    the cache READ is skipped but the on-disk artifact is preserved on
+    fetch failure (no stale-loss-on-failure). The eager-evict
+    implementation was replaced because evict + fetch races could let
+    concurrent callers clobber each other's freshly-written results."""
+    monkeypatch.setattr(agent_service, "get_data_factory", lambda: _FakeDataFactory())
+    service = agent_service.TerraFinAgentService()
+
+    calls: list[dict] = []
+    original = service._data_factory.get_recent_history
+
+    def _spy(name, *, period="3y", force_refresh=False):
+        calls.append({"name": name, "force_refresh": force_refresh})
+        return original(name, period=period)
+
+    monkeypatch.setattr(service._data_factory, "get_recent_history", _spy)
+
+    snapshot = service.market_snapshot("TEST", force_refresh=True)
+
+    assert len(calls) == 1
+    assert calls[0]["force_refresh"] is True
+    # Default path still produces the same response shape.
+    assert snapshot["ticker"] == "TEST"
+    assert snapshot["asof"] is not None
 
 
 def test_portfolio_exposes_top_holdings_matching_route_sort(monkeypatch) -> None:

@@ -201,6 +201,39 @@ bridge between process restarts and fresh upstream data.
 |--------|-----------|--------|
 | yfinance | `yfinance_v2` | `<safe_key>/seed_3y/` and `<safe_key>/full/` typed artifacts |
 
+### Session-aware staleness for `yfinance.full`
+
+`yfinance.full` carries a 24 h wall-clock TTL like any other source, but
+that alone leaves a gap: an artifact written at 18:00 UTC stays "fresh"
+until 18:00 UTC the next day, even though the US session has closed at
+21:00 UTC and a newer daily bar exists upstream. To close the gap,
+`get_yf_recent_history` does a second freshness check on read: if the
+cached artifact's last bar predates the most-recent expected session
+close for the ticker's exchange, the artifact is treated as stale and
+re-fetched automatically.
+
+Exchange resolution is heuristic and holiday-naive (see
+`data/providers/market/session_calendar.py`):
+
+| Ticker shape | Exchange | Close |
+|--------------|----------|-------|
+| Plain US ticker, `^`-prefixed index | NYSE | 16:00 ET |
+| 6-digit numeric (`005930`), `.KS`/`.KQ` suffix | KRX | 15:30 KST |
+| Crypto (`BTC-USD`) | n/a (always open) | check skipped |
+| Forex (`USDKRW=X`) | n/a (24/5) | check skipped |
+
+The worst case of holiday-naivete is a single redundant re-fetch on
+exchange holidays that returns the same data; we never under-refresh.
+A real exchange calendar (`pandas_market_calendars` or similar) can be
+added later if that over-refresh becomes painful.
+
+If the session-stale auto-refresh itself fails upstream, the cached
+chunk is returned anyway — stale-but-readable beats no answer. Callers
+that need a hard freshness guarantee should use
+`market_snapshot(force_refresh=True)`, which propagates upstream
+failures end-to-end (the data factory no longer swallows them when
+`force_refresh=True`).
+
 ## Configuration precedence
 
 Cache intervals resolve in this order:

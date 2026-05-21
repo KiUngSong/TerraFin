@@ -93,6 +93,22 @@ HOSTED_TOOL_CONTRACTS: dict[str, dict[str, Any]] = {
                     "enum": ["daily", "weekly", "monthly", "yearly"],
                     "default": "daily",
                 },
+                "force_refresh": {
+                    "type": "boolean",
+                    "default": False,
+                    "description": (
+                        "Set true only when serving time-sensitive snapshots "
+                        "(e.g. mid-session quote, freshly-closed bar that may "
+                        "still be cached from the prior session). Default false "
+                        "keeps the cache hot to avoid hammering upstream. "
+                        "Only honored for yfinance-backed names (indices, "
+                        "tickers, VIX/VVIX/SKEW/MOVE/Treasury yields); "
+                        "composite/private indicators (Vol Regime, VVIX/VIX "
+                        "Ratio, Fear & Greed, Net Breadth, CAPE, "
+                        "Trailing-Forward P/E Spread, SPX GEX) ignore this "
+                        "flag — their TTLs govern freshness."
+                    ),
+                },
             },
             required=["name"],
         ),

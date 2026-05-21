@@ -88,6 +88,11 @@ class MarketSnapshotResponse(BaseModel):
     ticker: str
     price_action: PriceAction
     indicators: IndicatorSummary
+    # ISO date of the last bar in the served series (mirrors
+    # ``processing.loadedEnd``). Surfaced at the top level so freshness
+    # gates don't have to dig through processing metadata to detect a
+    # stale-by-one-session snapshot.
+    asof: str | None = None
     processing: ProcessingMetadata
 
 

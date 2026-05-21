@@ -51,8 +51,8 @@ class _FakeDataFactory:
     def get(self, name):
         return _make_fake_tsdf(name, 180)
 
-    def get_recent_history(self, name, period="3y"):
-        _ = period
+    def get_recent_history(self, name, period="3y", *, force_refresh=False):
+        _ = period, force_refresh
         df = _make_fake_tsdf(name, 90)
         return HistoryChunk(
             frame=df,
@@ -579,8 +579,38 @@ def test_agent_market_snapshot_contract(monkeypatch) -> None:
     resp = client.get("/agent/api/market-snapshot?ticker=TEST&depth=full")
     assert resp.status_code == 200
     payload = resp.json()
-    assert set(payload) == {"ticker", "price_action", "indicators", "processing"}
+    assert set(payload) == {"ticker", "price_action", "indicators", "asof", "processing"}
     assert payload["processing"]["resolvedDepth"] == "full"
+    # `asof` mirrors processing.loadedEnd so the freshness gate can read
+    # the last bar's date without digging through processing metadata.
+    assert payload["asof"] == payload["processing"]["loadedEnd"]
+    assert payload["asof"] is not None
+
+
+def test_agent_market_snapshot_force_refresh_threads_through_route(monkeypatch) -> None:
+    """`force_refresh=true` on the query string must reach the service —
+    that's the lever the worker uses for time-sensitive snapshots when
+    the 24h `yfinance.full` cache TTL may be hiding a freshly-closed bar."""
+    _configure_agent_fakes(monkeypatch)
+
+    seen: dict[str, object] = {}
+    original = agent_service.TerraFinAgentService.market_snapshot
+
+    def _spy(self, name, *, depth="auto", view="daily", force_refresh=False):
+        seen["force_refresh"] = force_refresh
+        return original(self, name, depth=depth, view=view, force_refresh=force_refresh)
+
+    monkeypatch.setattr(agent_service.TerraFinAgentService, "market_snapshot", _spy)
+    reset_watchlist_service()
+    client = TestClient(create_app())
+
+    resp_default = client.get("/agent/api/market-snapshot?ticker=TEST")
+    assert resp_default.status_code == 200
+    assert seen["force_refresh"] is False
+
+    resp_force = client.get("/agent/api/market-snapshot?ticker=TEST&force_refresh=true")
+    assert resp_force.status_code == 200
+    assert seen["force_refresh"] is True
 
 
 def test_agent_resolve_company_earnings_and_financials(monkeypatch) -> None:

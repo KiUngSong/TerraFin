@@ -775,9 +775,12 @@ def create_agent_data_router() -> APIRouter:
         ticker: str = Query(..., min_length=1),
         depth: str = Query(default="auto", pattern="^(auto|recent|full)$"),
         view: str = Query(default="daily", pattern="^(daily|weekly|monthly|yearly)$"),
+        force_refresh: bool = Query(default=False),
     ):
         try:
-            return MarketSnapshotResponse(**service.market_snapshot(ticker, depth=depth, view=view))
+            return MarketSnapshotResponse(
+                **service.market_snapshot(ticker, depth=depth, view=view, force_refresh=force_refresh)
+            )
         except Exception as exc:
             _raise_http_error(exc)
 

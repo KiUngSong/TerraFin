@@ -167,7 +167,20 @@ def build_default_capability_registry(
             ),
             TerraFinCapability(
                 name="market_snapshot",
-                description="Fetch a compact market snapshot for a single asset.",
+                description=(
+                    "Fetch a compact market snapshot for a single asset. "
+                    "Response carries `asof` (ISO date of the last bar served) "
+                    "so callers can detect a stale-by-one-session payload. "
+                    "Pass `force_refresh=true` only when serving time-sensitive "
+                    "snapshots (e.g. mid-session quote, freshly-closed bar that "
+                    "may still be cached from the prior session); default false "
+                    "keeps the cache hot to avoid hammering upstream. Only "
+                    "yfinance-backed names (indices, raw tickers, VIX/VVIX/SKEW/"
+                    "MOVE/Treasury yields) honor the flag; composite/private "
+                    "indicators (Vol Regime, VVIX/VIX Ratio, Fear & Greed, Net "
+                    "Breadth, CAPE, Trailing-Forward P/E Spread, SPX GEX) "
+                    "ignore it."
+                ),
                 handler=resolved_service.market_snapshot,
                 focus_extractor=_focus_from_input_keys("name"),
                 backgroundable=True,

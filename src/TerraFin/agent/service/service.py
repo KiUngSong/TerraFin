@@ -1,3 +1,4 @@
+import logging
 import math
 from typing import Any, Iterable
 
@@ -28,6 +29,29 @@ from TerraFin.interface.stock.payloads import (
 )
 from TerraFin.interface.watchlist_service import get_watchlist_service
 
+_logger = logging.getLogger(__name__)
+
+
+# Indicators served by `market_snapshot` whose underlying fetch path honors
+# `force_refresh` (i.e. threads through to CacheManager.get_payload). Anything
+# else routed through `_market_series` ignores the kwarg today — composite
+# indicators like Vol Regime/VVIX-VIX Ratio/Fear & Greed/CAPE/SPX GEX/Net
+# Breadth go through MarketIndicator.get_recent_history wrappers that don't
+# take the kwarg, so force_refresh is silently a no-op for those. We log an
+# INFO line when that happens so callers aren't surprised.
+_FORCE_REFRESH_INDIRECT_MARKET_INDICATORS = frozenset(
+    {
+        "Vol Regime",
+        "VVIX/VIX Ratio",
+        "Fear & Greed",
+        "Net Breadth",
+        "CAPE",
+        "Trailing-Forward P/E Spread",
+        "SPX GEX",
+    }
+)
+
+
 from ._formatters import (
     DEFAULT_RECENT_PERIOD,
     _calendar_processing,
@@ -47,7 +71,14 @@ class TerraFinAgentService:
     def __init__(self, data_factory: DataFactory | None = None) -> None:
         self._data_factory = data_factory or get_data_factory()
 
-    def _market_series(self, name: str, *, depth: str = "auto", view: str = "daily") -> dict[str, Any]:
+    def _market_series(
+        self,
+        name: str,
+        *,
+        depth: str = "auto",
+        view: str = "daily",
+        force_refresh: bool = False,
+    ) -> dict[str, Any]:
         requested_depth = _normalize_depth(depth)
         resolved_view = _normalize_view(view)
         display_name = name.strip()
@@ -56,6 +87,20 @@ class TerraFinAgentService:
         canonical_name = canonical_macro_name(display_name)
         if resolve_macro_type(canonical_name) is not None:
             display_name = canonical_name
+
+        if force_refresh and display_name in _FORCE_REFRESH_INDIRECT_MARKET_INDICATORS:
+            # Composite/private indicators short-circuit through their own
+            # MarketIndicator.get_recent_history wrappers, which don't
+            # currently thread the kwarg down to CacheManager.get_payload.
+            # Log so callers aren't surprised that force_refresh is a no-op
+            # here. See `_FORCE_REFRESH_INDIRECT_MARKET_INDICATORS` for the
+            # set. A registry-wide refactor would let these honor the kwarg
+            # — tracked separately.
+            _logger.info(
+                "market_snapshot: force_refresh=True is a no-op for indicator '%s' "
+                "(composite/private path does not thread the kwarg through)",
+                display_name,
+            )
 
         if requested_depth == "full":
             frame = self._data_factory.get(display_name)
@@ -71,7 +116,9 @@ class TerraFinAgentService:
             )
             return {"name": display_name, "series": series, "processing": processing, "frame": frame}
 
-        history_chunk = self._data_factory.get_recent_history(display_name, period=DEFAULT_RECENT_PERIOD)
+        history_chunk = self._data_factory.get_recent_history(
+            display_name, period=DEFAULT_RECENT_PERIOD, force_refresh=force_refresh
+        )
         if history_chunk.frame is None or history_chunk.frame.empty:
             raise LookupError(f"No data found for '{display_name}'")
         history_chunk.frame.name = display_name
@@ -144,7 +191,14 @@ class TerraFinAgentService:
             "processing": payload["processing"],
         }
 
-    def market_snapshot(self, name: str, *, depth: str = "auto", view: str = "daily") -> dict[str, Any]:
+    def market_snapshot(
+        self,
+        name: str,
+        *,
+        depth: str = "auto",
+        view: str = "daily",
+        force_refresh: bool = False,
+    ) -> dict[str, Any]:
         """Per-ticker price action + indicators only.
 
         Previously bundled market-wide `market_breadth` and `watchlist`
@@ -154,10 +208,25 @@ class TerraFinAgentService:
         standalone MarketBreadthCard widget if the widget refreshed on
         its own. Use the `market_breadth` and `watchlist` capabilities
         for those (matching the standalone widgets).
+
+        ``force_refresh=True`` skips the 24h yfinance.full cache READ for
+        the resolved ticker and re-fetches from upstream. The on-disk
+        artifact is preserved on fetch failure so the next non-force
+        caller still sees the prior bar (no stale-loss-on-failure).
+        Single-flight in the cache manager coalesces concurrent
+        force_refresh callers so two simultaneous requests don't fan
+        out to upstream. Use sparingly — only for time-sensitive
+        snapshots where the TTL may be hiding a freshly-closed bar.
+        Default ``False`` keeps the cache hot to avoid hammering
+        upstream. NOTE: composite/private indicators (Vol Regime,
+        VVIX/VIX Ratio, Fear & Greed, Net Breadth, CAPE,
+        Trailing-Forward P/E Spread, SPX GEX) ignore ``force_refresh``
+        today; an INFO log is emitted when it's set for one of those.
         """
-        payload = self._market_series(name, depth=depth, view=view)
+        payload = self._market_series(name, depth=depth, view=view, force_refresh=force_refresh)
         series = payload["series"]
         indicator_results, _ = _compute_indicator_results(series, ["rsi", "macd", "bb"])
+        processing = payload["processing"]
         return {
             "ticker": payload["name"],
             "price_action": _price_action(series),
@@ -166,7 +235,8 @@ class TerraFinAgentService:
                 "macd_signal": indicator_results.get("macd", {}).get("values", {}).get("signal"),
                 "bb_position": indicator_results.get("bb", {}).get("values", {}).get("position"),
             },
-            "processing": payload["processing"],
+            "asof": processing.get("loadedEnd"),
+            "processing": processing,
         }
 
     def lppl_analysis(self, name: str, *, depth: str = "auto", view: str = "daily") -> dict[str, Any]:

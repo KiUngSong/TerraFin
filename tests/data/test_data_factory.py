@@ -1,6 +1,7 @@
 import inspect
 
 import pandas as pd
+import pytest
 
 import TerraFin.data.factory as factory_module
 import TerraFin.data.providers.market.market_indicator as market_indicator_module
@@ -75,7 +76,8 @@ def test_get_economic_data_contract_stubbed(monkeypatch) -> None:
 
 
 def test_get_recent_history_contract_stubbed(monkeypatch) -> None:
-    def _stub_recent(_ticker: str, *, period: str = "3y") -> HistoryChunk:
+    def _stub_recent(_ticker: str, *, period: str = "3y", force_refresh: bool = False) -> HistoryChunk:
+        _ = force_refresh
         frame = TimeSeriesDataFrame(
             pd.DataFrame(
                 {
@@ -103,6 +105,49 @@ def test_get_recent_history_contract_stubbed(monkeypatch) -> None:
     assert chunk.loaded_end == "2026-01-01"
     assert chunk.has_older is True
     assert chunk.requested_period == "3y"
+
+
+def test_get_recent_history_force_refresh_propagates_upstream_failure(monkeypatch) -> None:
+    """``force_refresh=True`` is the freshness-verification lever — if
+    the upstream fetch fails the caller must learn about it, not get a
+    silently-stale fallback."""
+
+    def _exploding_recent(_ticker: str, *, period: str = "3y", force_refresh: bool = False) -> HistoryChunk:
+        _ = period, force_refresh
+        raise RuntimeError("upstream blew up")
+
+    monkeypatch.setattr(factory_module, "get_yf_recent_history", _exploding_recent)
+
+    with pytest.raises(RuntimeError, match="upstream blew up"):
+        DataFactory().get_recent_history("AAPL", period="3y", force_refresh=True)
+
+
+def test_get_recent_history_default_swallows_upstream_failure(monkeypatch) -> None:
+    """Default ``force_refresh=False`` keeps the graceful-degradation
+    behavior — upstream errors are logged and the factory falls back to
+    its own ``self.get(name)``-based slice."""
+
+    def _exploding_recent(_ticker: str, *, period: str = "3y", force_refresh: bool = False) -> HistoryChunk:
+        _ = period, force_refresh
+        raise RuntimeError("upstream blew up")
+
+    def _stub_get(_self, _name: str) -> TimeSeriesDataFrame:
+        return TimeSeriesDataFrame(
+            pd.DataFrame(
+                {
+                    "time": pd.to_datetime(["2024-01-01", "2024-01-02", "2024-01-03"]),
+                    "close": [10.0, 11.0, 12.0],
+                }
+            )
+        )
+
+    monkeypatch.setattr(factory_module, "get_yf_recent_history", _exploding_recent)
+    monkeypatch.setattr(DataFactory, "get", _stub_get)
+
+    chunk = DataFactory().get_recent_history("AAPL", period="3y")
+    # Fallback path returned a chunk rather than raising.
+    assert chunk.source_version == "factory-fallback"
+    assert not chunk.frame.empty
 
 
 def test_get_full_history_backfill_contract_stubbed(monkeypatch) -> None:

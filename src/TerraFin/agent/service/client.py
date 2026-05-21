@@ -319,10 +319,27 @@ class TerraFinAgentClient:
             params={"ticker": name, "indicators": indicator_text, "depth": depth, "view": view},
         )
 
-    def market_snapshot(self, name: str, *, depth: str = "auto", view: str = "daily") -> dict[str, Any]:
+    def market_snapshot(
+        self,
+        name: str,
+        *,
+        depth: str = "auto",
+        view: str = "daily",
+        force_refresh: bool = False,
+    ) -> dict[str, Any]:
         if self._resolved_transport() == "python":
-            return self._service_call("market_snapshot", name, depth=depth, view=view)
-        return self._http_get("/agent/api/market-snapshot", params={"ticker": name, "depth": depth, "view": view})
+            return self._service_call(
+                "market_snapshot", name, depth=depth, view=view, force_refresh=force_refresh
+            )
+        return self._http_get(
+            "/agent/api/market-snapshot",
+            params={
+                "ticker": name,
+                "depth": depth,
+                "view": view,
+                "force_refresh": force_refresh,
+            },
+        )
 
     def economic(self, indicators: str | Iterable[str]) -> dict[str, Any]:
         indicator_text = indicators if isinstance(indicators, str) else ",".join(str(item) for item in indicators)

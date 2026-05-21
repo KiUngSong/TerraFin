@@ -208,8 +208,25 @@ class DataFactory:
         """Get market data from the data layer."""
         return get_market_data(ticker_or_index_name_or_indicator_name)
 
-    def get_recent_history(self, name: str, *, period: str = "3y") -> HistoryChunk:
-        """Return a recent history seed window for progressive chart loading."""
+    def get_recent_history(self, name: str, *, period: str = "3y", force_refresh: bool = False) -> HistoryChunk:
+        """Return a recent history seed window for progressive chart loading.
+
+        ``force_refresh=True`` is threaded through to the underlying cache
+        layer (CacheManager.get_payload) so the upstream is re-fetched even
+        when the artifact is fresh by TTL. The on-disk artifact is preserved
+        on fetch failure — the next non-force caller still sees the prior
+        value. Currently only the yfinance-backed path honors the flag;
+        composite/private indicators (Vol Regime, VVIX/VIX, Fear & Greed,
+        CAPE, SPX GEX, Net Breadth) ignore it.
+
+        Exception semantics:
+        * ``force_refresh=False`` (default): swallow upstream fetch errors
+          and fall back to ``_fallback_recent_history`` so callers see
+          graceful degradation (stale data is better than no data).
+        * ``force_refresh=True``: propagate upstream errors so the caller
+          (typically a freshness-verification worker) can detect that the
+          probe failed instead of silently receiving stale data.
+        """
         if name in MARKET_INDICATOR_REGISTRY:
             indicator = MARKET_INDICATOR_REGISTRY[name]
             if indicator.get_recent_history is not None:
@@ -221,12 +238,16 @@ class DataFactory:
         ticker = self._resolve_market_ticker(name)
         if ticker is not None:
             try:
-                chunk = get_yf_recent_history(ticker, period=period)
+                chunk = get_yf_recent_history(ticker, period=period, force_refresh=force_refresh)
                 chunk.frame.name = name.split(":", 1)[-1]
                 return chunk
             except ValueError:
                 raise
             except Exception:
+                if force_refresh:
+                    # The caller opted into freshness verification — do not
+                    # mask the failure with stale data.
+                    raise
                 logger.exception("Falling back to full recent-history slice for %s", name)
         return self._fallback_recent_history(name, period, source_name=f"auto:{name}")
 
