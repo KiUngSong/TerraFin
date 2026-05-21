@@ -1,6 +1,17 @@
+import re
+from pathlib import Path
+
 import pytest
 
 from TerraFin.data.providers.corporate.filings.sec_edgar import parser
+
+
+_FIXTURES_DIR = Path(__file__).resolve().parent / "fixtures"
+# Real EDGAR 8-K filing: Apple Inc., accession 0000320193-26-000011.
+# Contains Item 2.02 (Results of Operations) + Item 9.01 (Exhibits) —
+# the two-item shape covers both correctly-classified TopSectionTitle
+# and mis-classified TitleElement cases observed with Edgar10QParser.
+_SAMPLE_8K_PATH = _FIXTURES_DIR / "sample_8k_AAPL_0000320193-26-000011.html"
 
 
 _FILING_HTML = """<html><body>
@@ -106,6 +117,70 @@ def test_parse_sec_filing_accepts_verbose_form_descriptors() -> None:
 def test_parse_sec_filing_handles_none_filing_form() -> None:
     with pytest.raises(ValueError, match="not supported"):
         parser.parse_sec_filing(_FILING_HTML, None)
+
+
+# ---------------------------------------------------------------------------
+# 8-K parsing parity (real EDGAR fixture)
+# ---------------------------------------------------------------------------
+
+_EIGHT_K_ITEM_HEADING_RE = re.compile(r"^## Item \d+\.\d{2}\b", re.MULTILINE)
+
+
+def test_parse_sec_filing_8k_returns_nonempty_markdown() -> None:
+    """8-K branch should accept the form and produce markdown output."""
+    html = _SAMPLE_8K_PATH.read_text()
+    md = parser.parse_sec_filing(html, "8-K")
+    assert isinstance(md, str)
+    assert md.strip()
+
+
+def test_parse_sec_filing_8k_promotes_item_code_headings_to_level_two() -> None:
+    """8-K item codes (`Item N.NN`) must surface as ## headings — sec_parser
+    classifies the second item as TitleElement on this AAPL fixture, so
+    the heading-promotion path in `_emit_heading` is what lifts it."""
+    html = _SAMPLE_8K_PATH.read_text()
+    md = parser.parse_sec_filing(html, "8-K")
+    matches = _EIGHT_K_ITEM_HEADING_RE.findall(md)
+    assert matches, "expected at least one `## Item N.NN` heading in 8-K markdown"
+
+
+def test_parse_sec_filing_8k_build_toc_emits_item_code_slugs() -> None:
+    """`build_toc` is form-agnostic — it just needs ## headings. On the
+    AAPL fixture both Item 2.02 and Item 9.01 should land in the TOC
+    with item-code-style slugs."""
+    html = _SAMPLE_8K_PATH.read_text()
+    md = parser.parse_sec_filing(html, "8-K")
+    toc = parser.build_toc(md)
+    slugs = [e["slug"] for e in toc]
+    assert any(s.startswith("item-202") for s in slugs), slugs
+    assert any(s.startswith("item-901") for s in slugs), slugs
+
+
+def test_parse_sec_filing_8k_accepts_verbose_form_descriptors() -> None:
+    """EDGAR's primaryDocDescription sometimes comes as `FORM 8-K` or
+    `8-K/A`. Loose matching preserves the caller contract."""
+    html = _SAMPLE_8K_PATH.read_text()
+    md_a = parser.parse_sec_filing(html, "FORM 8-K")
+    md_b = parser.parse_sec_filing(html, "8-K/A")
+    assert _EIGHT_K_ITEM_HEADING_RE.search(md_a)
+    assert _EIGHT_K_ITEM_HEADING_RE.search(md_b)
+
+
+def test_parse_sec_filing_8k_section_body_lookup_roundtrip() -> None:
+    """End-to-end: parse → build TOC → slice section body by slug.
+    Mirrors what `service.sec_filing_section` does — confirms the
+    parser output is shaped correctly for downstream consumers."""
+    html = _SAMPLE_8K_PATH.read_text()
+    md = parser.parse_sec_filing(html, "8-K")
+    toc = parser.build_toc(md)
+    target = next(e for e in toc if e["slug"].startswith("item-202"))
+    lines = md.split("\n")
+    later = [e for e in toc if e["line_index"] > target["line_index"]]
+    end_line = later[0]["line_index"] if later else len(lines)
+    body = "\n".join(lines[target["line_index"] + 1 : end_line]).strip()
+    assert body, "Item 2.02 body should not be empty"
+    # AAPL's Item 2.02 mentions a press release.
+    assert "press release" in body.lower()
 
 
 _SAMPLE_MD = (
@@ -466,6 +541,28 @@ def test_promote_item_heading_regex_does_not_overmatch_body_text() -> None:
     slugs = [e["slug"] for e in toc]
     assert "item-foo-bar" not in slugs
     assert "part-ii" in slugs
+
+
+def test_parse_sec_filing_8k_item_801_other_events_lands_in_toc() -> None:
+    """Item 8.01 "Other Events" is a common 8-K item code (used for
+    non-2.02/non-5.02 announcements: dividends, buyback authorizations,
+    SEC settlements, etc.). The 8-K item-code regex (`\\d+\\.\\d{2}`)
+    must match it the same as the more common Item 2.02 / Item 9.01.
+    Synthesize a minimal 8-K body with just an Item 8.01 heading and
+    assert it surfaces both as a `## Item 8.01` heading and as a TOC slug.
+    """
+    html = (
+        "<html><body>"
+        "<p>Item 8.01 Other Events</p>"
+        "<p>On May 21, 2026 the Company announced a $1B share repurchase "
+        "authorization replacing the prior program.</p>"
+        "</body></html>"
+    )
+    md = parser.parse_sec_filing(html, "8-K")
+    assert "## Item 8.01" in md, md
+    toc = parser.build_toc(md)
+    slugs = [e["slug"] for e in toc]
+    assert any(s.startswith("item-801") for s in slugs), slugs
 
 
 def test_table_to_md_returns_sec_parser_markdown_verbatim() -> None:

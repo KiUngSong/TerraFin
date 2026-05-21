@@ -1,4 +1,4 @@
-"""SEC 10-K / 10-Q HTML → markdown conversion for LLM consumption."""
+"""SEC 10-K / 10-Q / 8-K HTML → markdown conversion for LLM consumption."""
 
 import logging
 import re
@@ -13,6 +13,7 @@ from sec_parser.semantic_elements import (
     TitleElement,
     TopSectionTitle,
 )
+
 
 log = logging.getLogger(__name__)
 
@@ -31,6 +32,16 @@ _SLUG_MAX_LEN = 80
 # text-level scan over raw element text.
 _SECTION_HEADING_RE = re.compile(
     r"^\s*(part\s+[ivx]+|item\s+\d+[a-z]?)\b",
+    re.IGNORECASE | re.MULTILINE,
+)
+
+# SEC 8-K item-code pattern. Unlike 10-K/10-Q (`Item 7`, `Item 7A`), 8-K item
+# codes follow `\d+\.\d{2}` (e.g. `Item 2.02 Results of Operations`,
+# `Item 5.02 Departure of Directors`, `Item 9.01 Financial Statements and
+# Exhibits`). `\s` matches the NBSP characters EDGAR uses between the item
+# code and the title.
+_EIGHT_K_SECTION_HEADING_RE = re.compile(
+    r"^\s*item\s+\d+\.\d{2}\b",
     re.IGNORECASE | re.MULTILINE,
 )
 
@@ -136,7 +147,6 @@ def _heal_item_title_split(match: "re.Match[str]") -> str:
     return parent + " " + cont + "\n"
 
 
-
 def parse_sec_filing(html_content, filing_form="10-Q", *, include_images: bool = False):
     """
     Parse SEC filing HTML content into structured markdown.
@@ -163,10 +173,26 @@ def parse_sec_filing(html_content, filing_form="10-Q", *, include_images: bool =
         # via a log so regressions here are at least observable.
         log.info("Parsing 10-K filing with Edgar10QParser (sec_parser has no dedicated 10-K parser)")
         return _parse_filing(html_content, include_images=include_images)
+    if "8-K" in form:
+        # 8-K uses Edgar10QParser too — same underlying HTML structure — but
+        # section detection needs the 8-K item-code pattern (`X.YY`) instead
+        # of the 10-K/10-Q pattern (`X` / `XA`). sec_parser also frequently
+        # mis-classifies the second 8-K item heading as TitleElement instead
+        # of TopSectionTitle (observed on AAPL 8-K 0000320193-26-000011),
+        # so the heading promotion in `_emit_heading` is what lifts those
+        # to level-2 entries.
+        log.info("Parsing 8-K filing with Edgar10QParser + 8-K item-code regex")
+        return _parse_filing(
+            html_content,
+            include_images=include_images,
+            heading_re=_EIGHT_K_SECTION_HEADING_RE,
+        )
     raise ValueError(f"Filing form '{filing_form}' not supported.")
 
 
-def _split_into_heading_chunks(text: str) -> list[tuple[str | None, str]]:
+def _split_into_heading_chunks(
+    text: str, *, heading_re: "re.Pattern[str]" = _SECTION_HEADING_RE
+) -> list[tuple[str | None, str]]:
     """Split a text blob into `[(heading, body), ...]` chunks whenever a
     line starts with a Part/Item marker.
 
@@ -198,7 +224,7 @@ def _split_into_heading_chunks(text: str) -> list[tuple[str | None, str]]:
             chunks.append((None, body))
 
     for line in lines:
-        if _SECTION_HEADING_RE.match(line):
+        if heading_re.match(line):
             _flush()
             current_heading = line.strip()
             current_body = []
@@ -208,7 +234,9 @@ def _split_into_heading_chunks(text: str) -> list[tuple[str | None, str]]:
     return chunks
 
 
-def _looks_like_section_heading(text: str) -> bool:
+def _looks_like_section_heading(
+    text: str, *, heading_re: "re.Pattern[str]" = _SECTION_HEADING_RE
+) -> bool:
     """True when the text starts with a Part/Item section marker
     OR contains an embedded Part/Item line further down.
 
@@ -219,10 +247,15 @@ def _looks_like_section_heading(text: str) -> bool:
     """
     if not text:
         return False
-    return bool(_SECTION_HEADING_RE.search(text))
+    return bool(heading_re.search(text))
 
 
-def _emit_heading(text: str, *, default_level: int) -> str:
+def _emit_heading(
+    text: str,
+    *,
+    default_level: int,
+    heading_re: "re.Pattern[str]" = _SECTION_HEADING_RE,
+) -> str:
     """Render heading line(s), overriding sec_parser's level when needed.
 
     When the text contains one or more Part/Item markers (possibly
@@ -233,8 +266,8 @@ def _emit_heading(text: str, *, default_level: int) -> str:
     still surfaces in the document flow but doesn't shadow the Item
     entries in the TOC.
     """
-    if _SECTION_HEADING_RE.search(text):
-        chunks = _split_into_heading_chunks(text)
+    if heading_re.search(text):
+        chunks = _split_into_heading_chunks(text, heading_re=heading_re)
         rendered: list[str] = []
         for heading, body in chunks:
             if heading is None:
@@ -254,16 +287,21 @@ def _emit_heading(text: str, *, default_level: int) -> str:
     return f"{'#' * default_level} {text}\n"
 
 
-def _parse_filing(html_content, *, include_images: bool) -> str:
+def _parse_filing(
+    html_content,
+    *,
+    include_images: bool,
+    heading_re: "re.Pattern[str]" = _SECTION_HEADING_RE,
+) -> str:
     elements = sp.Edgar10QParser().parse(html_content)
 
     parts: list[str] = []
     for element in elements:
         text = (element.text or "").strip()
         if isinstance(element, TopSectionTitle):
-            parts.append(_emit_heading(text, default_level=2))
+            parts.append(_emit_heading(text, default_level=2, heading_re=heading_re))
         elif isinstance(element, TitleElement):
-            parts.append(_emit_heading(text, default_level=3))
+            parts.append(_emit_heading(text, default_level=3, heading_re=heading_re))
         elif isinstance(element, (TextElement, SupplementaryText)):
             # Promote plain text that contains an SEC Part/Item marker.
             # Edgar10QParser is 10-Q-biased; 10-K Item 7 (MD&A), 7A,
@@ -272,8 +310,8 @@ def _parse_filing(html_content, *, include_images: bool) -> str:
             # their bodies — the ZETA 10-K failure mode. Running the
             # chunk split here surfaces every embedded Item heading,
             # not just the first one.
-            if _looks_like_section_heading(text):
-                chunks = _split_into_heading_chunks(text)
+            if _looks_like_section_heading(text, heading_re=heading_re):
+                chunks = _split_into_heading_chunks(text, heading_re=heading_re)
                 for heading, body in chunks:
                     if heading is None:
                         if body.strip():
@@ -543,17 +581,17 @@ def _is_title_row(row: list[dict]) -> bool:
 
 _HEADER_LABEL_RE = re.compile(
     r"^("
-    r"\d{4}"                                # 2024, 2025
-    r"|\d{1,2}/\d{1,2}/\d{2,4}"             # 6/30/2025
-    r"|\w+ \d{1,2},? ?\d{0,4}"              # June 29, 2025
-    r"|Level [123]"                          # fair-value hierarchy
+    r"\d{4}"  # 2024, 2025
+    r"|\d{1,2}/\d{1,2}/\d{2,4}"  # 6/30/2025
+    r"|\w+ \d{1,2},? ?\d{0,4}"  # June 29, 2025
+    r"|Level [123]"  # fair-value hierarchy
     r"|Change"
     r"|Total"
     r"|\$"
-    r"|\(in [^)]+\)"                         # (in millions)
+    r"|\(in [^)]+\)"  # (in millions)
     r"|Year ended \w+"
     r"|Q[1-4]"
-    r"|[A-Z]{2,5}"                           # OI&E, AOCI, GAAP
+    r"|[A-Z]{2,5}"  # OI&E, AOCI, GAAP
     r")$"
 )
 
@@ -821,6 +859,7 @@ def _merge_adjacent_duplicate_columns(
     the colspan expansion then duplicates the value across two or more
     adjacent groups. Merging folds them back to one column.
     """
+
     def _is_currency_prefix(text: str) -> bool:
         return bool(_CURRENCY_PREFIX_RE.fullmatch(text.strip())) if text.strip() else False
 
@@ -911,11 +950,7 @@ def _rebuild_table_markdown(html: str) -> str | None:
     # take over segmentation. Otherwise (a signature block where every
     # row is one-cell text) leave the rows alone so they emit as a
     # plain-text list later.
-    while (
-        len(rows) >= 2
-        and _is_title_row(rows[0])
-        and any(len(r) >= 2 for r in rows[1:])
-    ):
+    while len(rows) >= 2 and _is_title_row(rows[0]) and any(len(r) >= 2 for r in rows[1:]):
         rows = rows[1:]
     if not rows:
         return None
@@ -930,9 +965,7 @@ def _rebuild_table_markdown(html: str) -> str | None:
     provisional = _build_column_groups(rows[:1], total_width=total_width)
     if not provisional:
         return None
-    provisional_collapsed = [
-        _collapse_row_into_groups(r, provisional, is_header=False) for r in grid
-    ]
+    provisional_collapsed = [_collapse_row_into_groups(r, provisional, is_header=False) for r in grid]
     header_count = _classify_header_count(provisional_collapsed)
 
     # Second pass: rebuild groups as the union of every header row's cell
@@ -940,13 +973,9 @@ def _rebuild_table_markdown(html: str) -> str | None:
     groups = _build_column_groups(rows[:header_count], total_width=total_width)
     if not groups:
         return None
-    header_rows_collapsed = [
-        _collapse_row_into_groups(grid[i], groups, is_header=True)
-        for i in range(header_count)
-    ]
+    header_rows_collapsed = [_collapse_row_into_groups(grid[i], groups, is_header=True) for i in range(header_count)]
     body_rows_collapsed = [
-        _collapse_row_into_groups(grid[i], groups, is_header=False)
-        for i in range(header_count, len(grid))
+        _collapse_row_into_groups(grid[i], groups, is_header=False) for i in range(header_count, len(grid))
     ]
 
     header = _merge_header_lines(header_rows_collapsed)
@@ -972,11 +1001,7 @@ def _rebuild_table_markdown(html: str) -> str | None:
 
     keep: list[int] = []
     for c in range(len(header)):
-        body_has = any(
-            row[c].strip()
-            for row in body_rows_collapsed
-            if c < len(row) and not _is_spanning_row(row)
-        )
+        body_has = any(row[c].strip() for row in body_rows_collapsed if c < len(row) and not _is_spanning_row(row))
         distinguishing = _column_has_distinguishing_header(c, header_rows_collapsed)
         # Keep column 0 always (row labels live there).
         if c == 0 or body_has or distinguishing:
@@ -984,15 +1009,11 @@ def _rebuild_table_markdown(html: str) -> str | None:
     if not keep:
         return None
     header = [header[c] for c in keep]
-    body_rows_collapsed = [
-        [row[c] if c < len(row) else "" for c in keep]
-        for row in body_rows_collapsed
-    ]
+    body_rows_collapsed = [[row[c] if c < len(row) else "" for c in keep] for row in body_rows_collapsed]
     # Spanning rows (colspan = full table width) land with the same label in
     # every group after collapse. Preserve col[0]; blank the data columns.
     body_rows_collapsed = [
-        ([row[0]] + [""] * (len(row) - 1)) if _is_spanning_row(row) else row
-        for row in body_rows_collapsed
+        ([row[0]] + [""] * (len(row) - 1)) if _is_spanning_row(row) else row for row in body_rows_collapsed
     ]
 
     # Drop body rows that are entirely empty post-collapse.
@@ -1013,9 +1034,7 @@ def _rebuild_table_markdown(html: str) -> str | None:
     # Post-pass: merge adjacent duplicate columns. When a body cell's
     # colspan crosses a header group boundary, the collapse step produces
     # identical text in adjacent columns — fuse them if no row disagrees.
-    header, body_rows_collapsed = _merge_adjacent_duplicate_columns(
-        header, body_rows_collapsed
-    )
+    header, body_rows_collapsed = _merge_adjacent_duplicate_columns(header, body_rows_collapsed)
     if len(header) < 2:
         # After post-pass merge we collapsed to a single column — emit as
         # plain lines for the same reason as above.
@@ -1117,5 +1136,3 @@ def build_toc(markdown: str, *, max_level: int | None = 2) -> list[dict]:
         entry["char_count"] = sum(len(lines[j]) + 1 for j in range(body_start, body_end))
 
     return entries
-
-

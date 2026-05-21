@@ -251,7 +251,17 @@ HOSTED_TOOL_CONTRACTS: dict[str, dict[str, Any]] = {
                 "ticker": {"type": "string", "minLength": 1},
                 "accession": {"type": "string", "minLength": 1},
                 "primaryDocument": {"type": "string", "minLength": 1},
-                "form": {"type": "string", "minLength": 1, "default": "10-Q"},
+                "form": {
+                    "type": "string",
+                    "minLength": 1,
+                    "default": "10-Q",
+                    "description": (
+                        "Filing form string from sec_filings (e.g. '10-K', '10-Q', "
+                        "'8-K', '8-K/A'). MUST be passed for 8-K filings — otherwise "
+                        "EX-99.x exhibit bodies (earnings PR, CFO commentary) are not "
+                        "appended and the agent only sees the 4 KB cover sheet."
+                    ),
+                },
             },
             required=["ticker", "accession", "primaryDocument"],
         ),
@@ -264,7 +274,17 @@ HOSTED_TOOL_CONTRACTS: dict[str, dict[str, Any]] = {
                 "accession": {"type": "string", "minLength": 1},
                 "primaryDocument": {"type": "string", "minLength": 1},
                 "sectionSlug": {"type": "string", "minLength": 1},
-                "form": {"type": "string", "minLength": 1, "default": "10-Q"},
+                "form": {
+                    "type": "string",
+                    "minLength": 1,
+                    "default": "10-Q",
+                    "description": (
+                        "Filing form string from sec_filings (e.g. '10-K', '10-Q', "
+                        "'8-K', '8-K/A'). MUST be passed for 8-K filings so EX-99.x "
+                        "exhibit slugs (exhibit-991-press-release, "
+                        "exhibit-992-supplemental-material) are reachable."
+                    ),
+                },
             },
             required=["ticker", "accession", "primaryDocument", "sectionSlug"],
         ),

@@ -20,6 +20,8 @@ CACHE_TTL_REGISTRY: dict[str, int] = {
     "sec.submissions": 86_400,
     "sec.submissions.history": 30 * 86_400,
     "sec.parsed": 86_400,
+    "sec.accession_index": 86_400,
+    "sec.exhibit": 86_400,
     # 13F guru holdings
     "portfolio": 7 * 86_400,
     # Private-source panels

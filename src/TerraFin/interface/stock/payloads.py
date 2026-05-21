@@ -17,13 +17,12 @@ from TerraFin.analytics.analysis.fundamental.dcf.inputs import (
 from TerraFin.data import (
     SecEdgarError,
     build_toc,
-    download_filing,
+    fetch_and_parse_filing,
     get_company_filings,
     get_data_factory,
     get_ticker_earnings,
     get_ticker_info,
     get_ticker_to_cik_dict_cached,
-    parse_sec_filing,
 )
 from TerraFin.interface.market_insights.payloads import canonical_macro_name, resolve_macro_type
 
@@ -395,17 +394,23 @@ def build_filing_document_payload(
         raise HTTPException(status_code=400, detail="primaryDocument is required.")
 
     try:
-        html = download_filing(cik, acc_clean, primary_document)
+        # 8-K branch appends EX-99.x exhibit bodies (earnings PR / CFO commentary)
+        # so the dashboard shows the substantive content, not just the cover sheet.
+        markdown = fetch_and_parse_filing(
+            cik, acc_clean, primary_document, form, include_images,
+        )
     except SecEdgarError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
-
-    try:
-        markdown = parse_sec_filing(html, form, include_images=include_images)
     except ValueError as exc:
         # Unsupported form (e.g., a DEF 14A passed through) — raw fallback.
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     # `max_level=2` keeps the sidebar compact (Part/Item scaffold only).
+    # 8-K exhibit bodies (earnings PR / CFO commentary) emit their own
+    # section structure at level 3 (e.g. `### Q1 FY27 Summary`,
+    # `### CFO Commentary`); bump to level 3 so those entries land in
+    # the sidebar TOC. Other forms keep the compact level-2 view.
+    toc_max_level = 3 if (form or "").upper().startswith("8-K") else 2
     # Normalize keys to camelCase for frontend consistency with the rest of the API.
     toc = [
         {
@@ -415,7 +420,7 @@ def build_filing_document_payload(
             "slug": entry["slug"],
             "charCount": entry["char_count"],
         }
-        for entry in build_toc(markdown, max_level=2)
+        for entry in build_toc(markdown, max_level=toc_max_level)
     ]
 
     urls = _edgar_urls(cik, acc_clean, primary_document)

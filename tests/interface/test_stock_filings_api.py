@@ -98,10 +98,11 @@ def test_build_filings_list_payload_handles_empty_upstream(monkeypatch, cik_mapp
 
 
 def test_build_filing_document_payload_returns_markdown_and_camelcase_toc(monkeypatch, cik_mapping) -> None:
-    monkeypatch.setattr(payloads, "download_filing", lambda cik, acc, doc: "<html>ignored</html>")
-
     fake_md = "## PART I\n\nbody\n\n## PART II\n"
-    monkeypatch.setattr(payloads, "parse_sec_filing", lambda html, form, *, include_images=False: fake_md)
+    monkeypatch.setattr(
+        payloads, "fetch_and_parse_filing",
+        lambda cik, acc, doc, form, include_images: fake_md,
+    )
 
     result = payloads.build_filing_document_payload(
         "AAPL",
@@ -128,13 +129,104 @@ def test_build_filing_document_payload_requires_primary_document(monkeypatch, ci
     assert exc.value.status_code == 400
 
 
-def test_build_filing_document_payload_propagates_unsupported_form_as_422(monkeypatch, cik_mapping) -> None:
-    monkeypatch.setattr(payloads, "download_filing", lambda cik, acc, doc: "<html></html>")
+def test_build_filing_document_payload_10q_sidebar_keeps_compact_level_2_toc(
+    monkeypatch, cik_mapping
+) -> None:
+    """10-Q (and every non-8-K form) keeps the compact Part/Item-only
+    sidebar — level-3 sub-titles must NOT leak into the TOC."""
+    fake_md = (
+        "## PART I\n\n"
+        "### Item 1. Financial Statements\n\n"
+        "body\n\n"
+        "## PART II\n\n"
+        "### Item 1A. Risk Factors\n"
+    )
+    monkeypatch.setattr(
+        payloads, "fetch_and_parse_filing",
+        lambda cik, acc, doc, form, include_images: fake_md,
+    )
 
-    def bad_parse(*_args, **_kwargs):
+    result = payloads.build_filing_document_payload(
+        "AAPL",
+        accession="0000320193-25-000001",
+        primary_document="aapl-20240928.htm",
+        form="10-Q",
+    )
+
+    levels = [e["level"] for e in result["toc"]]
+    assert levels == [2, 2], "10-Q sidebar must stop at level 2 (Part headings only)"
+
+
+def test_build_filing_document_payload_8k_sidebar_promotes_exhibit_subheadings(
+    monkeypatch, cik_mapping
+) -> None:
+    """8-K exhibit bodies (earnings PR / CFO commentary) carry their own
+    level-3 structure (e.g. `### Q1 FY27 Summary`, `### CFO Commentary`).
+    The 8-K branch must bump the sidebar TOC to ``max_level=3`` so those
+    entries show up — otherwise the sidebar shows only the Item code
+    scaffold and the substantive exhibit headings are invisible."""
+    fake_md = (
+        "## Item 2.02 Results of Operations\n\n"
+        "body\n\n"
+        "## Exhibit 99.1 — Press Release\n\n"
+        "### Q1 FY27 Summary\n\n"
+        "summary body\n\n"
+        "### CFO Commentary\n\n"
+        "commentary body\n"
+    )
+    monkeypatch.setattr(
+        payloads, "fetch_and_parse_filing",
+        lambda cik, acc, doc, form, include_images: fake_md,
+    )
+
+    result = payloads.build_filing_document_payload(
+        "AAPL",
+        accession="0000320193-24-000007",
+        primary_document="aapl-8k.htm",
+        form="8-K",
+    )
+
+    texts = [e["text"] for e in result["toc"]]
+    # Level-2 entries still present.
+    assert "Item 2.02 Results of Operations" in texts
+    assert "Exhibit 99.1 — Press Release" in texts
+    # And the level-3 exhibit-body subheadings now surface in the sidebar.
+    assert "Q1 FY27 Summary" in texts
+    assert "CFO Commentary" in texts
+
+
+def test_build_filing_document_payload_8ka_amendment_also_promotes_subheadings(
+    monkeypatch, cik_mapping
+) -> None:
+    """8-K/A amendments must get the same level-3 sidebar treatment as 8-K —
+    strict form == "8-K" check would silently demote amendments to compact TOC."""
+    fake_md = (
+        "## Item 2.02 Results of Operations (Amended)\n\n"
+        "## Exhibit 99.1 — Press Release\n\n"
+        "### Q1 FY27 Revised Summary\n\n"
+        "body\n"
+    )
+    monkeypatch.setattr(
+        payloads, "fetch_and_parse_filing",
+        lambda cik, acc, doc, form, include_images: fake_md,
+    )
+
+    result = payloads.build_filing_document_payload(
+        "AAPL",
+        accession="0000320193-24-000007",
+        primary_document="aapl-8ka.htm",
+        form="8-K/A",
+    )
+
+    texts = [e["text"] for e in result["toc"]]
+    assert "Q1 FY27 Revised Summary" in texts, "8-K/A sidebar must promote level-3 like 8-K"
+
+
+def test_build_filing_document_payload_propagates_unsupported_form_as_422(monkeypatch, cik_mapping) -> None:
+    def bad_fetch(*_args, **_kwargs):
         raise ValueError("Filing form 'DEF 14A' not supported.")
 
-    monkeypatch.setattr(payloads, "parse_sec_filing", bad_parse)
+    monkeypatch.setattr(payloads, "fetch_and_parse_filing", bad_fetch)
 
     with pytest.raises(HTTPException) as exc:
         payloads.build_filing_document_payload(

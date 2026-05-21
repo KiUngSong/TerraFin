@@ -28,7 +28,6 @@ def _stub_payloads(monkeypatch):
         )
 
     monkeypatch.setattr(payloads, "get_company_filings", fake_filings_df)
-    monkeypatch.setattr(payloads, "download_filing", lambda cik, acc, doc: "<html>irrelevant</html>")
     fake_md = (
         "## PART I - FINANCIAL INFORMATION\n\n"
         "## Item 1. Business\n\n"
@@ -37,7 +36,10 @@ def _stub_payloads(monkeypatch):
         "## Item 7. MD&A\n\n"
         "Liquidity remained strong with operating cash flow of $110B.\n"
     )
-    monkeypatch.setattr(payloads, "parse_sec_filing", lambda html, form, *, include_images=False: fake_md)
+    monkeypatch.setattr(
+        payloads, "fetch_and_parse_filing",
+        lambda cik, acc, doc, form, include_images: fake_md,
+    )
 
 
 def test_capability_registry_exposes_three_sec_tools() -> None:

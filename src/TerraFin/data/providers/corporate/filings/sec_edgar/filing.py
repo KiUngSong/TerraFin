@@ -1,7 +1,9 @@
 import logging
+import re
 from typing import Any
 
 import pandas as pd
+from bs4 import BeautifulSoup
 
 from TerraFin.configuration import load_terrafin_config
 from TerraFin.data.cache.policy import ttl_for
@@ -17,6 +19,8 @@ SEC_FILINGS_CACHE_NAMESPACE = "sec_filings"
 # Managed-cache namespaces for the index/CIK paths (step 4 migration).
 SEC_CIK_NAMESPACE = "sec.cik"
 SEC_SUBMISSIONS_NAMESPACE = "sec.submissions"
+SEC_ACCESSION_INDEX_NAMESPACE = "sec.accession_index"
+SEC_EXHIBIT_NAMESPACE = "sec.exhibit"
 
 _CIK_MAPPING_SOURCE = "sec.cik.mapping"
 _CIK_MAPPING_KEY = "mapping"
@@ -186,10 +190,17 @@ def clear_sec_index_cache() -> None:
 
     manager = get_cache_manager()
     for source in list(manager._payload_specs):
-        if source.startswith("sec.cik.") or source.startswith("sec.submissions."):
+        if (
+            source.startswith("sec.cik.")
+            or source.startswith("sec.submissions.")
+            or source.startswith("sec.accession_index.")
+            or source.startswith("sec.exhibit.")
+        ):
             manager.clear_payload(source)
     CacheManager.file_cache_clear(SEC_CIK_NAMESPACE)
     CacheManager.file_cache_clear(SEC_SUBMISSIONS_NAMESPACE)
+    CacheManager.file_cache_clear(SEC_ACCESSION_INDEX_NAMESPACE)
+    CacheManager.file_cache_clear(SEC_EXHIBIT_NAMESPACE)
 
 
 def clear_sec_filings_cache() -> None:
@@ -319,3 +330,163 @@ def download_filing(cik: int, accession_number: str, file_name: str) -> str:
     """
     url = f"https://www.sec.gov/Archives/edgar/data/{str(cik).zfill(10)}/{accession_number}/{file_name}"
     return _fetch_text(url)
+
+
+# ── Accession-level file listing & exhibit fetch ────────────────────────────
+
+
+def _accession_index_source(cik: int, accession_number: str) -> str:
+    return f"sec.accession_index.{cik}.{accession_number}"
+
+
+def _accession_index_url(cik: int, accession_number: str) -> str:
+    """EDGAR per-accession index HTML page (carries the EX-99.x type column).
+
+    Accepts either dashed (``0001045810-26-000051``) or undashed
+    (``000104581026000051``) accession numbers; the path slicing below
+    assumes the dash-stripped 18-char form, so normalize defensively
+    matching how ``download_filing`` / ``download_exhibit`` callers
+    already pre-strip dashes upstream.
+    """
+    accession_number = accession_number.replace("-", "")
+    return (
+        f"https://www.sec.gov/Archives/edgar/data/{str(cik).zfill(10)}/"
+        f"{accession_number}/{accession_number[:10]}-{accession_number[10:12]}-{accession_number[12:]}"
+        "-index.html"
+    )
+
+
+def _parse_accession_index_html(html: str) -> list[dict[str, str]]:
+    """Extract the document-format file table from a per-accession index page.
+
+    Returns one dict per row: ``{"seq", "description", "document", "type", "size"}``.
+    The ``type`` column is what carries the EX-99.x classification — filenames
+    themselves are issuer-chosen and often don't start with ``ex-99`` (e.g.
+    NVDA uses ``q1fy27pr.htm`` for its EX-99.1 press release, AAPL uses
+    ``a8-kex991q2202603282026.htm``).
+    """
+    soup = BeautifulSoup(html, "html.parser")
+    table = soup.find("table", {"summary": "Document Format Files"})
+    if table is None:
+        return []
+    rows: list[dict[str, str]] = []
+    for tr in table.find_all("tr"):
+        cells = tr.find_all("td")
+        if len(cells) < 5:
+            continue
+        seq = cells[0].get_text(strip=True)
+        description = cells[1].get_text(strip=True)
+        # The Document cell holds an <a> whose text is the bare filename.
+        anchor = cells[2].find("a")
+        document = anchor.get_text(strip=True) if anchor is not None else cells[2].get_text(strip=True)
+        type_ = cells[3].get_text(strip=True)
+        size = cells[4].get_text(strip=True)
+        # Skip the trailer row ("Complete submission text file") which has
+        # an empty Seq and Type.
+        if not document or not type_:
+            continue
+        rows.append(
+            {
+                "seq": seq,
+                "description": description,
+                "document": document,
+                "type": type_,
+                "size": size,
+            }
+        )
+    return rows
+
+
+def _ensure_accession_index_registered(cik: int, accession_number: str) -> str:
+    from TerraFin.data.cache.manager import CachePayloadSpec
+    from TerraFin.data.cache.registry import get_cache_manager
+
+    source = _accession_index_source(cik, accession_number)
+    url = _accession_index_url(cik, accession_number)
+    get_cache_manager().register_payload(
+        CachePayloadSpec(
+            source=source,
+            namespace=SEC_ACCESSION_INDEX_NAMESPACE,
+            key=f"{cik}_{accession_number}",
+            ttl_seconds=ttl_for("sec.accession_index"),
+            fetch_fn=lambda url=url: _parse_accession_index_html(_fetch_text(url)),
+        )
+    )
+    return source
+
+
+def list_filing_files(cik: int, accession_number: str) -> list[dict[str, str]]:
+    """List every file in an EDGAR accession with its EX-99.x type classification.
+
+    File listings are immutable after the filing is accepted, so this is
+    cached for `sec.accession_index` TTL.
+
+    Returns a list of dicts: ``{"seq", "description", "document", "type", "size"}``.
+    Use the ``type`` field (e.g. ``"EX-99.1"``) to filter for press-release
+    exhibits — issuer filenames are arbitrary and don't reliably start with
+    ``ex-99``.
+    """
+    from TerraFin.data.cache.registry import get_cache_manager
+
+    source = _ensure_accession_index_registered(cik, accession_number)
+    return list(get_cache_manager().get_payload(source).payload)  # type: ignore[arg-type]
+
+
+def _exhibit_source(cik: int, accession_number: str, file_name: str) -> str:
+    return f"sec.exhibit.{cik}.{accession_number}.{file_name}"
+
+
+def _ensure_exhibit_registered(cik: int, accession_number: str, file_name: str) -> str:
+    from TerraFin.data.cache.manager import CachePayloadSpec
+    from TerraFin.data.cache.registry import get_cache_manager
+
+    source = _exhibit_source(cik, accession_number, file_name)
+    url = (
+        f"https://www.sec.gov/Archives/edgar/data/{str(cik).zfill(10)}/"
+        f"{accession_number}/{file_name}"
+    )
+    get_cache_manager().register_payload(
+        CachePayloadSpec(
+            source=source,
+            namespace=SEC_EXHIBIT_NAMESPACE,
+            key=f"{cik}_{accession_number}_{file_name}",
+            ttl_seconds=ttl_for("sec.exhibit"),
+            fetch_fn=lambda url=url: _fetch_text(url),
+        )
+    )
+    return source
+
+
+def download_exhibit(cik: int, accession_number: str, file_name: str) -> str:
+    """Download an exhibit file (typically EX-99.x press release HTML).
+
+    Cached in the shared file cache under ``sec.exhibit`` because exhibits
+    are immutable once filed and tend to be re-fetched as part of the 8-K
+    orchestration loop.
+    """
+    from TerraFin.data.cache.registry import get_cache_manager
+
+    source = _ensure_exhibit_registered(cik, accession_number, file_name)
+    return get_cache_manager().get_payload(source).payload  # type: ignore[return-value]
+
+
+_EX99_TYPE_RE = re.compile(r"^EX-99(\.\d+)?$", re.IGNORECASE)
+
+
+def filter_ex99_html_exhibits(files: list[dict[str, str]]) -> list[dict[str, str]]:
+    """Return only EX-99.* entries whose document is an HTML file.
+
+    PRs / earnings commentaries always render as `.htm`/`.html`. Non-HTML
+    EX-99 entries (rare — PDFs, images) are skipped because the SEC HTML
+    parser can't consume them.
+    """
+    selected: list[dict[str, str]] = []
+    for row in files:
+        type_ = (row.get("type") or "").strip()
+        if not _EX99_TYPE_RE.match(type_):
+            continue
+        document = (row.get("document") or "").strip().lower()
+        if not (document.endswith(".htm") or document.endswith(".html")):
+            continue
+        selected.append(row)
+    return selected

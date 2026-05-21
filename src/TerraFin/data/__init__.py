@@ -15,6 +15,7 @@ from .factory import DataFactory, get_data_factory
 from .providers.corporate.filings.sec_edgar import (
     build_toc,
     download_filing,
+    fetch_and_parse_filing,
     get_company_filings,
     get_ticker_to_cik_dict_cached,
     parse_sec_filing,
@@ -53,6 +54,7 @@ __all__ = [
     "SecEdgarUnavailableError",
     "build_toc",
     "download_filing",
+    "fetch_and_parse_filing",
     "get_company_filings",
     "get_ticker_to_cik_dict_cached",
     "parse_sec_filing",
