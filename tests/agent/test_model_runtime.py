@@ -2,7 +2,7 @@ import pytest
 
 from TerraFin.agent.definitions import TerraFinAgentDefinition
 from TerraFin.agent.model_management import set_saved_default_model_ref
-from TerraFin.agent.hosted_service import build_hosted_model_provider_registry, get_hosted_agent_loop, reset_hosted_agent_loop
+from TerraFin.agent.service.hosted import build_hosted_model_provider_registry, get_hosted_agent_loop, reset_hosted_agent_loop
 from TerraFin.agent.loop import TerraFinConversationMessage, TerraFinHostedConversation, TerraFinModelTurn
 from TerraFin.agent.model_runtime import (
     TerraFinModelConfigError,

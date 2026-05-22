@@ -30,6 +30,19 @@ TerraFin"):
   auto-generated; run `python scripts/generate-agent-artefacts.py` after
   adding capabilities to keep SKILL.md and this count in sync).
 
+### External HTTP entry point
+
+Talking to a running TerraFin from outside the venv? Hit the HTTP server
+directly. Local dev defaults to `http://127.0.0.1:8001`. Discovery surfaces:
+
+- Swagger UI: [`/docs`](http://127.0.0.1:8001/docs) — interactive, executable
+- Schema: [`/openapi.json`](http://127.0.0.1:8001/openapi.json) — machine-readable
+- Health: `GET /ready`
+- Per-route docs: [docs/api-reference.md](./docs/api-reference.md)
+
+Prefer Swagger over hand-written curl snippets — the schema there always
+matches the running server.
+
 ## Capability surface (current)
 
 All of these have parity Python (`TerraFinAgentClient`), CLI
