@@ -26,7 +26,7 @@ _KOREAN_RE = re.compile(r"[가-힣]")
 # to avoid duplicate results for the same underlying company.
 _PRIMARY_EXCHANGES: set[str] = {
     # US
-    "NMS", "NGM", "NCM", "NYQ", "ASE", "BATS", "ARCA", "PCX",
+    "NMS", "NGM", "NCM", "NYQ", "ASE", "BATS", "BTS", "ARCA", "PCX",
     "PNK", "OQB", "OQX",
     # Korea
     "KSC",  # KOSPI
