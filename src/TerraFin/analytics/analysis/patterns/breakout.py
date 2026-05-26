@@ -548,3 +548,62 @@ def _wyckoff_spring_upthrust(
             )
         ]
     return []
+
+
+# ─── VCP (Volatility Contraction Pattern) ────────────────────────────────────
+#
+# Minervini's VCP: a base of SUCCESSIVE, progressively SHALLOWER pullbacks
+# (T1 > T2 > T3 …, typically 2-6 "footprints") with volume drying up into the
+# right side, setting up a pivot whose breakout occurs on volume expansion.
+# VCP is fuzzy by nature — this is a heuristic detector, not a precise oracle.
+# It's the ENTRY-timing layer of SEPA (the Trend Template + RS is the screen).
+
+
+def detect_vcp(
+    ohlc,
+    *,
+    window: int = 130,
+    half: int = 3,
+    min_contractions: int = 2,
+    max_contractions: int = 6,
+    max_latest_depth: float = 0.12,
+) -> dict | None:
+    """Heuristic VCP base detection over the last `window` daily bars.
+
+    Returns a dict (n_contractions, depths newest-last, pivot, volume_drying,
+    breakout) when a contracting base is present, else None. Logic:
+      - swing pivots on closes → successive high→low pullback depths
+      - require >=min_contractions, each shallower than the prior (contracting)
+      - latest contraction tight (<= max_latest_depth)
+      - volume drying up: recent third's avg volume < first third's
+      - pivot = most recent swing high; breakout = close >= pivot
+    """
+    cs = _closes(ohlc)
+    vs = _volumes(ohlc)
+    if vs is None or len(cs) < window or len(vs) < window:
+        return None
+    cs_w, vs_w = cs[-window:], vs[-window:]
+    piv = swing_pivots(cs_w, half=half)
+    if len(piv) < 3:
+        return None
+    depths: list[float] = []
+    for a, b in zip(piv, piv[1:]):
+        if a.side == 1 and b.side == -1 and a.price > 0:
+            depths.append((a.price - b.price) / a.price)
+    if len(depths) < min_contractions:
+        return None
+    depths = depths[-max_contractions:]
+    contracting = all(depths[i] < depths[i - 1] for i in range(1, len(depths)))
+    if not (contracting and depths[-1] <= max_latest_depth):
+        return None
+    third = max(1, window // 3)
+    volume_drying = (sum(vs_w[-third:]) / third) < (sum(vs_w[:third]) / third)
+    last_high = max((p.price for p in piv if p.side == 1), default=None)
+    breakout = last_high is not None and cs_w[-1] >= last_high
+    return {
+        "n_contractions": len(depths),
+        "depths": [round(d, 3) for d in depths],
+        "pivot": last_high,
+        "volume_drying": volume_drying,
+        "breakout": breakout,
+    }
