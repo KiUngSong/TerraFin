@@ -7,6 +7,7 @@ from threading import RLock
 from typing import TYPE_CHECKING, Any, Literal
 from uuid import uuid4
 
+from ..contracts.conversation_state import RUNTIME_MODEL_METADATA_KEY
 from ..runtime.artifacts import TerraFinArtifact, TerraFinCapabilityCall
 from ..runtime.context import TerraFinAgentContext, create_agent_context
 from ..runtime.session import TerraFinAgentSession
@@ -107,6 +108,21 @@ class TerraFinHostedSessionRecord:
         return self
 
 
+_TERMINAL_TASK_STATUSES = frozenset({"completed", "failed", "cancelled"})
+
+
+@dataclass(frozen=True, slots=True)
+class HostedSessionLightMeta:
+    session_id: str
+    agent_name: str
+    created_at: datetime
+    updated_at: datetime
+    last_accessed_at: datetime
+    runtime_model: dict[str, Any] | None
+    hidden_internal: bool
+    pending_task_count: int
+
+
 class HostedSessionStore:
     def create(self, record: TerraFinHostedSessionRecord) -> TerraFinHostedSessionRecord:
         raise NotImplementedError
@@ -116,6 +132,36 @@ class HostedSessionStore:
 
     def list(self) -> tuple[TerraFinHostedSessionRecord, ...]:
         raise NotImplementedError
+
+    def list_light_metadata(self) -> tuple[HostedSessionLightMeta, ...]:
+        # Default summary path: derive light metadata from full records.
+        # Concrete stores that can read payloads cheaply should override this
+        # to avoid deserializing a full agent context per session.
+        metas: list[HostedSessionLightMeta] = []
+        for record in self.list():
+            hidden = bool(
+                record.context.session.metadata.get("hiddenInternal")
+                or record.metadata.get("hiddenInternal")
+            )
+            pending = sum(
+                1
+                for task in record.context.task_registry.list_for_session(record.session_id)
+                if task.status not in _TERMINAL_TASK_STATUSES
+            )
+            runtime_model = record.context.session.metadata.get(RUNTIME_MODEL_METADATA_KEY)
+            metas.append(
+                HostedSessionLightMeta(
+                    session_id=record.session_id,
+                    agent_name=record.agent_name,
+                    created_at=record.created_at,
+                    updated_at=record.updated_at,
+                    last_accessed_at=record.last_accessed_at,
+                    runtime_model=runtime_model,
+                    hidden_internal=hidden,
+                    pending_task_count=pending,
+                )
+            )
+        return tuple(metas)
 
     def attach_conversation(
         self,
@@ -862,6 +908,42 @@ class SQLiteHostedSessionStore(HostedSessionStore):
             ]
             self._cache = {record.session_id: record for record in records}
             return tuple(records)
+
+    def list_light_metadata(self) -> tuple[HostedSessionLightMeta, ...]:
+        # Light summary path: read raw payloads without deserializing a full
+        # agent context per session (which is the dominant cost of `list()`).
+        with self._lock:
+            with self._connect() as connection:
+                rows = connection.execute(
+                    "SELECT payload FROM hosted_sessions ORDER BY updated_at DESC"
+                ).fetchall()
+        metas: list[HostedSessionLightMeta] = []
+        for row in rows:
+            payload = json.loads(str(row[0]))
+            session_meta = dict(payload.get("sessionMetadata", payload.get("metadata", {})))
+            record_meta = dict(payload.get("metadata", {}))
+            hidden = bool(session_meta.get("hiddenInternal") or record_meta.get("hiddenInternal"))
+            runtime_model = session_meta.get(RUNTIME_MODEL_METADATA_KEY) or record_meta.get(
+                RUNTIME_MODEL_METADATA_KEY
+            )
+            pending = sum(
+                1
+                for task in payload.get("tasks", [])
+                if isinstance(task, dict) and task.get("status") not in _TERMINAL_TASK_STATUSES
+            )
+            metas.append(
+                HostedSessionLightMeta(
+                    session_id=str(payload["sessionId"]),
+                    agent_name=str(payload["agentName"]),
+                    created_at=_parse_datetime(str(payload["createdAt"])) or _utc_now(),
+                    updated_at=_parse_datetime(str(payload["updatedAt"])) or _utc_now(),
+                    last_accessed_at=_parse_datetime(str(payload["lastAccessedAt"])) or _utc_now(),
+                    runtime_model=runtime_model,
+                    hidden_internal=hidden,
+                    pending_task_count=pending,
+                )
+            )
+        return tuple(metas)
 
     def attach_conversation(
         self,

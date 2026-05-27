@@ -227,75 +227,19 @@ def _message_preview(content: str, *, limit: int = 96) -> str:
     return f"{compact[: limit - 1].rstrip()}…"
 
 
-def _session_summary_response(
-    record: TerraFinHostedSessionRecord,
-    *,
-    loop: object | None = None,
-) -> HostedAgentSessionSummaryResponse:
-    transcript_summary = None
-    if loop is not None:
-        transcript_store = getattr(getattr(loop, "runtime", None), "transcript_store", None)
-        if transcript_store is not None and transcript_store.session_exists(record.session_id):
-            transcript_summary = transcript_store.build_summary(record.session_id)
-    conversation = None
-    if transcript_summary is None and loop is not None:
-        try:
-            conversation = loop.get_conversation(record.session_id)
-        except Exception:
-            conversation = None
-    visible_messages = (
-        []
-        if conversation is None
-        else [
-            message
-            for message in conversation.snapshot()
-            if message.role not in {"system", "tool"} and not is_internal_only_message(message)
-        ]
-    )
-    last_message = visible_messages[-1] if visible_messages else None
-    first_user_message = next((message for message in visible_messages if message.role == "user"), None)
-    runtime_model = _runtime_model_response(record.context.session.metadata.get(RUNTIME_MODEL_METADATA_KEY))
-    if runtime_model is None and loop is not None:
-        runtime_model = _resolve_model_client_runtime_model(loop, session=record.context.session)
-    if transcript_summary is not None and transcript_summary.runtime_model is not None:
-        runtime_model = _runtime_model_response(transcript_summary.runtime_model) or runtime_model
-    pending_task_count = sum(
-        1
-        for task in record.context.task_registry.list_for_session(record.session_id)
-        if task.status not in {"completed", "failed", "cancelled"}
-    )
+def _list_summary_response(summary) -> HostedAgentSessionSummaryResponse:
     return HostedAgentSessionSummaryResponse(
-        sessionId=record.session_id,
-        agentName=record.agent_name,
-        createdAt=record.created_at.isoformat(),
-        updatedAt=record.updated_at.isoformat(),
-        lastAccessedAt=record.last_accessed_at.isoformat(),
-        runtimeModel=runtime_model,
-        title=(
-            transcript_summary.title
-            if transcript_summary is not None
-            else None
-            if first_user_message is None
-            else _message_preview(first_user_message.content, limit=72)
-        ),
-        lastMessagePreview=(
-            transcript_summary.last_message_preview
-            if transcript_summary is not None
-            else None
-            if last_message is None
-            else _message_preview(last_message.content)
-        ),
-        lastMessageAt=(
-            None
-            if (transcript_summary is not None and transcript_summary.last_message_at is None)
-            else transcript_summary.last_message_at.isoformat()
-            if transcript_summary is not None
-            else None
-            if last_message is None
-            else last_message.created_at.isoformat()
-        ),
-        messageCount=transcript_summary.message_count if transcript_summary is not None else len(visible_messages),
-        pendingTaskCount=pending_task_count,
+        sessionId=summary.session_id,
+        agentName=summary.agent_name,
+        createdAt=summary.created_at.isoformat(),
+        updatedAt=summary.updated_at.isoformat(),
+        lastAccessedAt=summary.last_accessed_at.isoformat(),
+        runtimeModel=_runtime_model_response(summary.runtime_model),
+        title=summary.title,
+        lastMessagePreview=summary.last_message_preview,
+        lastMessageAt=None if summary.last_message_at is None else summary.last_message_at.isoformat(),
+        messageCount=summary.message_count,
+        pendingTaskCount=summary.pending_task_count,
     )
 
 
@@ -548,9 +492,9 @@ def create_agent_data_router() -> APIRouter:
     def api_hosted_agent_list_sessions():
         try:
             loop = get_hosted_agent_loop()
-            records = loop.runtime.list_sessions()
+            summaries = loop.runtime.list_session_summaries()
             return HostedAgentSessionListResponse(
-                sessions=[_session_summary_response(record, loop=loop) for record in records],
+                sessions=[_list_summary_response(summary) for summary in summaries],
             )
         except Exception as exc:
             _raise_http_error(exc)

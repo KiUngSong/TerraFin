@@ -7,6 +7,7 @@ import hashlib
 import json
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from inspect import signature
 from threading import Event, RLock, Thread
@@ -25,6 +26,7 @@ from ..contracts.definitions import (
 )
 from ..models.runtime import TerraFinRuntimeModel
 from ..storage.session_store import (
+    HostedSessionLightMeta,
     HostedSessionStore,
     InMemoryHostedSessionStore,
     TerraFinHostedApprovalRequest,
@@ -46,6 +48,21 @@ from .tasks import TerraFinTaskRecord
 
 def _utc_now() -> datetime:
     return datetime.now(UTC)
+
+
+@dataclass(frozen=True, slots=True)
+class HostedSessionListSummary:
+    session_id: str
+    agent_name: str
+    created_at: datetime
+    updated_at: datetime
+    last_accessed_at: datetime
+    runtime_model: dict[str, Any] | None
+    title: str | None
+    last_message_preview: str | None
+    last_message_at: datetime | None
+    message_count: int
+    pending_task_count: int
 
 
 class TerraFinHostedAgentRuntime:
@@ -135,6 +152,57 @@ class TerraFinHostedAgentRuntime:
                 continue
             records.append(record)
         return tuple(records)
+
+    def list_session_summaries(self) -> tuple[HostedSessionListSummary, ...]:
+        # Light summary path for the "Recent sessions" list view. Builds from
+        # the transcript index + a light raw-payload read of session metadata,
+        # never deserializing a full agent context. Listing does not evict, so
+        # this intentionally skips `_cleanup_expired_state()`.
+        light: dict[str, HostedSessionLightMeta] = {
+            meta.session_id: meta for meta in self.session_store.list_light_metadata()
+        }
+        summaries: list[HostedSessionListSummary] = []
+        if self.transcript_store is not None:
+            for entry in self.transcript_store.list_sessions():
+                meta = light.get(entry.session_id)
+                if meta is None or meta.hidden_internal:
+                    continue
+                summaries.append(
+                    HostedSessionListSummary(
+                        session_id=meta.session_id,
+                        agent_name=meta.agent_name,
+                        created_at=meta.created_at,
+                        updated_at=meta.updated_at,
+                        last_accessed_at=meta.last_accessed_at,
+                        runtime_model=entry.runtime_model or meta.runtime_model,
+                        title=entry.title,
+                        last_message_preview=entry.last_message_preview,
+                        last_message_at=entry.last_message_at,
+                        message_count=entry.message_count,
+                        pending_task_count=meta.pending_task_count,
+                    )
+                )
+            return tuple(summaries)
+        for meta in light.values():
+            if meta.hidden_internal:
+                continue
+            summaries.append(
+                HostedSessionListSummary(
+                    session_id=meta.session_id,
+                    agent_name=meta.agent_name,
+                    created_at=meta.created_at,
+                    updated_at=meta.updated_at,
+                    last_accessed_at=meta.last_accessed_at,
+                    runtime_model=meta.runtime_model,
+                    title=None,
+                    last_message_preview=None,
+                    last_message_at=None,
+                    message_count=0,
+                    pending_task_count=meta.pending_task_count,
+                )
+            )
+        summaries.sort(key=lambda summary: summary.updated_at, reverse=True)
+        return tuple(summaries)
 
     def get_agent_definition(self, agent_name: str) -> TerraFinAgentDefinition:
         return self.agent_registry.get(agent_name)

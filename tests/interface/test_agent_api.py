@@ -14,8 +14,10 @@ from TerraFin.agent.definitions import (
     TerraFinAgentDefinition,
     is_internal_agent_definition,
 )
+from TerraFin.agent.contracts.conversation_state import RUNTIME_MODEL_METADATA_KEY
 from TerraFin.agent.loop import TerraFinConversationMessage, TerraFinHostedConversation, TerraFinHostedRunResult
 from TerraFin.agent.runtime import TerraFinAgentSession, TerraFinTaskRegistry
+from TerraFin.agent.runtime.hosted import HostedSessionListSummary
 from TerraFin.agent.session_store import (
     TerraFinHostedApprovalRequest,
     TerraFinHostedSessionRecord,
@@ -204,6 +206,33 @@ class _FakeHostedRuntime:
                 reverse=True,
             )
         )
+
+    def list_session_summaries(self):
+        summaries = []
+        for record in self._records.values():
+            if record.metadata.get("hiddenInternal") or record.context.session.metadata.get("hiddenInternal"):
+                continue
+            summaries.append(
+                HostedSessionListSummary(
+                    session_id=record.session_id,
+                    agent_name=record.agent_name,
+                    created_at=record.created_at,
+                    updated_at=record.updated_at,
+                    last_accessed_at=record.last_accessed_at,
+                    runtime_model=record.context.session.metadata.get(RUNTIME_MODEL_METADATA_KEY),
+                    title=None,
+                    last_message_preview=None,
+                    last_message_at=None,
+                    message_count=0,
+                    pending_task_count=sum(
+                        1
+                        for task in record.context.task_registry.list_for_session(record.session_id)
+                        if task.status not in {"completed", "failed", "cancelled"}
+                    ),
+                )
+            )
+        summaries.sort(key=lambda summary: summary.updated_at, reverse=True)
+        return tuple(summaries)
 
     def delete_session(self, session_id: str):
         record = self._records[session_id]
