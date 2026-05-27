@@ -20,6 +20,10 @@ from .rates import fit_current_treasury_curve
 DEFAULT_ERP_PCT = 5.0
 DEFAULT_TERMINAL_GROWTH_PCT = 3.0
 DEFAULT_STOCK_GROWTH_PCT = 6.0
+# Sustained multi-year DCF initial growth above this is implausible for any
+# mature equity; an EPS-ratio default that high is a trough-EPS artifact, so
+# the template flags it as low-confidence rather than projecting it silently.
+IMPLAUSIBLE_EPS_GROWTH_PCT = 35.0
 DEFAULT_STOCK_PROJECTION_YEARS = 5
 ALLOWED_STOCK_PROJECTION_YEARS = (5, 10, 15)
 SP500Methodology = Literal["shareholder_yield", "earnings_power"]
@@ -545,6 +549,20 @@ def build_stock_template(
     elif trailing_eps and forward_eps and trailing_eps > 0 and forward_eps > 0:
         base_growth_pct = ((forward_eps / trailing_eps) - 1.0) * 100.0
         growth_source = "eps"
+        # forward/trailing EPS is a single-year ratio; off a trough-depressed
+        # trailing EPS it explodes (e.g. 80%+) and the projection then compounds
+        # that as a multi-year initial growth, producing absurd intrinsic values.
+        # Don't silently clamp it (that would hide the problem and shift MoS for
+        # every name at once) — flag it as low-confidence so the user/agent
+        # supplies an explicit base_growth_pct. Cross-reference revenue CAGR.
+        if base_growth_pct > IMPLAUSIBLE_EPS_GROWTH_PCT:
+            rev_cagr = _revenue_cagr_pct(income_annual)
+            cross_ref = f" Revenue CAGR is {rev_cagr:.1f}%." if rev_cagr is not None else ""
+            warnings.append(
+                f"EPS-implied initial growth of {base_growth_pct:.0f}% reflects a depressed "
+                f"trailing-EPS base, not a sustainable multi-year rate; treat the DCF as "
+                f"low-confidence and supply an explicit base_growth_pct.{cross_ref}"
+            )
     else:
         revenue_cagr_pct = _revenue_cagr_pct(income_annual)
         if revenue_cagr_pct is not None:

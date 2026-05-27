@@ -663,3 +663,36 @@ def test_turnaround_schedule_linear_interp_pre_breakeven() -> None:
     # Year 4 and 5 apply the fading growth path.
     assert schedule[3] > schedule[2]
     assert schedule[4] > schedule[3]
+
+
+def test_build_stock_template_flags_implausible_eps_growth_without_clamping(monkeypatch) -> None:
+    # Trough-depressed trailing EPS: forward/trailing = 10/4 - 1 = 150%, far above
+    # the IMPLAUSIBLE_EPS_GROWTH_PCT (35%) threshold. The flag path must append a
+    # low-confidence warning AND leave base_growth_pct unclamped at the raw 150%.
+    annual_cashflow = pd.DataFrame(
+        {
+            "date": ["2025-12-31", "2024-12-31", "2023-12-31", "2022-12-31"],
+            "Operating Cash Flow": [900.0, 850.0, 780.0, 720.0],
+            "Capital Expenditure": [-210.0, -190.0, -175.0, -160.0],
+        }
+    )
+    _patch_stock_env(
+        monkeypatch,
+        annual_cashflow=annual_cashflow,
+        ticker_info={
+            "currentPrice": 150.0,
+            "sharesOutstanding": 100.0,
+            "beta": 1.2,
+            "trailingEps": 4.0,
+            "forwardEps": 10.0,
+        },
+    )
+
+    template = build_stock_template("AAPL", data_factory=_PriceFactory({"AAPL": 150.0}))
+
+    assert template.assumptions["growthSource"] == "eps"
+    # The raw EPS-implied growth is preserved (not clamped to the 35% threshold).
+    expected_growth = ((10.0 / 4.0) - 1.0) * 100.0
+    assert round(template.base_growth_pct or 0.0, 4) == round(expected_growth, 4)
+    assert round(template.assumptions["baseGrowthPct"] or 0.0, 4) == round(expected_growth, 4)
+    assert any("low-confidence" in warning for warning in template.warnings)

@@ -648,6 +648,9 @@ class TerraFinAgentService:
         *,
         projection_years: int | None = None,
         fcf_base_source: str | None = None,
+        base_growth_pct: float | None = None,
+        terminal_growth_pct: float | None = None,
+        beta: float | None = None,
         breakeven_year: int | None = None,
         breakeven_cash_flow_per_share: float | None = None,
         post_breakeven_growth_pct: float | None = None,
@@ -663,6 +666,17 @@ class TerraFinAgentService:
         overrides_kwargs: dict[str, Any] = {}
         if fcf_base_source is not None:
             overrides_kwargs["fcf_base_source"] = fcf_base_source  # type: ignore[arg-type]
+        # Explicit growth/discount levers so the agent can drive analyst-grade
+        # scenario valuations (distinct bear/base/bull growth) — the same fields
+        # the frontend DCF form exposes. Without base_growth_pct the agent could
+        # only nudge the turnaround knob, so non-turnaround scenarios collapsed
+        # to the single auto-derived growth curve.
+        if base_growth_pct is not None:
+            overrides_kwargs["base_growth_pct"] = float(base_growth_pct)
+        if terminal_growth_pct is not None:
+            overrides_kwargs["terminal_growth_pct"] = float(terminal_growth_pct)
+        if beta is not None:
+            overrides_kwargs["beta"] = float(beta)
         if breakeven_year is not None:
             overrides_kwargs["breakeven_year"] = int(breakeven_year)
         if breakeven_cash_flow_per_share is not None:
