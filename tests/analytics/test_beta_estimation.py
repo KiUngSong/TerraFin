@@ -89,6 +89,30 @@ def test_estimate_beta_5y_monthly_uses_supported_benchmark_and_returns_ready() -
     assert estimate.r_squared == pytest.approx(1.0)
 
 
+def test_estimate_beta_5y_monthly_uses_default_factory_when_none_passed(monkeypatch) -> None:
+    # Regression: the live HTTP route calls estimate_beta_5y_monthly() with NO
+    # data_factory, hitting the `data_factory or get_data_factory()` fallback in
+    # returns.py. That line had an unimported get_data_factory (NameError → 500
+    # for every ticker). Every prior test injected data_factory, so the default
+    # path was never exercised. This locks it in.
+    benchmark_returns = _returns()
+    factory = FakeDataFactory(
+        {
+            "NVDA": _frame_from_monthly_returns([v * 1.4 for v in benchmark_returns]),
+            "^SPX": _frame_from_monthly_returns(benchmark_returns),
+        }
+    )
+    monkeypatch.setattr(
+        "TerraFin.analytics.analysis.risk.returns.get_data_factory",
+        lambda: factory,
+    )
+
+    estimate = estimate_beta_5y_monthly("NVDA")  # no data_factory= on purpose
+
+    assert estimate.status == "ready"
+    assert estimate.beta == pytest.approx(1.4)
+
+
 def test_estimate_beta_5y_monthly_adjusted_wraps_raw_beta() -> None:
     benchmark_returns = _returns()
     stock_returns = [value * 0.6 for value in benchmark_returns]

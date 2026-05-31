@@ -1,6 +1,6 @@
 import pandas as pd
 
-from TerraFin.data.factory import DataFactory
+from TerraFin.data.factory import DataFactory, get_data_factory
 
 from .benchmarks import normalize_symbol
 from .models import ReturnWindow
