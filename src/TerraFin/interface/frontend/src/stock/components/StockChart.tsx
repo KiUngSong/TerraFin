@@ -68,11 +68,11 @@ const StockChart: React.FC<StockChartProps> = ({ ticker, onReadyChange }) => {
   }, [ticker]);
 
   if (!snapshot && loadError) {
-    return <div style={{ padding: '18px 0', fontSize: 13, color: '#b91c1c' }}>Failed to load chart: {loadError}</div>;
+    return <div style={{ padding: '18px 0', fontSize: "var(--tf-fs-base)", color: 'var(--tf-down)' }}>Failed to load chart: {loadError}</div>;
   }
 
   if (!snapshot) {
-    return <div style={{ padding: '18px 0', fontSize: 13, color: '#475569' }}>Loading chart...</div>;
+    return <div style={{ padding: '18px 0', fontSize: "var(--tf-fs-base)", color: 'var(--tf-muted)' }}>Loading chart...</div>;
   }
 
   return (
@@ -82,10 +82,10 @@ const StockChart: React.FC<StockChartProps> = ({ ticker, onReadyChange }) => {
           flex: 1,
           minHeight: 0,
           minWidth: 0,
-          border: '1px solid #e2e8f0',
-          borderRadius: 12,
+          border: '1px solid var(--tf-border)',
+          borderRadius: 'var(--tf-radius)',
           overflow: 'hidden',
-          background: '#ffffff',
+          background: 'var(--tf-bg-pane)',
         }}
       >
         <ChartComponent
@@ -106,11 +106,11 @@ const StockChart: React.FC<StockChartProps> = ({ ticker, onReadyChange }) => {
             right: 10,
             padding: '4px 8px',
             borderRadius: 999,
-            fontSize: 11,
+            fontSize: "var(--tf-fs-xs)",
             fontWeight: 700,
-            color: '#334155',
-            background: 'rgba(255,255,255,0.92)',
-            border: '1px solid #e2e8f0',
+            color: 'var(--tf-text)',
+            background: 'var(--tf-bg-elevated)',
+            border: '1px solid var(--tf-border)',
           }}
           >
           Refreshing...

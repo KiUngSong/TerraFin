@@ -11,7 +11,7 @@ from TerraFin.data import (
     indicator_registry,
 )
 from TerraFin.data.contracts.dataframes import TimeSeriesDataFrame
-from TerraFin.interface.chart.state import get_named_series
+from TerraFin.interface.pages.chart.state import get_named_series
 
 
 _MACRO_NAME_ALIASES = {

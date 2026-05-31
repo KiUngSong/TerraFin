@@ -3,10 +3,13 @@
   flex-direction: column;
   width: 100%;
   height: 100%;
-  background: linear-gradient(180deg, #f8fafc 0%, #f1f5f9 100%);
-  font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-  color: #0f172a;
-  overflow: auto;
+  background: var(--tf-bg);
+  font-family: var(--tf-mono);
+  color: var(--tf-text);
+  /* Vertical scroll only — overflow:auto on both axes let wide content (the
+     calendar grid) scroll the page sideways. */
+  overflow-y: auto;
+  overflow-x: hidden;
 }
 
 .tf-calendar-content {
@@ -20,13 +23,13 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border: 1px solid #cbd5e1;
-  border-radius: 999px;
-  color: #1e293b;
-  background: #ffffff;
+  border: 1px solid var(--tf-border);
+  border-radius: var(--tf-radius);
+  color: var(--tf-text);
+  background: var(--tf-bg-elevated);
   padding: 8px 12px;
   text-decoration: none;
-  font-size: 12px;
+  font-size: var(--tf-fs-xs);
   font-weight: 600;
 }
 
@@ -39,8 +42,8 @@
 
 .tf-calendar-layout {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(260px, 320px);
-  gap: 14px;
+  grid-template-columns: minmax(0, 1fr) minmax(280px, 320px);
+  gap: 16px;
 }
 
 .tf-calendar-main {
@@ -50,32 +53,32 @@
 
 .tf-calendar-results-meta {
   margin-top: 10px;
-  font-size: 12px;
-  color: #64748b;
+  font-size: var(--tf-fs-xs);
+  color: var(--tf-muted);
 }
 
 .tf-calendar-state {
-  font-size: 12px;
-  color: #334155;
-  background: #f8fafc;
-  border: 1px solid #e2e8f0;
-  border-radius: 8px;
+  font-size: var(--tf-fs-base);
+  color: var(--tf-text);
+  background: var(--tf-bg-elevated);
+  border: 1px solid var(--tf-border);
+  border-radius: var(--tf-radius);
   padding: 8px 10px;
   margin-bottom: 10px;
 }
 
 .tf-calendar-state.error {
-  color: #7f1d1d;
-  background: #fff1f2;
-  border-color: #fecdd3;
+  color: var(--tf-down);
+  background: var(--tf-bg-elevated);
+  border-color: var(--tf-border-strong);
 }
 
 .tf-link-button {
   border: none;
   background: none;
-  color: #1d4ed8;
+  color: var(--tf-amber);
   cursor: pointer;
-  font-size: 12px;
+  font-size: var(--tf-fs-xs);
   font-weight: 600;
   padding: 0;
 }
@@ -101,98 +104,152 @@
 }
 
 .fc .fc-daygrid-more-link {
-  color: #1d4ed8;
-  font-size: 11px;
+  color: var(--tf-amber);
+  font-size: var(--tf-fs-xs);
   font-weight: 600;
   padding: 1px 4px;
 }
 
 .fc .fc-more-popover {
-  border-radius: 8px;
-  border: 1px solid #e2e8f0;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  border-radius: var(--tf-radius);
+  border: 1px solid var(--tf-border);
   max-height: 280px;
   overflow-y: auto;
 }
 
 .fc .fc-more-popover .fc-popover-header {
-  background: #f8fafc;
-  font-size: 12px;
+  background: var(--tf-bg-elevated);
+  font-size: var(--tf-fs-xs);
   font-weight: 600;
-  color: #334155;
+  color: var(--tf-text);
   padding: 6px 10px;
 }
 
-.fc .fc-daygrid-event,
-.fc .fc-list-event {
+.fc .fc-daygrid-event {
   cursor: pointer;
 }
 
 .fc .fc-button {
-  border-radius: 999px;
-  border-color: #cbd5e1;
-  background: #f8fafc;
-  color: #334155;
-  font-size: 12px;
+  border-radius: var(--tf-radius);
+  border-color: var(--tf-border);
+  background: var(--tf-bg-elevated);
+  color: var(--tf-text);
+  font-size: var(--tf-fs-xs);
   font-weight: 600;
   text-transform: none;
 }
 
 .fc .fc-button:hover {
-  background: #e2e8f0;
+  background: var(--tf-border);
 }
 
 .fc .fc-button-primary:not(:disabled).fc-button-active {
-  background: #dbeafe;
-  border-color: #93c5fd;
-  color: #1e3a8a;
+  background: var(--tf-bg-elevated);
+  border-color: var(--tf-amber);
+  color: var(--tf-amber);
 }
 
 .fc .fc-today-button {
-  background: #1d4ed8;
-  color: #ffffff;
-  border-color: #1d4ed8;
+  background: var(--tf-amber);
+  color: var(--tf-bg);
+  border-color: var(--tf-amber);
   font-weight: 700;
 }
 
 .fc .fc-today-button:hover {
-  background: #1e40af;
-  border-color: #1e40af;
+  background: var(--tf-amber);
+  border-color: var(--tf-amber);
 }
 
 .fc .fc-today-button:disabled {
-  background: #93c5fd;
-  border-color: #93c5fd;
-  color: #ffffff;
+  background: var(--tf-bg-elevated);
+  border-color: var(--tf-border);
+  color: var(--tf-muted);
   opacity: 0.7;
 }
 
 .tf-calendar-detail {
-  border: 1px solid #e2e8f0;
-  border-radius: 10px;
+  border: 1px solid var(--tf-border);
+  border-radius: var(--tf-radius);
   padding: 12px;
-  background: #f8fafc;
-  display: grid;
+  background: var(--tf-bg-elevated);
+  display: flex;
+  flex-direction: column;
   gap: 8px;
+  height: 100%;
+  min-height: 0;
+  box-sizing: border-box;
+  overflow-y: auto;
 }
 
 .tf-calendar-detail.empty {
-  color: #64748b;
-  font-size: 13px;
+  color: var(--tf-muted);
+  font-size: var(--tf-fs-base);
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+}
+
+.tf-calendar-detail-hint {
+  margin-top: 4px;
+  font-size: var(--tf-fs-xs);
+  color: var(--tf-muted);
+}
+
+.tf-calendar-agenda {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin-top: 4px;
+}
+
+.tf-calendar-agenda-row {
+  display: grid;
+  grid-template-columns: 52px 8px 1fr;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 6px;
+  border: 0;
+  border-bottom: 1px solid var(--tf-border);
+  background: transparent;
+  color: var(--tf-text);
+  font-family: var(--tf-sans);
+  font-size: var(--tf-fs-base);
+  text-align: left;
+  cursor: pointer;
+}
+
+@media (hover: hover) {
+  .tf-calendar-agenda-row:hover {
+    background: var(--tf-bg);
+  }
+}
+
+.tf-calendar-agenda-date {
+  color: var(--tf-muted);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--tf-fs-xs);
+}
+
+.tf-calendar-agenda-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .tf-calendar-detail-label {
-  font-size: 11px;
-  color: #64748b;
+  font-size: var(--tf-fs-xs);
+  color: var(--tf-muted);
   text-transform: uppercase;
   letter-spacing: 0.6px;
 }
 
 .tf-calendar-detail-title {
   margin-top: 2px;
-  font-size: 15px;
+  font-size: var(--tf-fs-md);
   font-weight: 700;
-  color: #0f172a;
+  color: var(--tf-text);
 }
 
 .tf-calendar-detail-title a {
@@ -201,18 +258,238 @@
 }
 
 .tf-calendar-detail-title a:hover {
-  color: #2563eb;
+  color: var(--tf-amber);
 }
 
 .tf-calendar-detail-grid {
-  font-size: 12px;
-  color: #334155;
+  font-size: var(--tf-fs-base);
+  color: var(--tf-text);
   display: grid;
   gap: 6px;
 }
 
 @media (max-width: 1024px) {
+  /* Single column: the calendar (mobile = CalendarAgenda) stacks above the
+     detail panel. */
   .tf-calendar-layout {
     grid-template-columns: 1fr;
   }
+  .tf-calendar-main { overflow-x: hidden; }
+}
+
+/* ============================================================
+   FullCalendar dark contrast overrides (.fc-* — was wrongly .rbc-*)
+   ============================================================ */
+
+.fc {
+  background: var(--tf-bg);
+  color: var(--tf-text);
+  border: 0;
+  --fc-border-color: var(--tf-border-strong);
+  --fc-today-bg-color: rgba(240, 180, 0, 0.12);
+  --fc-neutral-bg-color: var(--tf-bg);
+  --fc-page-bg-color: var(--tf-bg);
+}
+
+.fc .fc-scrollgrid {
+  border: 0;
+}
+
+.fc .fc-scrollgrid,
+.fc .fc-scrollgrid td,
+.fc .fc-scrollgrid th,
+.fc .fc-daygrid-day,
+.fc .fc-col-header-cell {
+  border-color: var(--tf-border-strong) !important;
+}
+
+/* Weekday header row */
+.fc .fc-col-header-cell-cushion {
+  color: var(--tf-muted-strong);
+  font-family: var(--tf-sans);
+  font-size: var(--tf-fs-xs);
+  font-weight: 600;
+  text-transform: none;
+  letter-spacing: 0;
+  padding: 6px 4px;
+}
+
+/* Date number in each cell */
+.fc .fc-daygrid-day-number {
+  color: var(--tf-text);
+  font-family: var(--tf-sans);
+  font-size: var(--tf-fs-base);
+  font-weight: 500;
+  padding: 4px 6px;
+}
+
+/* Off-range (prev/next month) days — dim cell + number so month boundary reads. */
+.fc .fc-day-other {
+  background: color-mix(in srgb, var(--tf-bg) 60%, transparent) !important;
+}
+.fc .fc-day-other .fc-daygrid-day-number {
+  color: var(--tf-muted) !important;
+  opacity: 0.4 !important;
+}
+
+/* Today highlight */
+.fc .fc-day-today {
+  background: var(--fc-today-bg-color) !important;
+}
+
+/* Event rows inside cells */
+.fc .fc-event,
+.fc .fc-daygrid-event {
+  background: transparent !important;
+  border: 0 !important;
+  padding: 0 !important;
+  color: var(--tf-text) !important;
+  font-family: var(--tf-sans);
+  font-size: var(--tf-fs-xs);
+}
+
+@media (hover: hover) {
+  .fc .fc-event:hover {
+    background: var(--tf-bg-elevated) !important;
+  }
+}
+
+/* FullCalendar paints a rgba(0,0,0,.25) overlay via ::after on focus/selected
+   (the "black part" after tapping an event) plus a focus box-shadow. Kill both
+   so tapping an event doesn't darken it. */
+.fc .fc-event:focus,
+.fc .fc-event.fc-event-selected,
+.fc .fc-event:focus-visible {
+  box-shadow: none !important;
+}
+.fc .fc-event:focus::after,
+.fc .fc-event:hover::after,
+.fc .fc-event.fc-event-selected::after,
+.fc .fc-event-mirror::after {
+  background: none !important;
+  display: none !important;
+}
+
+.fc .fc-event-title,
+.fc .fc-event-time {
+  color: var(--tf-text) !important;
+  font-family: var(--tf-sans);
+}
+
+/* "+N more" link */
+.fc .fc-daygrid-more-link {
+  color: var(--tf-amber);
+  font-family: var(--tf-sans);
+  font-size: var(--tf-fs-micro);
+  font-weight: 500;
+}
+
+/* Toolbar buttons (prev / next / today) */
+.fc .fc-button,
+.fc .fc-button-primary {
+  background: transparent !important;
+  border: 1px solid var(--tf-border) !important;
+  color: var(--tf-text) !important;
+  font-family: var(--tf-sans);
+  font-size: var(--tf-fs-xs);
+  font-weight: 500;
+  text-transform: none;
+  letter-spacing: 0;
+  box-shadow: none !important;
+}
+.fc .fc-button:hover {
+  background: var(--tf-bg-elevated) !important;
+  border-color: var(--tf-border-strong) !important;
+  color: var(--tf-text-strong) !important;
+}
+.fc .fc-button-primary:not(:disabled).fc-button-active,
+.fc .fc-button-primary:not(:disabled):active {
+  background: var(--tf-bg-elevated) !important;
+  border-color: var(--tf-amber) !important;
+  color: var(--tf-amber) !important;
+}
+
+/* Toolbar title (e.g., "May 2026") */
+.fc .fc-toolbar-title {
+  color: var(--tf-text-strong);
+  font-family: var(--tf-sans);
+  font-size: var(--tf-fs-md);
+  font-weight: 700;
+  letter-spacing: 0;
+}
+
+/* ============================================================
+   Mobile agenda (CalendarAgenda) — pure flex, replaces FC's listMonth view
+   whose <table>/colspan internals were uncontrollable. No table, no FC.
+   ============================================================ */
+.tf-magenda { display: flex; flex-direction: column; width: 100%; }
+.tf-magenda__nav {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 4px 10px;
+}
+.tf-magenda__navbtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 40px;
+  height: 36px;
+  padding: 0 10px;
+  border: 1px solid var(--tf-border);
+  border-radius: var(--tf-radius);
+  background: var(--tf-bg-elevated);
+  color: var(--tf-text);
+  font-family: var(--tf-sans);
+  font-size: var(--tf-fs-base);
+  font-weight: 600;
+  cursor: pointer;
+}
+.tf-magenda__today { font-size: var(--tf-fs-xs); }
+.tf-magenda__title {
+  margin-left: auto;
+  font-weight: 700;
+  font-size: var(--tf-fs-md);
+  color: var(--tf-text-strong);
+}
+.tf-magenda__day {
+  font-weight: 700;
+  font-size: var(--tf-fs-base);
+  color: var(--tf-text-strong);
+  padding: 12px 6px 6px;
+  border-top: 1px solid var(--tf-border);
+}
+.tf-magenda__day-wd { color: var(--tf-muted); font-weight: 400; margin-left: 6px; }
+.tf-magenda__row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  text-align: left;
+  padding: 10px 6px;
+  border: 0;
+  border-bottom: 1px solid var(--tf-border);
+  background: transparent;
+  color: var(--tf-text);
+  font-family: var(--tf-sans);
+  font-size: var(--tf-fs-base);
+  cursor: pointer;
+  min-height: 40px;
+}
+.tf-magenda__time {
+  flex: 0 0 auto;
+  min-width: 56px;
+  color: var(--tf-muted);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.tf-magenda__title-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.tf-magenda__state { padding: 16px 6px; color: var(--tf-muted); font-size: var(--tf-fs-xs); }
+.tf-magenda__state--error { color: var(--tf-down); }
+@media (hover: hover) {
+  .tf-magenda__row:hover { background: var(--tf-bg-hover); }
 }

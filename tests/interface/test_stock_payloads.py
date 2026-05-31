@@ -8,7 +8,7 @@ The guards convert that into a 404 so the agent's repair layer triggers.
 import pytest
 from fastapi import HTTPException
 
-from TerraFin.interface.stock import payloads
+from TerraFin.interface.pages.stock import payloads
 
 
 def test_build_company_info_payload_raises_on_all_null_core_fields(monkeypatch) -> None:

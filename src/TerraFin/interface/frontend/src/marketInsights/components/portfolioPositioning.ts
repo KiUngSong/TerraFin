@@ -14,53 +14,58 @@ interface PortfolioTone {
   label: string;
 }
 
+// Magnitude tones for treemap tiles. Greens → tf-up family, reds → tf-down,
+// neutral → tf-muted. Magnitude within each direction is conveyed by alpha
+// (kept solid here; intensity stepping via the tone scale is the DNA we want
+// to preserve in a terminal-flat way — saturation varies, hue locks to the
+// semantic token).
 const PORTFOLIO_TONES = {
   strongGreen: {
-    fill: '#166534',
-    edge: '#14532d',
+    fill: 'var(--tf-up)',
+    edge: 'var(--tf-up)',
     label: 'New / +10%+',
   },
   mediumGreen: {
-    fill: '#237a57',
-    edge: '#195e43',
+    fill: 'var(--tf-up)',
+    edge: 'var(--tf-up)',
     label: '+5% to +10%',
   },
   lightGreen: {
-    fill: '#49a078',
-    edge: '#2f855a',
+    fill: 'var(--tf-up)',
+    edge: 'var(--tf-up)',
     label: '+2.5% to +5%',
   },
   neutral: {
-    fill: '#51627a',
-    edge: '#334155',
+    fill: 'var(--tf-muted)',
+    edge: 'var(--tf-muted)',
     label: 'Within +/-2.5%',
   },
   lightRed: {
-    fill: '#d96c78',
-    edge: '#c24e5c',
+    fill: 'var(--tf-down)',
+    edge: 'var(--tf-down)',
     label: '-2.5% to -5%',
   },
   mediumRed: {
-    fill: '#c44a55',
-    edge: '#a1303f',
+    fill: 'var(--tf-down)',
+    edge: 'var(--tf-down)',
     label: '-5% to -10%',
   },
   strongRed: {
-    fill: '#8b1e2d',
-    edge: '#6e1523',
+    fill: 'var(--tf-down)',
+    edge: 'var(--tf-down)',
     label: '-10%+',
   },
 } satisfies Record<string, PortfolioTone>;
 
+// Tiles render only 3 distinct colors (up / neutral / down) — the magnitude
+// sub-buckets all resolve to the same token, so a 7-row legend showed 3
+// identical green dots + 3 identical red. Legend matches what the eye sees;
+// exact magnitude is on each tile's label/tooltip.
 export const PORTFOLIO_LEGEND = [
-  PORTFOLIO_TONES.strongGreen,
-  PORTFOLIO_TONES.mediumGreen,
-  PORTFOLIO_TONES.lightGreen,
-  PORTFOLIO_TONES.neutral,
-  PORTFOLIO_TONES.lightRed,
-  PORTFOLIO_TONES.mediumRed,
-  PORTFOLIO_TONES.strongRed,
-];
+  { fill: 'var(--tf-up)', edge: 'var(--tf-up)', label: 'Added / up' },
+  { fill: 'var(--tf-muted)', edge: 'var(--tf-muted)', label: 'Within +/-2.5%' },
+  { fill: 'var(--tf-down)', edge: 'var(--tf-down)', label: 'Trimmed / down' },
+] satisfies PortfolioTone[];
 
 export const parsePortfolioWeight = (value: number | string): number => {
   if (typeof value === 'number') {

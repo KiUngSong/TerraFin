@@ -3,7 +3,7 @@ from types import ModuleType, SimpleNamespace
 
 import pandas as pd
 
-import TerraFin.interface.chart.client as chart_client
+import TerraFin.interface.pages.chart.client as chart_client
 from TerraFin.data.contracts.dataframes import TimeSeriesDataFrame
 
 

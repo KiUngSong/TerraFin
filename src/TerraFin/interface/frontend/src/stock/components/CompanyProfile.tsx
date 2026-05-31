@@ -3,8 +3,8 @@ import { useViewportTier } from '../../shared/responsive';
 import type { CompanyInfo } from '../useStockData';
 
 const CompanyProfile: React.FC<{ info: CompanyInfo }> = ({ info }) => {
-  const { isMobile, isTablet } = useViewportTier();
-  const metrics: { label: string; value: string }[] = [
+  const { isMobile } = useViewportTier();
+  const metrics: { label: string; value: string; span?: number }[] = [
     { label: 'Market Cap', value: formatMarketCap(info.marketCap) },
     { label: 'P/E (Trailing)', value: fmt(info.trailingPE) },
     { label: 'P/E (Forward)', value: fmt(info.forwardPE) },
@@ -20,32 +20,35 @@ const CompanyProfile: React.FC<{ info: CompanyInfo }> = ({ info }) => {
         info.fiftyTwoWeekLow != null && info.fiftyTwoWeekHigh != null
           ? `$${info.fiftyTwoWeekLow.toFixed(2)} – $${info.fiftyTwoWeekHigh.toFixed(2)}`
           : '-',
+      span: 2,
     },
     { label: 'Country', value: info.country || '-' },
   ];
 
   const gridTemplateColumns = isMobile
     ? '1fr'
-    : isTablet
-      ? 'repeat(3, minmax(0, 1fr))'
-      : 'repeat(auto-fit, minmax(136px, 1fr))';
+    : 'repeat(3, minmax(0, 1fr))';
 
-  const metricCardPadding = isMobile ? '12px 13px' : '10px 12px';
-  const valueFontSize = isMobile ? 16 : 15;
+  const metricCardPadding = isMobile ? '12px 13px' : '12px';
+  const valueFontSize = 'var(--tf-fs-base)';
 
   return (
     <div style={{ display: 'grid', gridTemplateColumns, gap: 10, minWidth: 0 }}>
       {metrics.map((m) => (
         <div
           key={m.label}
-          style={{ ...metricCardStyle, padding: metricCardPadding }}
+          style={{
+            ...metricCardStyle,
+            padding: metricCardPadding,
+            gridColumn: !isMobile && m.span ? `span ${m.span}` : undefined,
+          }}
         >
-          <div style={{ fontSize: 11, color: '#64748b', fontWeight: 700, marginBottom: 6, letterSpacing: '0.02em' }}>{m.label}</div>
+          <div style={{ fontSize: 'var(--tf-fs-xs)', color: 'var(--tf-muted)', fontWeight: 600, marginBottom: 6, letterSpacing: '0.04em' }}>{m.label}</div>
           <div
             style={{
               fontSize: valueFontSize,
-              fontWeight: 800,
-              color: '#0f172a',
+              fontWeight: 700,
+              color: 'var(--tf-text-strong)',
               lineHeight: 1.25,
               overflowWrap: 'anywhere',
               wordBreak: 'break-word',
@@ -63,14 +66,14 @@ const CompanyProfile: React.FC<{ info: CompanyInfo }> = ({ info }) => {
             gridColumn: isMobile ? 'auto' : '1 / -1',
           }}
         >
-          <div style={{ fontSize: 11, color: '#64748b', fontWeight: 700, marginBottom: 6, letterSpacing: '0.02em' }}>Website</div>
+          <div style={{ fontSize: 'var(--tf-fs-xs)', color: 'var(--tf-muted)', fontWeight: 600, marginBottom: 6, letterSpacing: '0.04em' }}>Website</div>
           <a
             href={info.website}
             target="_blank"
             rel="noopener noreferrer"
             style={{
-              fontSize: isMobile ? 13 : 12,
-              color: '#1d4ed8',
+              fontSize: 'var(--tf-fs-base)',
+              color: 'var(--tf-amber)',
               textDecoration: 'none',
               fontWeight: 700,
               overflowWrap: 'anywhere',
@@ -86,10 +89,10 @@ const CompanyProfile: React.FC<{ info: CompanyInfo }> = ({ info }) => {
 };
 
 const metricCardStyle: React.CSSProperties = {
-  border: '1px solid #dbe4ef',
-  borderRadius: 12,
-  padding: '12px 13px',
-  background: 'linear-gradient(180deg, #ffffff 0%, #f8fafc 100%)',
+  border: '1px solid var(--tf-border)',
+  borderRadius: 'var(--tf-radius)',
+  padding: '12px',
+  background: 'var(--tf-bg-elevated)',
   minWidth: 0,
 };
 

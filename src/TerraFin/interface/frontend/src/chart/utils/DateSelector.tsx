@@ -50,9 +50,9 @@ function ModernCalendarHeader({
           padding: 6,
           border: 'none',
           background: 'transparent',
-          color: '#616161',
+          color: 'var(--tf-muted)',
           cursor: prevMonthButtonDisabled ? 'default' : 'pointer',
-          fontSize: 16,
+          fontSize: "var(--tf-fs-base)",
           lineHeight: 1,
         }}
       >
@@ -63,11 +63,11 @@ function ModernCalendarHeader({
           flex: 1,
           textAlign: 'center',
           padding: '8px 16px',
-          background: '#f0f0f0',
-          borderRadius: 20,
-          fontSize: 14,
+          background: 'var(--tf-bg-pane)',
+          borderRadius: 'var(--tf-radius)',
+          fontSize: "var(--tf-fs-base)",
           fontWeight: 500,
-          color: '#212121',
+          color: 'var(--tf-text)',
         }}
       >
         {MONTH_NAMES[date.getMonth()]} {date.getFullYear()}
@@ -81,9 +81,9 @@ function ModernCalendarHeader({
           padding: 6,
           border: 'none',
           background: 'transparent',
-          color: '#616161',
+          color: 'var(--tf-muted)',
           cursor: nextMonthButtonDisabled ? 'default' : 'pointer',
-          fontSize: 16,
+          fontSize: "var(--tf-fs-base)",
           lineHeight: 1,
         }}
       >
@@ -170,7 +170,7 @@ const DateSelector: React.FC<DateSelectorProps> = ({ isOpen, onClose, onSelect }
       style={{
         position: 'fixed',
         inset: 0,
-        background: 'rgba(0,0,0,0.35)',
+        background: 'rgba(0,0,0,0.6)',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
@@ -181,9 +181,9 @@ const DateSelector: React.FC<DateSelectorProps> = ({ isOpen, onClose, onSelect }
     >
       <div
         style={{
-          background: '#fff',
-          borderRadius: 12,
-          boxShadow: '0 8px 32px rgba(0,0,0,0.12)',
+          background: 'var(--tf-bg-pane)',
+          borderRadius: 'var(--tf-radius)',
+          border: '1px solid var(--tf-border)',
           minWidth: 320,
           maxWidth: 380,
           overflow: 'hidden',
@@ -196,16 +196,16 @@ const DateSelector: React.FC<DateSelectorProps> = ({ isOpen, onClose, onSelect }
             alignItems: 'center',
             justifyContent: 'space-between',
             padding: '16px 20px',
-            borderBottom: '1px solid #eee',
+            borderBottom: '1px solid var(--tf-border)',
           }}
         >
           <h2
             id="date-modal-title"
             style={{
               margin: 0,
-              fontSize: 18,
+              fontSize: "var(--tf-fs-md)",
               fontWeight: 600,
-              color: '#212121',
+              color: 'var(--tf-text)',
             }}
           >
             Date
@@ -219,9 +219,9 @@ const DateSelector: React.FC<DateSelectorProps> = ({ isOpen, onClose, onSelect }
               border: 'none',
               background: 'transparent',
               cursor: 'pointer',
-              fontSize: 20,
+              fontSize: "var(--tf-fs-base)",
               lineHeight: 1,
-              color: '#616161',
+              color: 'var(--tf-muted)',
             }}
           >
             x
@@ -240,7 +240,7 @@ const DateSelector: React.FC<DateSelectorProps> = ({ isOpen, onClose, onSelect }
               display: 'flex',
               gap: 0,
               marginBottom: 16,
-              borderBottom: '1px solid #eee',
+              borderBottom: '1px solid var(--tf-border)',
             }}
           >
             <button
@@ -249,13 +249,13 @@ const DateSelector: React.FC<DateSelectorProps> = ({ isOpen, onClose, onSelect }
               style={{
                 fontFamily: FONT_FAMILY,
                 padding: '8px 12px',
-                fontSize: 14,
+                fontSize: "var(--tf-fs-base)",
                 fontWeight: 500,
                 border: 'none',
                 background: 'transparent',
-                color: tab === 'date' ? '#1976d2' : '#616161',
+                color: tab === 'date' ? 'var(--tf-amber)' : 'var(--tf-muted)',
                 cursor: 'pointer',
-                borderBottom: tab === 'date' ? '2px solid #1976d2' : '2px solid transparent',
+                borderBottom: tab === 'date' ? '2px solid var(--tf-amber)' : '2px solid transparent',
                 marginBottom: -1,
               }}
             >
@@ -267,13 +267,13 @@ const DateSelector: React.FC<DateSelectorProps> = ({ isOpen, onClose, onSelect }
               style={{
                 fontFamily: FONT_FAMILY,
                 padding: '8px 12px',
-                fontSize: 14,
+                fontSize: "var(--tf-fs-base)",
                 fontWeight: 500,
                 border: 'none',
                 background: 'transparent',
-                color: tab === 'range' ? '#1976d2' : '#616161',
+                color: tab === 'range' ? 'var(--tf-amber)' : 'var(--tf-muted)',
                 cursor: 'pointer',
-                borderBottom: tab === 'range' ? '2px solid #1976d2' : '2px solid transparent',
+                borderBottom: tab === 'range' ? '2px solid var(--tf-amber)' : '2px solid transparent',
                 marginBottom: -1,
               }}
             >
@@ -286,9 +286,9 @@ const DateSelector: React.FC<DateSelectorProps> = ({ isOpen, onClose, onSelect }
               <label
                 style={{
                   display: 'block',
-                  fontSize: 12,
+                  fontSize: "var(--tf-fs-base)",
                   fontWeight: 500,
-                  color: '#616161',
+                  color: 'var(--tf-muted)',
                   marginBottom: 8,
                 }}
               >
@@ -304,9 +304,9 @@ const DateSelector: React.FC<DateSelectorProps> = ({ isOpen, onClose, onSelect }
                 <label
                   style={{
                     display: 'block',
-                    fontSize: 12,
+                    fontSize: "var(--tf-fs-base)",
                     fontWeight: 500,
-                    color: '#616161',
+                    color: 'var(--tf-muted)',
                     marginBottom: 8,
                   }}
                 >
@@ -318,9 +318,9 @@ const DateSelector: React.FC<DateSelectorProps> = ({ isOpen, onClose, onSelect }
                 <label
                   style={{
                     display: 'block',
-                    fontSize: 12,
+                    fontSize: "var(--tf-fs-base)",
                     fontWeight: 500,
-                    color: '#616161',
+                    color: 'var(--tf-muted)',
                     marginBottom: 8,
                   }}
                 >
@@ -328,7 +328,7 @@ const DateSelector: React.FC<DateSelectorProps> = ({ isOpen, onClose, onSelect }
                 </label>
                 <DatePicker selected={rangeTo} onChange={(d: Date | null) => d && setRangeTo(d)} {...datePickerCommon} />
               </div>
-              {!rangeValid && <span style={{ fontSize: 12, color: '#c62828' }}>From date must be before or equal to To date.</span>}
+              {!rangeValid && <span style={{ fontSize: "var(--tf-fs-base)", color: 'var(--tf-down)' }}>From date must be before or equal to To date.</span>}
             </div>
           )}
 
@@ -346,12 +346,12 @@ const DateSelector: React.FC<DateSelectorProps> = ({ isOpen, onClose, onSelect }
               style={{
                 fontFamily: FONT_FAMILY,
                 padding: '8px 16px',
-                fontSize: 14,
+                fontSize: "var(--tf-fs-base)",
                 fontWeight: 500,
-                border: '1px solid #e0e0e0',
-                borderRadius: 8,
-                background: '#fff',
-                color: '#212121',
+                border: '1px solid var(--tf-border)',
+                borderRadius: 'var(--tf-radius)',
+                background: 'var(--tf-bg-elevated)',
+                color: 'var(--tf-text)',
                 cursor: 'pointer',
               }}
             >
@@ -364,12 +364,12 @@ const DateSelector: React.FC<DateSelectorProps> = ({ isOpen, onClose, onSelect }
               style={{
                 fontFamily: FONT_FAMILY,
                 padding: '8px 16px',
-                fontSize: 14,
+                fontSize: "var(--tf-fs-base)",
                 fontWeight: 500,
                 border: 'none',
-                borderRadius: 8,
-                background: tab === 'range' && !rangeValid ? '#e0e0e0' : '#212121',
-                color: '#fff',
+                borderRadius: 'var(--tf-radius)',
+                background: tab === 'range' && !rangeValid ? 'var(--tf-bg-pane)' : 'var(--tf-amber)',
+                color: 'var(--tf-bg)',
                 cursor: tab === 'range' && !rangeValid ? 'not-allowed' : 'pointer',
               }}
             >
@@ -383,21 +383,23 @@ const DateSelector: React.FC<DateSelectorProps> = ({ isOpen, onClose, onSelect }
         .terrafin-datepicker-input {
           width: 100%;
           padding: 10px 12px;
-          font-size: 14px;
+          font-size: var(--tf-fs-base);
           font-family: ${FONT_FAMILY};
-          border: 1px solid #e8e8e8;
-          border-radius: 8px;
+          border: 1px solid var(--tf-border);
+          border-radius: var(--tf-radius);
+          background: var(--tf-bg-elevated);
+          color: var(--tf-text);
           box-sizing: border-box;
         }
         .terrafin-datepicker-input:focus {
           outline: none;
-          border-color: #bdbdbd;
+          border-color: var(--tf-border-strong);
         }
         .terrafin-calendar-modern {
           font-family: ${FONT_FAMILY} !important;
-          border: none !important;
-          border-radius: 12px !important;
-          box-shadow: 0 4px 20px rgba(0,0,0,0.08) !important;
+          border: 1px solid var(--tf-border) !important;
+          background: var(--tf-bg-pane) !important;
+          border-radius: var(--tf-radius) !important;
           padding: 0 8px 12px !important;
           height: 320px !important;
           max-height: 320px !important;
@@ -416,8 +418,8 @@ const DateSelector: React.FC<DateSelectorProps> = ({ isOpen, onClose, onSelect }
           margin-bottom: 8px !important;
         }
         .terrafin-calendar-modern .react-datepicker__day-name {
-          color: #212121 !important;
-          font-size: 13px !important;
+          color: var(--tf-text) !important;
+          font-size: var(--tf-fs-base) !important;
           font-weight: 500 !important;
           width: 2.2rem !important;
           line-height: 2.2rem !important;
@@ -427,21 +429,21 @@ const DateSelector: React.FC<DateSelectorProps> = ({ isOpen, onClose, onSelect }
           width: 2.2rem !important;
           line-height: 2.2rem !important;
           margin: 0.2rem !important;
-          border-radius: 8px !important;
-          font-size: 14px !important;
-          color: #212121 !important;
+          border-radius: var(--tf-radius) !important;
+          font-size: var(--tf-fs-base) !important;
+          color: var(--tf-text) !important;
         }
         .terrafin-calendar-modern .react-datepicker__day:hover {
-          background: #f0f0f0 !important;
+          background: var(--tf-bg-elevated) !important;
         }
         .terrafin-calendar-modern .react-datepicker__day--selected,
         .terrafin-calendar-modern .react-datepicker__day--keyboard-selected {
-          background: #424242 !important;
-          color: #fff !important;
+          background: var(--tf-amber) !important;
+          color: var(--tf-bg) !important;
           font-weight: 500 !important;
         }
         .terrafin-calendar-modern .react-datepicker__day--outside-month {
-          color: #bdbdbd !important;
+          color: var(--tf-muted) !important;
         }
         .terrafin-calendar-modern .react-datepicker__month-container {
           float: none !important;

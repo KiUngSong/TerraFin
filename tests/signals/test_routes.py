@@ -6,9 +6,9 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from TerraFin.interface.monitor import webhook as wh
-from TerraFin.interface.monitor.routes import _client_id
-from TerraFin.interface.monitor.routes import create_signals_router as create_alerting_router
+from TerraFin.interface.infra.monitor import webhook as wh
+from TerraFin.interface.infra.monitor.routes import _client_id
+from TerraFin.interface.infra.monitor.routes import create_signals_router as create_alerting_router
 
 
 @pytest.fixture(autouse=True)

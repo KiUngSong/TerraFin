@@ -2,39 +2,55 @@ import React from 'react';
 import type { CompanyInfo } from '../useStockData';
 
 const StockHeader: React.FC<{ info: CompanyInfo }> = ({ info }) => {
-  const changeColor = (info.changePercent ?? 0) >= 0 ? '#047857' : '#b91c1c';
+  const changeColor = (info.changePercent ?? 0) >= 0 ? 'var(--tf-up)' : 'var(--tf-down)';
   const changeSign = (info.changePercent ?? 0) >= 0 ? '+' : '';
+  // KR exchanges trade in won — drop the $ for .KS / .KQ tickers.
+  const isKr = /\.(KS|KQ)$/i.test(info.ticker);
+  const currencyPrefix = isKr ? '₩' : '$';
+  const priceFmt = isKr ? { maximumFractionDigits: 0 } : { minimumFractionDigits: 2, maximumFractionDigits: 2 };
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 12, minWidth: 0 }}>
-      <div style={{ display: 'flex', alignItems: 'baseline', gap: 14, flexWrap: 'wrap', minWidth: 0 }}>
-        <span style={{ fontSize: 20, lineHeight: 1, fontWeight: 800, color: '#0f172a' }}>{info.ticker}</span>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 6, minWidth: 0 }}>
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, minWidth: 0 }}>
+        <span style={{ fontFamily: 'var(--tf-sans)', fontSize: 'var(--tf-fs-md)', fontWeight: 700, color: 'var(--tf-text-strong)', letterSpacing: '0.04em' }}>
+          {info.ticker}
+        </span>
         {info.shortName && (
-          <span
-            style={{
-              fontSize: 14,
-              color: '#334155',
-              fontWeight: 600,
-              minWidth: 0,
-              overflowWrap: 'anywhere',
-              wordBreak: 'break-word',
-            }}
-          >
-            {info.shortName}
+          <span style={{ fontFamily: 'var(--tf-sans)', fontSize: 'var(--tf-fs-md)', color: 'var(--tf-muted)', fontWeight: 500, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={info.shortName}>
+            · {info.shortName}
           </span>
         )}
+      </div>
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 12, flexWrap: 'wrap', minWidth: 0 }}>
         {info.currentPrice != null && (
-          <span style={{ fontSize: 17, fontWeight: 800, color: '#0f172a' }}>
-            ${info.currentPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+          <span
+            style={{
+              fontFamily: 'var(--tf-sans)',
+              fontSize: 'var(--tf-fs-md)',
+              lineHeight: 1.2,
+              fontWeight: 700,
+              color: 'var(--tf-text-strong)',
+              fontVariantNumeric: 'tabular-nums',
+            }}
+          >
+            {currencyPrefix}{info.currentPrice.toLocaleString(undefined, priceFmt)}
           </span>
         )}
         {info.changePercent != null && (
-          <span style={{ fontSize: 13, fontWeight: 700, color: changeColor }}>
+          <span
+            style={{
+              fontFamily: 'var(--tf-sans)',
+              fontSize: 'var(--tf-fs-base)',
+              fontWeight: 700,
+              color: changeColor,
+              fontVariantNumeric: 'tabular-nums',
+            }}
+          >
             {changeSign}{info.changePercent.toFixed(2)}%
           </span>
         )}
       </div>
-      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', minWidth: 0 }}>
+      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', minWidth: 0, marginTop: 4 }}>
         {info.sector && <span style={pillStyle}>{info.sector}</span>}
         {info.industry && <span style={pillStyle}>{info.industry}</span>}
       </div>
@@ -43,13 +59,14 @@ const StockHeader: React.FC<{ info: CompanyInfo }> = ({ info }) => {
 };
 
 const pillStyle: React.CSSProperties = {
-  fontSize: 12,
-  fontWeight: 600,
-  color: '#475569',
-  background: '#f1f5f9',
-  borderRadius: 999,
-  padding: '5px 12px',
-  border: '1px solid #e2e8f0',
+  fontFamily: 'var(--tf-sans)',
+  fontSize: 'var(--tf-fs-xs)',
+  fontWeight: 500,
+  color: 'var(--tf-muted)',
+  background: 'transparent',
+  borderRadius: 'var(--tf-radius)',
+  padding: '2px 8px',
+  border: '1px solid var(--tf-border)',
   maxWidth: '100%',
   overflowWrap: 'anywhere',
   wordBreak: 'break-word',

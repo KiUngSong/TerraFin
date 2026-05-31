@@ -183,16 +183,16 @@ const IndicatorSelector: React.FC<IndicatorSelectorProps> = ({ options, selected
           fontFamily: FONT_FAMILY,
           padding: '5px 10px',
           minHeight: 28,
-          fontSize: 12,
+          fontSize: "var(--tf-fs-xs)",
           fontWeight: 500,
-          border: '1px solid #e0e0e0',
-          borderRadius: 6,
-          background: open ? '#e8e8e8' : '#fff',
+          border: '1px solid var(--tf-border)',
+          borderRadius: 'var(--tf-radius)',
+          background: open ? 'var(--tf-bg-pane)' : 'var(--tf-bg-elevated)',
           cursor: 'pointer',
           display: 'flex',
           alignItems: 'center',
           gap: 5,
-          color: '#333',
+          color: 'var(--tf-text)',
           lineHeight: 1,
           whiteSpace: 'nowrap',
           flexShrink: 0,
@@ -205,11 +205,11 @@ const IndicatorSelector: React.FC<IndicatorSelectorProps> = ({ options, selected
         {localSelected.size > 0 && (
           <span
             style={{
-              background: '#1976d2',
-              color: '#fff',
-              borderRadius: 8,
+              background: 'var(--tf-amber)',
+              color: 'var(--tf-bg)',
+              borderRadius: 'var(--tf-radius)',
               padding: '1px 6px',
-              fontSize: 10,
+              fontSize: "var(--tf-fs-micro)",
               fontWeight: 600,
               flexShrink: 0,
             }}
@@ -227,10 +227,9 @@ const IndicatorSelector: React.FC<IndicatorSelectorProps> = ({ options, selected
             top: menuPos.top,
             bottom: menuPos.bottom,
             right: menuPos.right,
-            background: '#fff',
-            border: '1px solid #e0e0e0',
-            borderRadius: 8,
-            boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
+            background: 'var(--tf-bg-pane)',
+            border: '1px solid var(--tf-border)',
+            borderRadius: 'var(--tf-radius)',
             zIndex: 10000,
             minWidth: 180,
             padding: '6px 0',
@@ -276,12 +275,12 @@ const IndicatorSelector: React.FC<IndicatorSelectorProps> = ({ options, selected
                     cursor: disabled ? 'default' : 'pointer',
                     opacity: disabled ? 0.4 : 1,
                     fontFamily: FONT_FAMILY,
-                    fontSize: 13,
-                    color: '#333',
+                    fontSize: "var(--tf-fs-base)",
+                    color: 'var(--tf-text)',
                     textAlign: 'left',
                   }}
                   onMouseEnter={(e) => {
-                    if (!disabled) e.currentTarget.style.background = '#f5f5f5';
+                    if (!disabled) e.currentTarget.style.background = 'var(--tf-bg-elevated)';
                   }}
                   onMouseLeave={(e) => {
                     e.currentTarget.style.background = 'transparent';
@@ -292,7 +291,7 @@ const IndicatorSelector: React.FC<IndicatorSelectorProps> = ({ options, selected
                       width: 16,
                       height: 16,
                       borderRadius: 3,
-                      border: checked ? 'none' : '2px solid #ccc',
+                      border: checked ? 'none' : '2px solid var(--tf-muted)',
                       background: checked ? opt.color : 'transparent',
                       display: 'flex',
                       alignItems: 'center',
@@ -338,14 +337,14 @@ const IndicatorSelector: React.FC<IndicatorSelectorProps> = ({ options, selected
                           width: 18,
                           height: 18,
                           borderRadius: 999,
-                          border: '1px solid #cbd5e1',
-                          background: infoVisible ? '#1976d2' : '#fff',
-                          color: infoVisible ? '#fff' : '#5f6b7a',
+                          border: '1px solid var(--tf-border)',
+                          background: infoVisible ? 'var(--tf-amber)' : 'var(--tf-bg-elevated)',
+                          color: infoVisible ? 'var(--tf-bg)' : 'var(--tf-muted)',
                           display: 'flex',
                           alignItems: 'center',
                           justifyContent: 'center',
                           fontFamily: FONT_FAMILY,
-                          fontSize: 11,
+                          fontSize: "var(--tf-fs-xs)",
                           fontWeight: 700,
                           lineHeight: 1,
                           cursor: 'help',
@@ -368,15 +367,15 @@ const IndicatorSelector: React.FC<IndicatorSelectorProps> = ({ options, selected
                         transform: 'translateY(-50%)',
                         width: INFO_TOOLTIP_WIDTH,
                         padding: '10px 12px',
-                        background: '#2d2d2d',
-                        color: '#fff',
-                        fontSize: 12,
+                        background: 'var(--tf-bg-elevated)',
+                        color: 'var(--tf-text)',
+                        border: '1px solid var(--tf-border)',
+                        fontSize: "var(--tf-fs-xs)",
                         fontFamily: FONT_FAMILY,
                         lineHeight: 1.5,
-                        borderRadius: 8,
+                        borderRadius: 'var(--tf-radius)',
                         whiteSpace: 'normal',
                         zIndex: 10002,
-                        boxShadow: '0 6px 18px rgba(0,0,0,0.2)',
                         pointerEvents: 'none',
                       }}
                     >
@@ -389,7 +388,7 @@ const IndicatorSelector: React.FC<IndicatorSelectorProps> = ({ options, selected
                           width: 0,
                           height: 0,
                           border: '6px solid transparent',
-                          [infoTooltipPos.placement === 'right' ? 'borderRightColor' : 'borderLeftColor']: '#2d2d2d',
+                          [infoTooltipPos.placement === 'right' ? 'borderRightColor' : 'borderLeftColor']: 'var(--tf-bg-elevated)',
                         }}
                       />
                       <div style={{ fontWeight: 600, marginBottom: 4 }}>Mandelbrot Fractal Dimension</div>
@@ -402,7 +401,7 @@ const IndicatorSelector: React.FC<IndicatorSelectorProps> = ({ options, selected
             );
           })}
           {localSelected.size >= MAX_SELECTED && (
-            <div style={{ padding: '4px 14px', fontSize: 11, color: '#999' }}>Max {MAX_SELECTED} selected</div>
+            <div style={{ padding: '4px 14px', fontSize: "var(--tf-fs-xs)", color: 'var(--tf-muted)' }}>Max {MAX_SELECTED} selected</div>
           )}
         </div>,
         document.body,

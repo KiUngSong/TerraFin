@@ -46,30 +46,31 @@ from TerraFin.data.cache.registry import get_cache_manager
 from TerraFin.data.contracts.dataframes import TimeSeriesDataFrame
 from TerraFin.env import load_entrypoint_dotenv
 from TerraFin.interface.agent.data_routes import create_agent_data_router
-from TerraFin.interface.calendar.routes import create_calendar_router
-from TerraFin.interface.calendar.state import reset_calendar_state
-from TerraFin.interface.chart.formatters import format_dataframe
-from TerraFin.interface.chart.routes import CHART_PATH, create_chart_router
-from TerraFin.interface.chart.state import reset_chart_state
-from TerraFin.interface.config import RuntimeConfigError, load_runtime_config
-from TerraFin.interface.dashboard.data_routes import create_dashboard_data_router
-from TerraFin.interface.dashboard.routes import DASHBOARD_PATH, create_dashboard_router
-from TerraFin.interface.errors import AppRuntimeError, build_error_response
-from TerraFin.interface.frontend_assets import FrontendBuildError, validate_frontend_build
-from TerraFin.interface.health import create_health_router
-from TerraFin.interface.jobs import watchlist_refresh as _job_watchlist_refresh
-from TerraFin.interface.jobs import weekly_report as _job_weekly_report
-from TerraFin.interface.jobs import get_registered_jobs, load_entry_point_jobs
-from TerraFin.interface.market_insights.data_routes import create_market_insights_data_router
-from TerraFin.interface.market_insights.routes import create_market_insights_router
-from TerraFin.interface.monitor.heartbeat import registration_heartbeat
-from TerraFin.interface.monitor.http_provider import get_signal_provider_from_env
-from TerraFin.interface.monitor.routes import create_signals_router
-from TerraFin.interface.stock.data_routes import create_stock_data_router
-from TerraFin.interface.stock.routes import create_stock_router
-from TerraFin.interface.ticker_search import create_ticker_search_router
-from TerraFin.interface.watchlist.routes import create_watchlist_router
-from TerraFin.interface.watchlist_service import get_watchlist_service
+from TerraFin.interface.pages.calendar.data_routes import create_calendar_data_router
+from TerraFin.interface.pages.calendar.routes import create_calendar_router
+from TerraFin.interface.pages.calendar.state import reset_calendar_state
+from TerraFin.interface.pages.chart.formatters import format_dataframe
+from TerraFin.interface.pages.chart.routes import CHART_PATH, create_chart_router
+from TerraFin.interface.pages.chart.state import reset_chart_state
+from TerraFin.interface.core.config import RuntimeConfigError, load_runtime_config
+from TerraFin.interface.pages.terminal.data_routes import create_terminal_data_router
+from TerraFin.interface.pages.terminal.routes import TERMINAL_PATH, create_terminal_router
+from TerraFin.interface.core.errors import AppRuntimeError, build_error_response
+from TerraFin.interface.core.frontend_assets import FrontendBuildError, validate_frontend_build
+from TerraFin.interface.infra.health import create_health_router
+from TerraFin.interface.infra.jobs import watchlist_refresh as _job_watchlist_refresh
+from TerraFin.interface.infra.jobs import weekly_report as _job_weekly_report
+from TerraFin.interface.infra.jobs import get_registered_jobs, load_entry_point_jobs
+from TerraFin.interface.pages.market_insights.data_routes import create_market_insights_data_router
+from TerraFin.interface.pages.market_insights.routes import create_market_insights_router
+from TerraFin.interface.infra.monitor.heartbeat import registration_heartbeat
+from TerraFin.interface.infra.monitor.http_provider import get_signal_provider_from_env
+from TerraFin.interface.infra.monitor.routes import create_signals_router
+from TerraFin.interface.pages.stock.data_routes import create_stock_data_router
+from TerraFin.interface.pages.stock.routes import create_stock_router
+from TerraFin.interface.infra.ticker_search import create_ticker_search_router
+from TerraFin.interface.pages.watchlist.routes import create_watchlist_router
+from TerraFin.data.watchlist_service import get_watchlist_service
 
 
 ROOT_DIR = Path(__file__).parent
@@ -177,9 +178,10 @@ def create_app(initial_data: TimeSeriesDataFrame | None = None, base_path: str =
         )
 
     app.include_router(create_chart_router(frontend_build.build_dir), prefix=prefix)
-    app.include_router(create_dashboard_router(frontend_build.build_dir), prefix=prefix)
-    app.include_router(create_dashboard_data_router(), prefix=prefix)
+    app.include_router(create_terminal_router(frontend_build.build_dir), prefix=prefix)
+    app.include_router(create_terminal_data_router(), prefix=prefix)
     app.include_router(create_calendar_router(frontend_build.build_dir), prefix=prefix)
+    app.include_router(create_calendar_data_router(), prefix=prefix)
     app.include_router(create_market_insights_router(frontend_build.build_dir), prefix=prefix)
     app.include_router(create_market_insights_data_router(), prefix=prefix)
     app.include_router(create_watchlist_router(frontend_build.build_dir), prefix=prefix)
@@ -192,7 +194,7 @@ def create_app(initial_data: TimeSeriesDataFrame | None = None, base_path: str =
 
     @app.get("/")
     def index():
-        return RedirectResponse(url=f"{prefix}{DASHBOARD_PATH}")
+        return RedirectResponse(url=f"{prefix}{TERMINAL_PATH}")
 
     @app.get("/ready")
     def ready():

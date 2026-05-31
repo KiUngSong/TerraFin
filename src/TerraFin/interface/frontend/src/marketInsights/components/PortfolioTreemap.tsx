@@ -16,9 +16,10 @@ interface LayoutTile {
   y: number;
   w: number;
   h: number;
-  row: PortfolioHoldingRow;
+  row: PortfolioHoldingRow | null; // null = the aggregated "Other" tile
   weight: number;
   area: number;
+  otherCount?: number; // when set, this tile aggregates N small holdings
 }
 
 interface PortfolioTreemapProps {
@@ -31,10 +32,8 @@ interface PortfolioTreemapProps {
 const CANVAS_WIDTH = 100;
 const CANVAS_HEIGHT = 100;
 const CANVAS_AREA = CANVAS_WIDTH * CANVAS_HEIGHT;
-const MIN_VISIBLE_COUNT = 4;
 const MAX_VISIBLE_COUNT = 10;
-const MIN_TILE_HEIGHT = 14;
-const MIN_TILE_WIDTH = 18;
+const MIN_VISIBLE_WEIGHT = 5.0; // % of portfolio — below this folds into "Other"
 
 const worstAspectRatio = (row: LayoutTile[], shortSide: number): number => {
   if (row.length === 0) {
@@ -137,36 +136,45 @@ const squarify = (items: LayoutTile[]): LayoutTile[] => {
 const buildTiles = (rows: PortfolioHoldingRow[]): LayoutTile[] => {
   const weightedRows = rows
     .map((row) => ({
-      row,
+      row: row as PortfolioHoldingRow | null,
       weight: Math.max(parsePortfolioWeight(row['% of Portfolio']), 0.0001),
+      otherCount: undefined as number | undefined,
     }))
     .sort((left, right) => right.weight - left.weight);
 
-  const maxCount = Math.min(MAX_VISIBLE_COUNT, weightedRows.length);
-  const minCount = Math.min(MIN_VISIBLE_COUNT, maxCount);
+  if (weightedRows.length === 0) return [];
 
-  let fallback: LayoutTile[] = [];
-  for (let count = maxCount; count >= minCount; count -= 1) {
-    const subset = weightedRows.slice(0, count);
-    const totalWeight = subset.reduce((acc, tile) => acc + tile.weight, 0) || 1;
-    const normalized = subset.map((tile) => ({
-      x: 0,
-      y: 0,
-      w: 0,
-      h: 0,
-      area: (tile.weight / totalWeight) * CANVAS_AREA,
-      ...tile,
-    }));
-
-    const nextTiles = squarify(normalized);
-    fallback = nextTiles;
-
-    if (nextTiles.every((tile) => tile.h >= MIN_TILE_HEIGHT && tile.w >= MIN_TILE_WIDTH)) {
-      return nextTiles;
-    }
+  // Show only holdings big enough to render readably; fold the rest into ONE
+  // "Other" tile. Fold EARLY — any holding below MIN_VISIBLE_WEIGHT becomes a
+  // sliver, so it goes to Other (always show at least the top 3, at most
+  // MAX_VISIBLE_COUNT). Keeps every visible tile legible; no unreadable boxes.
+  let cut = weightedRows.findIndex((r) => r.weight < MIN_VISIBLE_WEIGHT);
+  if (cut < 0) cut = weightedRows.length;
+  cut = Math.min(Math.max(cut, Math.min(2, weightedRows.length)), MAX_VISIBLE_COUNT);
+  const head = weightedRows.slice(0, cut);
+  const tail = weightedRows.slice(cut);
+  const entries = [...head];
+  if (tail.length > 0) {
+    entries.push({
+      row: null,
+      weight: tail.reduce((acc, t) => acc + t.weight, 0),
+      otherCount: tail.length,
+    });
   }
 
-  return fallback;
+  const totalWeight = entries.reduce((acc, e) => acc + e.weight, 0) || 1;
+  const normalized: LayoutTile[] = entries.map((e) => ({
+    x: 0,
+    y: 0,
+    w: 0,
+    h: 0,
+    area: (e.weight / totalWeight) * CANVAS_AREA,
+    row: e.row,
+    weight: e.weight,
+    otherCount: e.otherCount,
+  }));
+
+  return squarify(normalized);
 };
 
 const PortfolioTreemap: React.FC<PortfolioTreemapProps> = ({
@@ -184,8 +192,6 @@ const PortfolioTreemap: React.FC<PortfolioTreemapProps> = ({
 
     return buildTiles(rows);
   }, [rows]);
-
-  const hiddenCount = Math.max(rows.length - tiles.length, 0);
 
   const clearActive = useCallback(() => {
     onActiveRowChange?.(null);
@@ -214,11 +220,11 @@ const PortfolioTreemap: React.FC<PortfolioTreemapProps> = ({
     >
       <div style={{ display: 'grid', gap: 6 }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
-          <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase', color: '#64748b' }}>
+          <div style={{ fontSize: "var(--tf-fs-micro)", fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase', color: 'var(--tf-muted)' }}>
             Treemap Legend
           </div>
-          <div style={{ fontSize: 11, color: '#64748b' }}>
-            {hiddenCount > 0 ? `${hiddenCount} smaller positions are listed at right` : 'Size = portfolio weight'}
+          <div style={{ fontSize: "var(--tf-fs-micro)", color: 'var(--tf-muted)' }}>
+            Size = portfolio weight
           </div>
         </div>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
@@ -230,11 +236,11 @@ const PortfolioTreemap: React.FC<PortfolioTreemapProps> = ({
                 alignItems: 'center',
                 gap: 6,
                 padding: '4px 8px',
-                borderRadius: 999,
-                background: '#f8fafc',
-                border: '1px solid #e2e8f0',
-                fontSize: 11,
-                color: '#475569',
+                borderRadius: 'var(--tf-radius)',
+                background: 'var(--tf-bg-elevated)',
+                border: '1px solid var(--tf-border)',
+                fontSize: "var(--tf-fs-micro)",
+                color: 'var(--tf-text)',
               }}
             >
               <span
@@ -242,7 +248,7 @@ const PortfolioTreemap: React.FC<PortfolioTreemapProps> = ({
                   width: 10,
                   height: 10,
                   borderRadius: 999,
-                  background: `linear-gradient(160deg, ${item.fill} 0%, ${item.edge} 100%)`,
+                  background: item.fill,
                   flexShrink: 0,
                 }}
               />
@@ -261,20 +267,67 @@ const PortfolioTreemap: React.FC<PortfolioTreemapProps> = ({
           height: '100%',
           minHeight: 0,
           position: 'relative',
-          borderRadius: 18,
+          borderRadius: 'var(--tf-radius)',
           overflow: 'hidden',
-          background: 'linear-gradient(180deg, #f8fafc 0%, #eef4ff 100%)',
-          border: '1px solid #dbe5f0',
-          boxShadow: 'inset 0 1px 0 rgba(255, 255, 255, 0.8)',
+          background: 'var(--tf-bg-elevated)',
+          border: '1px solid var(--tf-border)',
         }}
       >
         {tiles.length > 0 ? (
           tiles.map((tile) => {
-            const rowKey = getPortfolioRowKey(tile.row);
-            const tone = getPortfolioTone(tile.row.Updated, tile.row['Recent Activity']);
-            const stock = splitPortfolioStockLabel(tile.row.Stock || '');
-            const weight = parsePortfolioWeight(tile.row['% of Portfolio']);
-            const update = parsePortfolioUpdate(tile.row.Updated);
+            if (tile.otherCount != null || !tile.row) {
+              return (
+                <button
+                  key="__other__"
+                  type="button"
+                  onMouseEnter={clearActive}
+                  onFocus={clearActive}
+                  style={{
+                    position: 'absolute',
+                    left: `${tile.x}%`,
+                    top: `${tile.y}%`,
+                    width: `${tile.w}%`,
+                    height: `${tile.h}%`,
+                    padding: 3,
+                    border: 'none',
+                    background: 'transparent',
+                    cursor: 'default',
+                    textAlign: 'left',
+                  }}
+                  aria-label={`Other holdings: ${tile.weight.toFixed(2)} percent of portfolio across ${tile.otherCount ?? 0} positions`}
+                >
+                  <div
+                    style={{
+                      width: '100%',
+                      height: '100%',
+                      borderRadius: 'var(--tf-radius)',
+                      background: 'var(--tf-bg-hover)',
+                      border: '1px solid var(--tf-border)',
+                      color: 'var(--tf-muted-strong)',
+                      padding: 7,
+                      boxSizing: 'border-box',
+                      overflow: 'hidden',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      justifyContent: 'space-between',
+                      fontFamily: 'var(--tf-mono)',
+                    }}
+                  >
+                    <div style={{ fontSize: 'var(--tf-fs-xs)', fontWeight: 700, letterSpacing: '0.04em' }}>OTHER</div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', gap: 8, fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>
+                      <span style={{ fontSize: 'var(--tf-fs-micro)' }}>{tile.otherCount} holdings</span>
+                      <span style={{ fontSize: 'var(--tf-fs-base)', fontWeight: 700 }}>{tile.weight.toFixed(2)}%</span>
+                    </div>
+                  </div>
+                </button>
+              );
+            }
+            const row = tile.row;
+            const rowKey = getPortfolioRowKey(row);
+            const tone = getPortfolioTone(row.Updated, row['Recent Activity']);
+            const stock = splitPortfolioStockLabel(row.Stock || '');
+            const weight = parsePortfolioWeight(row['% of Portfolio']);
+            const update = parsePortfolioUpdate(row.Updated);
             const isActive = activeRowKey === rowKey;
             const minDimension = Math.min(tile.w, tile.h);
             const isLarge = tile.w >= 24 && tile.h >= 20;
@@ -308,12 +361,9 @@ const PortfolioTreemap: React.FC<PortfolioTreemapProps> = ({
                   style={{
                     width: '100%',
                     height: '100%',
-                    borderRadius: isLarge ? 16 : 12,
-                    background: `linear-gradient(160deg, ${tone.fill} 0%, ${tone.edge} 100%)`,
-                    border: isActive ? '1px solid rgba(255, 255, 255, 0.85)' : '1px solid rgba(255, 255, 255, 0.18)',
-                    boxShadow: isActive
-                      ? `0 16px 32px ${tone.edge}55, inset 0 1px 0 rgba(255, 255, 255, 0.16)`
-                      : '0 10px 20px rgba(15, 23, 42, 0.14), inset 0 1px 0 rgba(255, 255, 255, 0.1)',
+                    borderRadius: 'var(--tf-radius)',
+                    background: tone.fill,
+                    border: isActive ? '1px solid var(--tf-amber)' : '1px solid var(--tf-border)',
                     color: '#ffffff',
                     padding: isLarge ? 12 : isMedium ? 9 : 7,
                     boxSizing: 'border-box',
@@ -323,13 +373,14 @@ const PortfolioTreemap: React.FC<PortfolioTreemapProps> = ({
                     justifyContent: 'flex-start',
                     gap: 4,
                     outline: 'none',
+                    fontFamily: 'var(--tf-mono)',
                   }}
                 >
                   <div style={{ minWidth: 0 }}>
                     <div
                       style={{
-                        fontSize: isLarge ? 17 : isMedium ? 13 : 11,
-                        fontWeight: 800,
+                        fontSize: isLarge ? 'var(--tf-fs-base)' : 'var(--tf-fs-xs)',
+                        fontWeight: 700,
                         letterSpacing: '-0.02em',
                         lineHeight: canWrapPrimary ? 1.1 : 1.05,
                         overflow: 'hidden',
@@ -346,7 +397,7 @@ const PortfolioTreemap: React.FC<PortfolioTreemapProps> = ({
                       <div
                         style={{
                           marginTop: 4,
-                          fontSize: 11,
+                          fontSize: 'var(--tf-fs-xs)',
                           fontWeight: 600,
                           lineHeight: 1.35,
                           opacity: 0.92,
@@ -373,8 +424,8 @@ const PortfolioTreemap: React.FC<PortfolioTreemapProps> = ({
                         whiteSpace: 'nowrap',
                       }}
                     >
-                      <div style={{ fontSize: isLarge ? 12 : 10.5, fontWeight: 800 }}>{weight.toFixed(2)}%</div>
-                      <div style={{ fontSize: isLarge ? 12 : 10.5, fontWeight: 700, opacity: 0.95 }}>
+                      <div style={{ fontSize: 'var(--tf-fs-base)', fontWeight: 700 }}>{weight.toFixed(2)}%</div>
+                      <div style={{ fontSize: 'var(--tf-fs-base)', fontWeight: 700, opacity: 0.95 }}>
                         {formatSignedPercent(update)}
                       </div>
                     </div>
@@ -391,8 +442,8 @@ const PortfolioTreemap: React.FC<PortfolioTreemapProps> = ({
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              fontSize: 13,
-              color: '#64748b',
+              fontSize: "var(--tf-fs-base)",
+              color: 'var(--tf-muted)',
             }}
           >
             No portfolio holdings available.

@@ -9,14 +9,6 @@ interface FearGreedData {
   previous_1_month?: number;
 }
 
-const RATING_COLORS: Record<string, string> = {
-  'Extreme Fear': '#991b1b',
-  Fear: '#dc2626',
-  Neutral: '#64748b',
-  Greed: '#16a34a',
-  'Extreme Greed': '#065f46',
-};
-
 const GAUGE_START_DEG = -178.4;
 const GAUGE_END_DEG = -1.6;
 
@@ -34,7 +26,7 @@ const FearGreedGauge: React.FC = () => {
   const [unavailable, setUnavailable] = useState(false);
 
   useEffect(() => {
-    fetch('/dashboard/api/fear-greed')
+    fetch('/terminal/api/fear-greed')
       .then((r) => (r.ok ? r.json() : Promise.reject()))
       .then((d: FearGreedData) => {
         if (d && d.score != null) setData(d);
@@ -44,27 +36,30 @@ const FearGreedGauge: React.FC = () => {
   }, []);
 
   if (failed) {
-    return <div style={{ fontSize: 12, color: '#94a3b8' }}>Data source not connected</div>;
+    return <div style={{ fontFamily: 'var(--tf-mono)', fontSize: 'var(--tf-fs-xs)', color: 'var(--tf-muted)' }}>Data source not connected</div>;
   }
 
   if (unavailable) {
-    return <div style={{ fontSize: 12, color: '#94a3b8' }}>Unavailable</div>;
+    return <div style={{ fontFamily: 'var(--tf-mono)', fontSize: 'var(--tf-fs-xs)', color: 'var(--tf-muted)' }}>Unavailable</div>;
   }
 
   if (!data || data.score == null) {
-    return <div style={{ fontSize: 12, color: '#94a3b8' }}>Loading...</div>;
+    return <div style={{ fontFamily: 'var(--tf-mono)', fontSize: 'var(--tf-fs-xs)', color: 'var(--tf-muted)' }}>Loading...</div>;
   }
 
   const score = data.score;
   const rating = data.rating;
   const activeBand = bandForScore(score);
-  const color = RATING_COLORS[rating] || activeBand.arcColor || '#64748b';
 
   // Match the visual gauge bands to the same score thresholds used by the rating label.
   const needleDeg = scoreToNeedleRotation(score);
 
   return (
-    <div className="tf-fear-greed">
+    <a
+      className="tf-fear-greed tf-fear-greed--link"
+      href="/market-insights?ticker=Fear%20%26%20Greed"
+      title="CNN Fear & Greed score (0–100) — Extreme Fear 0–25 · Fear 25–45 · Neutral 45–55 · Greed 55–75 · Extreme Greed 75–100. Click for chart."
+    >
       {/* Gauge */}
       <div style={{ width: 130, flexShrink: 0 }}>
         <svg viewBox="0 0 200 140" width="130" height="91">
@@ -80,12 +75,12 @@ const FearGreedGauge: React.FC = () => {
 
           {/* Needle */}
           <g transform={`rotate(${needleDeg}, 100, 110)`}>
-            <line x1="100" y1="110" x2="100" y2="45" stroke="#1e293b" strokeWidth="3" strokeLinecap="round" />
+            <line x1="100" y1="110" x2="100" y2="45" stroke="var(--tf-text)" strokeWidth="3" strokeLinecap="round" />
           </g>
-          <circle cx="100" cy="110" r="5" fill="#1e293b" />
+          <circle cx="100" cy="110" r="5" fill="var(--tf-text)" />
 
           {/* Score below gauge */}
-          <text x="100" y="135" textAnchor="middle" fontSize="18" fontWeight="800" fill="#1e293b">
+          <text x="100" y="135" textAnchor="middle" style={{ fontSize: 'var(--tf-fs-lg)' }} fontWeight="700" fill="var(--tf-text)" fontFamily="var(--tf-mono)">
             {score}
           </text>
         </svg>
@@ -93,25 +88,25 @@ const FearGreedGauge: React.FC = () => {
 
       {/* Label */}
       <div style={{ minWidth: 0 }}>
-        <div style={{ fontSize: 15, lineHeight: 1.5 }}>
-          <span style={{ fontWeight: 700, color }}>{rating}</span>
-          <span style={{ color: '#334155' }}> is driving the</span>
+        <div style={{ fontFamily: 'var(--tf-mono)', fontSize: 'var(--tf-fs-base)', lineHeight: 1.55, color: 'var(--tf-text)' }}>
+          <span style={{ fontWeight: 600, color: rating === 'Extreme Fear' || rating === 'Fear' ? 'var(--tf-down)' : rating === 'Greed' || rating === 'Extreme Greed' ? 'var(--tf-up)' : 'var(--tf-muted)' }}>{rating}</span>
+          <span style={{ color: 'var(--tf-muted)' }}> drives the</span>
           <br />
-          <span style={{ color: '#334155' }}>US market</span>
+          <span style={{ color: 'var(--tf-muted)' }}>US market</span>
         </div>
         <div className="tf-fear-greed__history">
           {data.previous_close != null && (
-            <span>Prev <span style={{ color: '#475569', fontWeight: 600 }}>{data.previous_close}</span></span>
+            <span>Prev <span style={{ color: 'var(--tf-text)', fontWeight: 600 }}>{data.previous_close}</span></span>
           )}
           {data.previous_1_week != null && (
-            <span>1W <span style={{ color: '#475569', fontWeight: 600 }}>{data.previous_1_week}</span></span>
+            <span>1W <span style={{ color: 'var(--tf-text)', fontWeight: 600 }}>{data.previous_1_week}</span></span>
           )}
           {data.previous_1_month != null && (
-            <span>1M <span style={{ color: '#475569', fontWeight: 600 }}>{data.previous_1_month}</span></span>
+            <span>1M <span style={{ color: 'var(--tf-text)', fontWeight: 600 }}>{data.previous_1_month}</span></span>
           )}
         </div>
       </div>
-    </div>
+    </a>
   );
 };
 

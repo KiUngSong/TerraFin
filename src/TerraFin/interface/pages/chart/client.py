@@ -4,8 +4,8 @@ from urllib.parse import urlencode
 import requests
 
 from TerraFin.data.contracts.dataframes import TimeSeriesDataFrame
-from TerraFin.interface.chart.formatters import build_source_payload
-from TerraFin.interface.chart.routes import CHART_PATH
+from TerraFin.interface.pages.chart.formatters import build_source_payload
+from TerraFin.interface.pages.chart.routes import CHART_PATH
 from TerraFin.interface.server import get_runtime_config, run_server, start_server
 
 

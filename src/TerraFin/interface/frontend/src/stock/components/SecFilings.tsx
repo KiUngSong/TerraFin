@@ -242,8 +242,8 @@ const SecFilings: React.FC<Props> = ({ ticker, onUnavailable }) => {
                   onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setSelectedAccession(isSelected ? null : row.accession); }}
                 >
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: 13, fontWeight: 700, color: '#0f172a' }}>{row.form}</div>
-                    <div style={{ fontSize: 12, color: '#64748b' }}>
+                    <div style={{ fontSize: "var(--tf-fs-base)", fontWeight: 700, color: 'var(--tf-text-strong)' }}>{row.form}</div>
+                    <div style={{ fontSize: "var(--tf-fs-xs)", color: 'var(--tf-muted)' }}>
                       Filed {row.filingDate}{row.reportDate ? ` · Period ${row.reportDate}` : ''}
                     </div>
                   </div>
@@ -263,11 +263,11 @@ const SecFilings: React.FC<Props> = ({ ticker, onUnavailable }) => {
             <div style={readerWrapStyle}>
               <div style={readerHeaderStyle}>
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 14, fontWeight: 800, color: '#0f172a' }}>
+                  <div style={{ fontSize: "var(--tf-fs-md)", fontWeight: 700, color: 'var(--tf-text-strong)' }}>
                     {selectedFiling.form} · Filed {selectedFiling.filingDate}
                   </div>
                   {selectedFiling.primaryDocDescription ? (
-                    <div style={{ fontSize: 12, color: '#64748b' }}>{selectedFiling.primaryDocDescription}</div>
+                    <div style={{ fontSize: "var(--tf-fs-xs)", color: 'var(--tf-muted)' }}>{selectedFiling.primaryDocDescription}</div>
                   ) : null}
                 </div>
                 {filingDoc ? (
@@ -282,7 +282,7 @@ const SecFilings: React.FC<Props> = ({ ticker, onUnavailable }) => {
               ) : docError ? (
                 docError === '422' ? (
                   <div style={unsupportedStyle}>
-                    <div style={{ fontSize: 13, color: '#1e293b', marginBottom: 6 }}>
+                    <div style={{ fontSize: "var(--tf-fs-base)", color: 'var(--tf-text)', marginBottom: 6 }}>
                       In-app reader doesn&rsquo;t support <strong>{selectedFiling.form}</strong> filings yet.
                     </div>
                     <a href={selectedFiling.documentUrl} target="_blank" rel="noopener noreferrer" style={edgarPillStyle}>
@@ -311,7 +311,7 @@ const SecFilings: React.FC<Props> = ({ ticker, onUnavailable }) => {
                           >
                             <span style={headerLeftStyle(10)}>
                               <span style={chevronStyle(partOpen)}>▸</span>
-                              <span style={headerTitleStyle(14, 800, '#0f172a')}>
+                              <span style={headerTitleStyle(14, 800, 'var(--tf-text-strong)')}>
                                 {group.part?.text ?? 'Sections'}
                               </span>
                             </span>
@@ -336,7 +336,7 @@ const SecFilings: React.FC<Props> = ({ ticker, onUnavailable }) => {
                                     >
                                       <span style={headerLeftStyle(8)}>
                                         <span style={chevronStyle(itemOpen)}>▸</span>
-                                        <span style={headerTitleStyle(13, 700, '#1e293b')}>
+                                        <span style={headerTitleStyle(13, 700, 'var(--tf-text)')}>
                                           {entry.text}
                                         </span>
                                       </span>
@@ -373,61 +373,60 @@ const SecFilings: React.FC<Props> = ({ ticker, onUnavailable }) => {
 // ── styles ─────────────────────────────────────────────────────────────────
 
 const rootStyle: React.CSSProperties = { display: 'flex', flexDirection: 'column', gap: 12, minWidth: 0 };
-const dimStyle: React.CSSProperties = { fontSize: 12, color: '#64748b' };
-const errorStyle: React.CSSProperties = { fontSize: 12, color: '#b91c1c', padding: 8, background: '#fef2f2', borderRadius: 6 };
+const dimStyle: React.CSSProperties = { fontSize: "var(--tf-fs-base)", color: 'var(--tf-muted)' };
+const errorStyle: React.CSSProperties = { fontSize: "var(--tf-fs-base)", color: 'var(--tf-down)', padding: 8, background: 'var(--tf-bg-pane)', borderRadius: 'var(--tf-radius)' };
 const formRowStyle: React.CSSProperties = { display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' };
-const formLabelStyle: React.CSSProperties = { fontSize: 11, fontWeight: 700, color: '#475569', textTransform: 'uppercase', letterSpacing: 0.5 };
+const formLabelStyle: React.CSSProperties = { fontSize: "var(--tf-fs-xs)", fontWeight: 700, color: 'var(--tf-muted)', textTransform: 'uppercase', letterSpacing: 0.5 };
 const selectStyle: React.CSSProperties = {
-  height: 32, borderRadius: 6, border: '1px solid #cbd5e1', background: '#fff',
-  padding: '0 10px', fontSize: 13, color: '#0f172a', outline: 'none',
+  height: 32, borderRadius: 'var(--tf-radius)', border: '1px solid var(--tf-border)', background: 'var(--tf-bg-elevated)',
+  padding: '0 10px', fontSize: "var(--tf-fs-base)", color: 'var(--tf-text)', outline: 'none',
 };
 const filingListStyle: React.CSSProperties = { display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 220, overflowY: 'auto' };
 const filingRowStyle = (selected: boolean): React.CSSProperties => ({
   display: 'flex', alignItems: 'center', gap: 10, padding: '8px 10px',
-  border: `1px solid ${selected ? '#1d4ed8' : '#e2e8f0'}`,
-  borderRadius: 8, background: selected ? '#eff6ff' : '#ffffff', cursor: 'pointer',
+  border: `1px solid ${selected ? 'var(--tf-amber)' : 'var(--tf-border)'}`,
+  borderRadius: 'var(--tf-radius)', background: selected ? 'var(--tf-bg-pane)' : 'var(--tf-bg-elevated)', cursor: 'pointer',
 });
-const edgarLinkStyle: React.CSSProperties = { fontSize: 11, color: '#475569', textDecoration: 'none', flexShrink: 0 };
+const edgarLinkStyle: React.CSSProperties = { fontSize: "var(--tf-fs-xs)", color: 'var(--tf-muted)', textDecoration: 'none', flexShrink: 0 };
 const readerWrapStyle: React.CSSProperties = {
   display: 'flex', flexDirection: 'column', gap: 10,
-  borderTop: '1px solid #e2e8f0', paddingTop: 12, marginTop: 4,
+  borderTop: '1px solid var(--tf-border)', paddingTop: 12, marginTop: 4,
 };
 const readerHeaderStyle: React.CSSProperties = {
   display: 'flex', alignItems: 'center', gap: 10, justifyContent: 'space-between', flexWrap: 'wrap',
 };
 const edgarPillStyle: React.CSSProperties = {
-  padding: '6px 12px', borderRadius: 999, background: '#1d4ed8', color: '#fff',
-  fontSize: 12, fontWeight: 700, textDecoration: 'none', flexShrink: 0,
+  padding: '6px 12px', borderRadius: 999, background: 'var(--tf-amber)', color: 'var(--tf-bg)',
+  fontSize: "var(--tf-fs-xs)", fontWeight: 700, textDecoration: 'none', flexShrink: 0,
 };
 const accordionStyle: React.CSSProperties = { display: 'flex', flexDirection: 'column', gap: 10 };
 // Part — outer container, heavier visual weight because it's a structural
 // division (10-K Part I = Financial Info, Part II = Other Info).
 const partCardStyle: React.CSSProperties = {
-  border: '1px solid #cbd5e1', borderRadius: 10, background: '#ffffff', overflow: 'hidden',
-  boxShadow: '0 1px 2px rgba(15, 23, 42, 0.04)',
+  border: '1px solid var(--tf-border)', borderRadius: 'var(--tf-radius)', background: 'var(--tf-bg-pane)', overflow: 'hidden',
 };
 const partHeaderStyle = (open: boolean): React.CSSProperties => ({
   width: '100%', border: 'none',
-  background: open ? 'linear-gradient(180deg, #f1f5f9 0%, #e2e8f0 100%)' : '#f8fafc',
+  background: open ? 'var(--tf-bg-pane)' : 'var(--tf-bg-elevated)',
   padding: '12px 14px', display: 'flex', alignItems: 'center', gap: 10,
   justifyContent: 'space-between', cursor: 'pointer', textAlign: 'left',
 });
 const itemsWrapStyle: React.CSSProperties = {
   display: 'flex', flexDirection: 'column', gap: 6, padding: '10px 12px 12px',
-  background: '#f8fafc',
+  background: 'var(--tf-bg-pane)',
 };
 // Item — inner, lighter card.
 const itemCardStyle: React.CSSProperties = {
-  border: '1px solid #e2e8f0', borderRadius: 8, background: '#ffffff', overflow: 'hidden',
+  border: '1px solid var(--tf-border)', borderRadius: 'var(--tf-radius)', background: 'var(--tf-bg-elevated)', overflow: 'hidden',
 };
 const itemHeaderStyle = (open: boolean): React.CSSProperties => ({
-  width: '100%', border: 'none', background: open ? '#f1f5f9' : '#ffffff',
+  width: '100%', border: 'none', background: open ? 'var(--tf-bg-pane)' : 'var(--tf-bg-elevated)',
   padding: '9px 12px', display: 'flex', alignItems: 'center', gap: 10,
   justifyContent: 'space-between', cursor: 'pointer', textAlign: 'left',
 });
 const chevronStyle = (open: boolean): React.CSSProperties => ({
   display: 'inline-block', transition: 'transform 0.15s', transform: open ? 'rotate(90deg)' : 'rotate(0deg)',
-  color: '#64748b', fontSize: 12, flexShrink: 0, width: 12,
+  color: 'var(--tf-muted)', fontSize: "var(--tf-fs-xs)", flexShrink: 0, width: 12,
 });
 // Header left-hand column (chevron + title). Takes available space and can
 // shrink below its intrinsic width — the `minWidth: 0` is what lets the
@@ -453,16 +452,16 @@ const headerTitleStyle = (
   whiteSpace: 'nowrap',
 });
 const headerBadgeStyle: React.CSSProperties = {
-  fontSize: 11, color: '#64748b', flexShrink: 0,
+  fontSize: "var(--tf-fs-xs)", color: 'var(--tf-muted)', flexShrink: 0,
 };
 const sectionBodyStyle: React.CSSProperties = { padding: '4px 14px 14px' };
 const pickerHintStyle: React.CSSProperties = {
-  fontSize: 12, color: '#64748b', padding: 12, textAlign: 'center',
-  background: '#f8fafc', border: '1px dashed #e2e8f0', borderRadius: 8,
+  fontSize: "var(--tf-fs-base)", color: 'var(--tf-muted)', padding: 12, textAlign: 'center',
+  background: 'var(--tf-bg-pane)', border: '1px dashed var(--tf-border)', borderRadius: 'var(--tf-radius)',
 };
 const unsupportedStyle: React.CSSProperties = {
-  padding: 14, background: '#fffbeb', border: '1px solid #fde68a',
-  borderRadius: 8, display: 'flex', alignItems: 'center', gap: 12,
+  padding: 14, background: 'var(--tf-bg-pane)', border: '1px solid var(--tf-amber)',
+  borderRadius: 'var(--tf-radius)', display: 'flex', alignItems: 'center', gap: 12,
   justifyContent: 'space-between', flexWrap: 'wrap',
 };
 

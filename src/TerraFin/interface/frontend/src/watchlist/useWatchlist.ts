@@ -5,6 +5,8 @@ export interface WatchlistItem {
   name: string;
   move: string;
   tags: string[];
+  last?: number | null;
+  volume?: number | null;
 }
 
 export interface WatchlistGroup {
@@ -20,7 +22,7 @@ interface WatchlistResponse {
   monitorEnabled?: boolean;
 }
 
-const WATCHLIST_ENDPOINT = '/dashboard/api/watchlist';
+const WATCHLIST_ENDPOINT = '/terminal/api/watchlist';
 
 interface ParsedWatchlistResponse {
   items: WatchlistItem[];

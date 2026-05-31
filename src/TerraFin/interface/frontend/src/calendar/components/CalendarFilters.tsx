@@ -7,7 +7,7 @@ interface CalendarFiltersProps {
   onToggle: (category: EventCategory) => void;
 }
 
-const categories: EventCategory[] = ["earning", "macro", "event"];
+const categories: EventCategory[] = ["earning", "macro"];
 
 const CalendarFilters: React.FC<CalendarFiltersProps> = ({ selected, onToggle }) => (
   <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
@@ -19,14 +19,15 @@ const CalendarFilters: React.FC<CalendarFiltersProps> = ({ selected, onToggle })
           type="button"
           onClick={() => onToggle(category)}
           style={{
-            border: active ? "1px solid #1d4ed8" : "1px solid #cbd5e1",
-            background: active ? "#dbeafe" : "#ffffff",
-            color: active ? "#1e3a8a" : "#334155",
-            fontSize: 12,
+            border: active ? "1px solid var(--tf-amber)" : "1px solid var(--tf-border)",
+            background: active ? "var(--tf-bg-hover)" : "var(--tf-bg-elevated)",
+            color: active ? "var(--tf-amber)" : "var(--tf-text)",
+            fontSize: "var(--tf-fs-xs)",
             fontWeight: 600,
-            borderRadius: 999,
+            borderRadius: "var(--tf-radius)",
             padding: "6px 10px",
             cursor: "pointer",
+            fontFamily: "var(--tf-mono)",
           }}
         >
           {CATEGORY_LABELS[category]}

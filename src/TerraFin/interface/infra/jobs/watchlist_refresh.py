@@ -55,7 +55,7 @@ async def run() -> None:
 
     loop = asyncio.get_running_loop()
 
-    from TerraFin.interface.watchlist_service import get_watchlist_service
+    from TerraFin.data.watchlist_service import get_watchlist_service
     svc = get_watchlist_service()
 
     if not svc.is_backend_configured():

@@ -11,9 +11,9 @@ import pandas as pd
 
 from TerraFin.analytics.analysis.technical import DEFAULT_MFD_WINDOWS
 from TerraFin.data.contracts import TimeSeriesDataFrame
-from TerraFin.interface.chart.chart_view import apply_view
-from TerraFin.interface.chart.formatters import build_multi_payload
-from TerraFin.interface.chart.indicators.adapter import (
+from TerraFin.interface.pages.chart.chart_view import apply_view
+from TerraFin.interface.pages.chart.formatters import build_multi_payload
+from TerraFin.interface.pages.chart.indicators.adapter import (
     compute_bollinger_bands,
     compute_macd,
     compute_mandelbrot_fractal_dimension,

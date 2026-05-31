@@ -1,15 +1,15 @@
 import pandas as pd
 from fastapi.testclient import TestClient
 
-import TerraFin.interface.chart.routes as chart_routes
+import TerraFin.interface.pages.chart.routes as chart_routes
 from TerraFin.data import DataFactory
 from TerraFin.data.cache.registry import reset_cache_manager
 from TerraFin.data.contracts import HistoryChunk
 from TerraFin.data.contracts.dataframes import TimeSeriesDataFrame
-from TerraFin.interface.chart.chart_view import apply_view
-from TerraFin.interface.chart.formatters import build_multi_payload as _build_multi_payload
-from TerraFin.interface.chart.formatters import build_source_payload as _build_source_payload
-from TerraFin.interface.chart.formatters import format_dataframe
+from TerraFin.interface.pages.chart.chart_view import apply_view
+from TerraFin.interface.pages.chart.formatters import build_multi_payload as _build_multi_payload
+from TerraFin.interface.pages.chart.formatters import build_source_payload as _build_source_payload
+from TerraFin.interface.pages.chart.formatters import format_dataframe
 from TerraFin.interface.server import create_app
 
 

@@ -39,12 +39,12 @@ const TimeRangeButtons: React.FC<TimeRangeButtonsProps> = ({ selectedRange, onRa
               style={{
                 fontFamily: FONT_FAMILY,
                 padding: '6px 10px',
-                fontSize: 13,
+                fontSize: "var(--tf-fs-base)",
                 fontWeight: 500,
                 border: 'none',
-                borderRadius: 6,
-                background: isHovered ? '#f0f0f0' : 'transparent',
-                color: isDisabled ? '#94a3b8' : isSelected ? '#1976d2' : '#1a1a1a',
+                borderRadius: 'var(--tf-radius)',
+                background: isHovered ? 'var(--tf-bg-pane)' : 'transparent',
+                color: isDisabled ? 'var(--tf-muted)' : isSelected ? 'var(--tf-amber)' : 'var(--tf-text)',
                 cursor: isDisabled ? 'not-allowed' : 'pointer',
                 opacity: isDisabled ? 0.75 : 1,
                 textDecoration: isSelected ? 'underline' : 'none',
@@ -62,15 +62,15 @@ const TimeRangeButtons: React.FC<TimeRangeButtonsProps> = ({ selectedRange, onRa
                   transform: 'translateX(-50%)',
                   marginTop: 6,
                   padding: '6px 10px',
-                  background: '#2d2d2d',
-                  color: '#fff',
-                  fontSize: 12,
+                  background: 'var(--tf-bg-elevated)',
+                  color: 'var(--tf-text)',
+                  border: '1px solid var(--tf-border)',
+                  fontSize: "var(--tf-fs-base)",
                   fontFamily: FONT_FAMILY,
                   fontWeight: 500,
-                  borderRadius: 6,
+                  borderRadius: 'var(--tf-radius)',
                   whiteSpace: 'nowrap',
                   zIndex: 11,
-                  boxShadow: '0 2px 8px rgba(0,0,0,0.2)',
                 }}
                 >
                 <span
@@ -82,7 +82,7 @@ const TimeRangeButtons: React.FC<TimeRangeButtonsProps> = ({ selectedRange, onRa
                     width: 0,
                     height: 0,
                     border: '6px solid transparent',
-                    borderBottomColor: '#2d2d2d',
+                    borderBottomColor: 'var(--tf-bg-elevated)',
                   }}
                 />
                 {tooltipText}

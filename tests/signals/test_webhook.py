@@ -5,7 +5,7 @@ import hmac
 import pytest
 
 from TerraFin.data.contracts.signal_provider import InboundSignal
-from TerraFin.interface.monitor import webhook as wh
+from TerraFin.interface.infra.monitor import webhook as wh
 
 
 @pytest.fixture(autouse=True)

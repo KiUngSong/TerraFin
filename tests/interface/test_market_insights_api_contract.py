@@ -2,8 +2,8 @@ import pandas as pd
 from fastapi.testclient import TestClient
 
 import TerraFin.data as data_module
-import TerraFin.interface.market_insights.data_routes as market_routes
-import TerraFin.interface.market_insights.payloads as market_payloads
+import TerraFin.interface.pages.market_insights.data_routes as market_routes
+import TerraFin.interface.pages.market_insights.payloads as market_payloads
 from TerraFin.data.contracts import HistoryChunk
 from TerraFin.data.contracts.dataframes import TimeSeriesDataFrame
 from TerraFin.data.providers.corporate.filings.sec_edgar.filing import SecEdgarConfigurationError

@@ -4,8 +4,8 @@ from typing import Any, Iterable
 import requests
 
 from TerraFin.data.contracts import TimeSeriesDataFrame
-from TerraFin.interface.chart import client as chart_client
-from TerraFin.interface.chart.formatters import build_multi_payload
+from TerraFin.interface.pages.chart import client as chart_client
+from TerraFin.interface.pages.chart.formatters import build_multi_payload
 
 from ..contracts.conversation import is_internal_only_message
 from ..contracts.definitions import is_internal_agent_definition

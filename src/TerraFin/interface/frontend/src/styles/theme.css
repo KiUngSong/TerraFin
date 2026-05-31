@@ -1,0 +1,132 @@
+/*
+ * TerraFin Terminal — palette + typography tokens.
+ *
+ * Dark = primary. Light = warm-paper reader mode (designed, not inverted).
+ */
+
+:root {
+  /* True 10-step neutral ramp — depth, not 3 flat grays. */
+  --tf-gray-1:  #07090c;
+  --tf-gray-2:  #0b0e12;
+  --tf-gray-3:  #11151a;
+  --tf-gray-4:  #161b22;
+  --tf-gray-5:  #1d242d;
+  --tf-gray-6:  #2a323d;
+  --tf-gray-7:  #3d4754;
+  --tf-gray-8:  #6b7785;
+  --tf-gray-9:  #aab3c0;
+  --tf-gray-10: #e6e9ee;
+  --tf-gray-11: #ffffff;
+
+  /* Semantic — dark default */
+  --tf-bg:           var(--tf-gray-2);
+  --tf-bg-pane:      var(--tf-gray-3);
+  --tf-bg-elevated:  var(--tf-gray-4);
+  --tf-bg-hover:     var(--tf-gray-5);
+  --tf-border:       rgba(255, 255, 255, 0.06);
+  --tf-border-strong:rgba(255, 255, 255, 0.14);
+
+  --tf-text:         var(--tf-gray-10);
+  --tf-text-strong:  var(--tf-gray-11);
+  --tf-muted:        var(--tf-gray-9);
+  --tf-muted-strong: var(--tf-gray-10);
+
+  --tf-up: #2ecc71;
+  --tf-down: #ff5267;
+  --tf-amber: #f0b400;
+  --tf-accent: #f0b400;
+
+  /* Radius scale — sharp inline, softer panels, softest modals */
+  --tf-radius: 2px;
+  --tf-radius-panel: 8px;
+  --tf-radius-modal: 12px;
+
+  --tf-row-h: 22px;
+  --tf-pane-header-h: 28px;
+
+  /* Spacing scale — 4px base. Use these for padding/gap/margin instead of raw
+     px so layout density stays uniform and tunable from one place. */
+  --tf-space-1: 4px;
+  --tf-space-2: 8px;
+  --tf-space-3: 12px;
+  --tf-space-4: 16px;
+  --tf-space-5: 24px;
+  --tf-space-6: 32px;
+  /* Minimum interactive target on touch viewports (WCAG 2.5.5). */
+  --tf-tap-min: 40px;
+  /* Shared height for the stacked multi-tab panel (Stocks / Sectors) on mobile
+     so switching tabs doesn't reflow the column. Consumed by CSS (panel body)
+     AND JS (StockHeatmap reads this token for the TradingView embed height). */
+  --tf-panel-h-mobile: 460px;
+
+  /* Type scale — minor third (1.2) anchored at 12 */
+  --tf-fs-micro: 10px;
+  --tf-fs-xs:    11px;
+  --tf-fs-base:  13px;
+  --tf-fs-md:    15px;
+  --tf-fs-lg:    20px;
+  --tf-fs-xl:    28px;
+
+  /* Single unified font family — Inter + Pretendard for Hangul.
+   * Numerics use Inter w/ tabular-nums + slashed-zero feature; no mono switch. */
+  --tf-sans: Inter, "Pretendard Variable", Pretendard, "Apple SD Gothic Neo",
+    "Malgun Gothic", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+    "Helvetica Neue", Arial, sans-serif;
+  --tf-mono: var(--tf-sans);
+  --tf-tnum: "tnum" 1, "ss01" 1;
+}
+
+/* Global element font-family normalization — kill Arial/-apple-system leaks
+   on native controls and buttons. */
+button, select, option, input, textarea, .fc button {
+  font-family: var(--tf-sans);
+}
+
+[data-theme="dark"] {
+  --tf-bg:           var(--tf-gray-2);
+  --tf-bg-pane:      var(--tf-gray-3);
+  --tf-bg-elevated:  var(--tf-gray-4);
+  --tf-bg-hover:     var(--tf-gray-5);
+  --tf-border:       rgba(255, 255, 255, 0.06);
+  --tf-border-strong:rgba(255, 255, 255, 0.14);
+  --tf-text:         var(--tf-gray-10);
+  --tf-text-strong:  var(--tf-gray-11);
+  --tf-muted:        var(--tf-gray-9);
+  --tf-muted-strong: var(--tf-gray-10);
+  --tf-up: #2ecc71;
+  --tf-down: #ff5267;
+  --tf-amber: #f0b400;
+  --tf-accent: #f0b400;
+}
+
+[data-theme="light"] {
+  /* Warm-paper reader mode — Bloomberg meets FT print edition. */
+  --tf-gray-1: #fafaf7;
+  --tf-gray-2: #f4f3ee;
+  --tf-gray-3: #ffffff;
+  --tf-gray-4: #f7f6f1;
+  --tf-gray-5: #ecebe4;
+  --tf-gray-6: #d8d6cb;
+  --tf-gray-7: #9c9a8e;
+  --tf-gray-8: #565449;
+  --tf-gray-9: #2b2a25;
+  --tf-gray-10:#111110;
+  --tf-gray-11:#000000;
+
+  --tf-bg:           var(--tf-gray-1);
+  --tf-bg-pane:      var(--tf-gray-3);
+  --tf-bg-elevated:  var(--tf-gray-4);
+  --tf-bg-hover:     var(--tf-gray-5);
+  --tf-border:       rgba(0, 0, 0, 0.08);
+  --tf-border-strong:rgba(0, 0, 0, 0.18);
+
+  --tf-text:         var(--tf-gray-10);
+  --tf-text-strong:  var(--tf-gray-11);
+  --tf-muted:        var(--tf-gray-8);
+  --tf-muted-strong: var(--tf-gray-9);
+
+  --tf-up: #0a7d3b;
+  --tf-down: #a3162a;
+  --tf-amber: #b9750b;
+  --tf-accent: #b9750b;
+}

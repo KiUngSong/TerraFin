@@ -9,7 +9,7 @@ import os
 from fastapi import APIRouter, Header, HTTPException, Request
 
 from TerraFin.data.contracts.signal_provider import InboundSignal
-from TerraFin.interface.monitor.webhook import (
+from TerraFin.interface.infra.monitor.webhook import (
     WebhookSecretMissing,
     check_rate_limit,
     forward_to_telegram,

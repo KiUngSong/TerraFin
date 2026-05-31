@@ -4,7 +4,7 @@ import type { CalendarEvent, CalendarEventsResponse, EventCategory } from "./typ
 
 function normalizeCategory(category: unknown): EventCategory {
   if (category === "earning" || category === "macro") return category;
-  return "event";
+  return "macro";
 }
 
 function normalizeEvent(raw: Partial<CalendarEvent>): CalendarEvent | null {

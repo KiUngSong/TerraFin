@@ -1,11 +1,14 @@
 import React from 'react';
 import type { DcfProjectionPoint } from '../../dcf/types';
 
+// SVG fill/stroke values must be literal hex — CSS var() does not resolve in
+// SVG presentation attributes. These hex values are tuned for the dark-mode
+// palette (matching tf-up / tf-down / tf-muted / tf-border tokens).
 const POSITIVE_COLOR = '#059669';
 const NEGATIVE_COLOR = '#dc2626';
 const AXIS_COLOR = '#94a3b8';
-const GRID_COLOR = '#e2e8f0';
-const LABEL_COLOR = '#475569';
+const GRID_COLOR = '#334155';
+const LABEL_COLOR = '#94a3b8';
 
 const MIN_VIEWBOX_HEIGHT = 140;
 const PADDING_TOP = 18;
@@ -70,8 +73,8 @@ interface ProjectedFcfChartProps {
   title?: string;
 }
 
-const BAND_FILL = 'rgba(29, 78, 216, 0.12)';
-const BASE_LINE_COLOR = '#1d4ed8';
+const BAND_FILL = 'rgba(245, 158, 11, 0.16)';
+const BASE_LINE_COLOR = '#f59e0b';
 const BEAR_LINE_COLOR = '#dc2626';
 const BULL_LINE_COLOR = '#059669';
 const LINE_HORIZON_THRESHOLD = 15;
@@ -202,7 +205,7 @@ const ProjectedFcfChart: React.FC<ProjectedFcfChartProps> = ({
               <text
                 x={chartLeft - 6}
                 y={yToPx(tick) + 4}
-                fontSize="10"
+                style={{ fontSize: 'var(--tf-fs-micro)' }}
                 fill={LABEL_COLOR}
                 textAnchor="end"
               >
@@ -250,7 +253,7 @@ const ProjectedFcfChart: React.FC<ProjectedFcfChartProps> = ({
                           x2={cx}
                           y1={yToPx(bullVal)}
                           y2={yToPx(bearVal)}
-                          stroke="#0f172a"
+                          stroke="var(--tf-muted)"
                           strokeWidth={1.2}
                           opacity={0.85}
                         />
@@ -275,7 +278,7 @@ const ProjectedFcfChart: React.FC<ProjectedFcfChartProps> = ({
                     <text
                       x={cx}
                       y={viewHeight - 10}
-                      fontSize="10"
+                      style={{ fontSize: 'var(--tf-fs-micro)' }}
                       fill={LABEL_COLOR}
                       textAnchor="middle"
                     >
@@ -341,15 +344,15 @@ const ProjectedFcfChart: React.FC<ProjectedFcfChartProps> = ({
                             cx={x}
                             cy={y}
                             r={isLast ? 4 : 2.5}
-                            fill="#ffffff"
                             stroke={BASE_LINE_COLOR}
                             strokeWidth={1.5}
+                            style={{ fill: 'var(--tf-bg-pane)' }}
                           />
                           {idx === 0 || idx === valid.length - 1 || idx === Math.floor(valid.length / 2) ? (
                             <text
                               x={x}
                               y={viewHeight - 10}
-                              fontSize="10"
+                              style={{ fontSize: 'var(--tf-fs-micro)' }}
                               fill={LABEL_COLOR}
                               textAnchor="middle"
                             >
@@ -380,16 +383,15 @@ const tooltipStyle = (x: number, y: number, _accent: string): React.CSSPropertie
   left: x,
   top: y,
   padding: '4px 9px',
-  background: '#ffffff',
-  color: '#0f172a',
-  fontSize: 11,
+  background: 'var(--tf-bg-elevated)',
+  color: 'var(--tf-text)',
+  fontSize: "var(--tf-fs-xs)",
   fontWeight: 700,
-  borderRadius: 6,
-  border: '1px solid #cbd5e1',
+  borderRadius: 'var(--tf-radius)',
+  border: '1px solid var(--tf-border)',
   pointerEvents: 'none',
   whiteSpace: 'nowrap',
   zIndex: 10,
-  boxShadow: '0 2px 6px rgba(15, 23, 42, 0.12)',
   lineHeight: 1.3,
   display: 'inline-flex',
   alignItems: 'center',
@@ -405,9 +407,9 @@ const tooltipDotStyle = (accent: string): React.CSSProperties => ({
 });
 
 const tooltipLabelStyle: React.CSSProperties = {
-  fontSize: 10,
+  fontSize: "var(--tf-fs-micro)",
   fontWeight: 600,
-  color: '#64748b',
+  color: 'var(--tf-muted)',
 };
 
 const containerStyle: React.CSSProperties = {
@@ -415,17 +417,17 @@ const containerStyle: React.CSSProperties = {
   flexDirection: 'column',
   gap: 6,
   marginTop: 12,
-  border: '1px solid #e2e8f0',
-  borderRadius: 12,
+  border: '1px solid var(--tf-border)',
+  borderRadius: 'var(--tf-radius)',
   padding: '10px 12px',
-  background: '#f8fafc',
+  background: 'var(--tf-bg-pane)',
   minHeight: 0,
 };
 
 const titleStyle: React.CSSProperties = {
-  fontSize: 11,
+  fontSize: "var(--tf-fs-xs)",
   fontWeight: 700,
-  color: '#334155',
+  color: 'var(--tf-text)',
   letterSpacing: '0.02em',
 };
 

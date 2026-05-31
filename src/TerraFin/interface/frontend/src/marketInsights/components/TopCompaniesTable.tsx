@@ -13,8 +13,8 @@ interface TopCompaniesTableProps {
   height?: number;
 }
 
-const TH = { borderBottom: '1px solid #e2e8f0', padding: '10px 8px', color: '#64748b', fontWeight: 600 as const, fontSize: 13 };
-const TD = { borderBottom: '1px solid #f1f5f9', padding: '10px 8px', fontSize: 14 };
+const TH = { borderBottom: '1px solid var(--tf-border)', padding: '10px 8px', color: 'var(--tf-muted)', fontWeight: 700 as const, fontSize: "var(--tf-fs-xs)", textTransform: 'uppercase' as const, letterSpacing: '0.06em' };
+const TD = { borderBottom: '1px solid var(--tf-border)', padding: '10px 8px', fontSize: "var(--tf-fs-base)" };
 
 const SHORT_COUNTRY: Record<string, string> = {
   'United States': 'US',
@@ -51,18 +51,31 @@ const TopCompaniesTable: React.FC<TopCompaniesTableProps> = ({ companies, height
       </thead>
       <tbody>
         {companies.map((c) => (
-          <tr key={c.ticker}>
-            <td style={{ ...TD, color: '#94a3b8' }}>{c.rank}</td>
-            <td style={{ ...TD, color: '#0f172a', fontWeight: 600 }}>{c.ticker}</td>
-            <td style={{ ...TD, color: '#334155' }}>{c.name}</td>
-            <td style={{ ...TD, textAlign: 'right', color: '#0f172a', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>{c.marketCap}</td>
-            <td style={{ ...TD, textAlign: 'right', color: '#64748b' }}>{SHORT_COUNTRY[c.country] || c.country}</td>
+          <tr
+            key={c.ticker}
+            onClick={() => { window.location.href = `/stock/${encodeURIComponent(c.ticker)}`; }}
+            style={{ cursor: 'pointer' }}
+            title={`Open ${c.ticker}`}
+          >
+            <td style={{ ...TD, color: 'var(--tf-muted)' }}>{c.rank}</td>
+            <td style={TD}>
+              <a
+                href={`/stock/${encodeURIComponent(c.ticker)}`}
+                onClick={(e) => e.stopPropagation()}
+                style={{ color: 'var(--tf-amber)', fontWeight: 600, textDecoration: 'none' }}
+              >
+                {c.ticker}
+              </a>
+            </td>
+            <td style={{ ...TD, color: 'var(--tf-text)' }}>{c.name}</td>
+            <td style={{ ...TD, textAlign: 'right', color: 'var(--tf-text-strong)', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>{c.marketCap}</td>
+            <td style={{ ...TD, textAlign: 'right', color: 'var(--tf-muted)' }}>{SHORT_COUNTRY[c.country] || c.country}</td>
           </tr>
         ))}
       </tbody>
     </table>
     {companies.length === 0 && (
-      <div style={{ padding: 24, textAlign: 'center', color: '#94a3b8', fontSize: 14 }}>No data available</div>
+      <div style={{ padding: 24, textAlign: 'center', color: 'var(--tf-muted)', fontSize: "var(--tf-fs-base)" }}>No data available</div>
     )}
   </div>
 );

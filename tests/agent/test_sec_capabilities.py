@@ -5,7 +5,7 @@ import pytest
 from TerraFin.agent.runtime import build_default_capability_registry
 from TerraFin.agent.service import TerraFinAgentService
 from TerraFin.agent.tool_contracts import HOSTED_TOOL_CONTRACTS
-from TerraFin.interface.stock import payloads
+from TerraFin.interface.pages.stock import payloads
 
 
 @pytest.fixture(autouse=True)

@@ -27,7 +27,7 @@ This package owns the HTTP boundary in both directions:
 1. **Inbound (receive)** — the monitor POSTs each fired signal to
    ``/signals/api/signal``. ``routes.py`` accepts the request,
    ``webhook.py`` verifies the HMAC signature, dedups by signal_id, and
-   forwards to the user's Telegram via ``interface/channels/``.
+   forwards to the user's Telegram via ``interface/infra/channels/``.
 
 2. **Outbound (control)** — TerraFin tells the monitor which tickers to
    watch. ``http_provider.py`` is the HTTP client (``HttpSignalProvider``)

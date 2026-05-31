@@ -9,14 +9,14 @@ from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 
 from TerraFin.data.contracts.dataframes import TimeSeriesDataFrame
-from TerraFin.interface.chart.chart_view import apply_view
-from TerraFin.interface.chart.formatters import (
+from TerraFin.interface.pages.chart.chart_view import apply_view
+from TerraFin.interface.pages.chart.formatters import (
     build_multi_payload_from_items,
     build_source_payload,
     build_source_payload_from_items,
     format_series_item,
 )
-from TerraFin.interface.chart.indicators import (
+from TerraFin.interface.pages.chart.indicators import (
     compute_bollinger_bands,
     compute_macd,
     compute_mandelbrot_fractal_dimension,
@@ -26,7 +26,7 @@ from TerraFin.interface.chart.indicators import (
     compute_rsi,
     compute_trend_signal,
 )
-from TerraFin.interface.chart.state import (
+from TerraFin.interface.pages.chart.state import (
     add_named_series,
     clear_named_series,
     clear_pinned_names,
@@ -890,11 +890,11 @@ def create_chart_router(build_dir: Path) -> APIRouter:
             return {"suggestions": []}
         from TerraFin.data.providers.economic import indicator_registry
         from TerraFin.data.providers.market import INDEX_MAP, MARKET_INDICATOR_REGISTRY
-        from TerraFin.interface.ticker_search.aliases_kr import (
+        from TerraFin.interface.infra.ticker_search.aliases_kr import (
             lookup_kr_alias,
             prefix_match_kr_aliases,
         )
-        from TerraFin.interface.ticker_search.routes import (
+        from TerraFin.interface.infra.ticker_search.routes import (
             _is_korean,
             _search_naver_kr,
             _search_yahoo,
@@ -939,7 +939,7 @@ def create_chart_router(build_dir: Path) -> APIRouter:
         html = (build_dir / "index.html").read_text()
         return HTMLResponse(
             content=html,
-            headers={"Cache-Control": "no-cache, no-store, must-revalidate"},
+            headers={"Cache-Control": "no-cache"},
         )
 
     return router

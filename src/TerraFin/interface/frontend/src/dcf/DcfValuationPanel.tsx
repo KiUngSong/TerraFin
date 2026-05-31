@@ -16,12 +16,12 @@ const responsiveGridStyle = (minWidth: number): React.CSSProperties => ({
 });
 
 function cellColor(upsidePct: number | null | undefined): string {
-  if (typeof upsidePct !== 'number') return '#f8fafc';
-  if (upsidePct >= 20) return '#dcfce7';
-  if (upsidePct >= 5) return '#ecfccb';
-  if (upsidePct > -5) return '#f8fafc';
-  if (upsidePct > -20) return '#fee2e2';
-  return '#fecaca';
+  if (typeof upsidePct !== 'number') return 'var(--tf-bg-elevated)';
+  if (upsidePct >= 20) return 'rgba(46, 204, 113, 0.28)';
+  if (upsidePct >= 5) return 'rgba(46, 204, 113, 0.14)';
+  if (upsidePct > -5) return 'var(--tf-bg-elevated)';
+  if (upsidePct > -20) return 'rgba(255, 82, 103, 0.14)';
+  return 'rgba(255, 82, 103, 0.28)';
 }
 
 const DcfValuationPanel: React.FC<{
@@ -49,15 +49,15 @@ const DcfValuationPanel: React.FC<{
   }, [payload]);
 
   if (loading) {
-    return <div style={{ fontSize: 13, color: '#475569' }}>Loading valuation...</div>;
+    return <div style={{ fontSize: "var(--tf-fs-base)", color: 'var(--tf-muted)' }}>Loading valuation...</div>;
   }
 
   if (error) {
-    return <div style={{ fontSize: 13, color: '#b91c1c' }}>Failed to load valuation: {error}</div>;
+    return <div style={{ fontSize: "var(--tf-fs-base)", color: 'var(--tf-down)' }}>Failed to load valuation: {error}</div>;
   }
 
   if (!payload) {
-    return <div style={{ fontSize: 13, color: '#64748b' }}>No valuation available right now.</div>;
+    return <div style={{ fontSize: "var(--tf-fs-base)", color: 'var(--tf-muted)' }}>No valuation available right now.</div>;
   }
 
   const qualityMode = payload.dataQuality?.mode || 'live';
@@ -79,12 +79,12 @@ const DcfValuationPanel: React.FC<{
       {showBanner ? (
         <div
           style={{
-            border: '1px solid #fcd34d',
-            background: '#fffbeb',
-            color: '#92400e',
-            borderRadius: 10,
+            border: '1px solid var(--tf-amber)',
+            background: 'var(--tf-bg-elevated)',
+            color: 'var(--tf-amber)',
+            borderRadius: 'var(--tf-radius)',
             padding: '10px 12px',
-            fontSize: 12,
+            fontSize: "var(--tf-fs-base)",
             lineHeight: 1.5,
           }}
         >
@@ -98,50 +98,50 @@ const DcfValuationPanel: React.FC<{
       ) : null}
 
       <div style={responsiveGridStyle(showPresentValueToday ? 160 : 180)}>
-        <SummaryMetric label="Current Price" value={fmtCurrency(payload.currentPrice)} tone="#0f172a" />
-        <SummaryMetric label={headlineLabel} value={fmtCurrency(payload.currentIntrinsicValue)} tone="#0f172a" />
+        <SummaryMetric label="Current Price" value={fmtCurrency(payload.currentPrice)} tone="var(--tf-text)" />
+        <SummaryMetric label={headlineLabel} value={fmtCurrency(payload.currentIntrinsicValue)} tone="var(--tf-text)" />
         {showPresentValueToday ? (
-          <SummaryMetric label="Present Value Today" value={fmtCurrency(presentValueToday)} tone="#334155" />
+          <SummaryMetric label="Present Value Today" value={fmtCurrency(presentValueToday)} tone="var(--tf-muted)" />
         ) : null}
         <SummaryMetric
           label="Upside / Downside"
           value={fmtPct(payload.upsidePct)}
-          tone={typeof payload.upsidePct === 'number' && payload.upsidePct < 0 ? '#b91c1c' : '#047857'}
+          tone={typeof payload.upsidePct === 'number' && payload.upsidePct < 0 ? 'var(--tf-down)' : 'var(--tf-up)'}
         />
       </div>
 
       {methodCases.length > 0 ? (
         <div style={{ display: 'grid', gap: 8 }}>
-          <div style={{ fontSize: 12, fontWeight: 700, color: '#334155' }}>Index Cases</div>
+          <div style={{ fontSize: "var(--tf-fs-xs)", fontWeight: 700, color: 'var(--tf-muted-strong)' }}>Index Cases</div>
           <div style={responsiveGridStyle(180)}>
             {methodCases.map((methodCase) => (
               <div
                 key={methodCase.key}
                 style={{
-                  border: '1px solid #e2e8f0',
-                  borderRadius: 10,
+                  border: '1px solid var(--tf-border)',
+                  borderRadius: 'var(--tf-radius)',
                   padding: '10px 12px',
-                  background: '#ffffff',
+                  background: 'var(--tf-bg-elevated)',
                 }}
               >
                 <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 8 }}>
-                  <div style={{ fontSize: 12, fontWeight: 700, color: '#0f172a' }}>{methodCase.label}</div>
-                  <div style={{ fontSize: 10, fontWeight: 700, color: '#475569' }}>{Math.round(methodCase.weight * 100)}%</div>
+                  <div style={{ fontSize: "var(--tf-fs-xs)", fontWeight: 700, color: 'var(--tf-text)' }}>{methodCase.label}</div>
+                  <div style={{ fontSize: "var(--tf-fs-micro)", fontWeight: 700, color: 'var(--tf-muted)' }}>{Math.round(methodCase.weight * 100)}%</div>
                 </div>
-                <div style={{ marginTop: 6, fontSize: 16, fontWeight: 700, color: '#0f172a' }}>
+                <div style={{ marginTop: 6, fontSize: "var(--tf-fs-base)", fontWeight: 700, color: 'var(--tf-text)' }}>
                   {fmtCurrency(methodCase.currentIntrinsicValue)}
                 </div>
                 <div
                   style={{
                     marginTop: 2,
-                    fontSize: 11,
+                    fontSize: "var(--tf-fs-xs)",
                     fontWeight: 600,
-                    color: typeof methodCase.upsidePct === 'number' && methodCase.upsidePct < 0 ? '#b91c1c' : '#047857',
+                    color: typeof methodCase.upsidePct === 'number' && methodCase.upsidePct < 0 ? 'var(--tf-down)' : 'var(--tf-up)',
                   }}
                 >
                   {fmtPct(methodCase.upsidePct)}
                 </div>
-                <div style={{ marginTop: 8, fontSize: 11, color: '#64748b', lineHeight: 1.5 }}>{methodCase.description}</div>
+                <div style={{ marginTop: 8, fontSize: "var(--tf-fs-xs)", color: 'var(--tf-muted)', lineHeight: 1.5 }}>{methodCase.description}</div>
               </div>
             ))}
           </div>
@@ -155,7 +155,7 @@ const DcfValuationPanel: React.FC<{
               key={scenario.key}
               label={`${scenario.label} Scenario`}
               value={`${fmtCurrency(scenario.intrinsicValue)} / ${fmtPct(scenario.upsidePct)}`}
-              tone={typeof scenario.upsidePct === 'number' && scenario.upsidePct < 0 ? '#b91c1c' : '#0f172a'}
+              tone={typeof scenario.upsidePct === 'number' && scenario.upsidePct < 0 ? 'var(--tf-down)' : 'var(--tf-text)'}
             />
           ))}
         </div>
@@ -164,25 +164,25 @@ const DcfValuationPanel: React.FC<{
       {selectedScenario ? (
         <div style={{ display: 'grid', gap: 10 }}>
           <div style={responsiveGridStyle(160)}>
-            <SummaryMetric label="Scenario Value" value={fmtCurrency(selectedScenario.intrinsicValue)} tone="#0f172a" />
+            <SummaryMetric label="Scenario Value" value={fmtCurrency(selectedScenario.intrinsicValue)} tone="var(--tf-text)" />
             <SummaryMetric
               label="Scenario Upside"
               value={fmtPct(selectedScenario.upsidePct)}
-              tone={typeof selectedScenario.upsidePct === 'number' && selectedScenario.upsidePct < 0 ? '#b91c1c' : '#047857'}
+              tone={typeof selectedScenario.upsidePct === 'number' && selectedScenario.upsidePct < 0 ? 'var(--tf-down)' : 'var(--tf-up)'}
             />
-            <SummaryMetric label="Terminal Growth" value={`${selectedScenario.terminalGrowthPct.toFixed(2)}%`} tone="#0f172a" />
-            <SummaryMetric label="Terminal Discount" value={`${selectedScenario.terminalDiscountRatePct.toFixed(2)}%`} tone="#0f172a" />
+            <SummaryMetric label="Terminal Growth" value={`${selectedScenario.terminalGrowthPct.toFixed(2)}%`} tone="var(--tf-text)" />
+            <SummaryMetric label="Terminal Discount" value={`${selectedScenario.terminalDiscountRatePct.toFixed(2)}%`} tone="var(--tf-text)" />
           </div>
 
-          <div style={{ fontSize: 12, color: '#475569', lineHeight: 1.5 }}>
+          <div style={{ fontSize: "var(--tf-fs-base)", color: 'var(--tf-muted)', lineHeight: 1.5 }}>
             {typeof payload.assumptions.valuationMethodDescription === 'string' ? `${payload.assumptions.valuationMethodDescription} ` : ''}
             {isBlendedIndexView ? 'Blended two-case S&P 500 estimate. ' : ''}
             Base growth {formatAssumptionNumber(payload.assumptions.baseGrowthPct)}. Rate source {payload.rateCurve.source}. Curve fallback{' '}
             {payload.rateCurve.fallbackUsed ? 'on' : 'off'}.
           </div>
 
-          <div style={{ overflowX: 'auto', border: '1px solid #e2e8f0', borderRadius: 10 }}>
-            <table style={{ width: '100%', minWidth: 520, borderCollapse: 'collapse', fontSize: 12, background: '#ffffff' }}>
+          <div style={{ overflowX: 'auto', border: '1px solid var(--tf-border)', borderRadius: 'var(--tf-radius)' }}>
+            <table style={{ width: '100%', minWidth: 520, borderCollapse: 'collapse', fontSize: "var(--tf-fs-base)", background: 'var(--tf-bg-elevated)', fontFamily: 'var(--tf-mono)' }}>
               <thead>
                 <tr>
                   <th style={thStyle}>Year</th>
@@ -209,9 +209,9 @@ const DcfValuationPanel: React.FC<{
       ) : null}
 
       <div style={{ display: 'grid', gap: 8 }}>
-        <div style={{ fontSize: 12, fontWeight: 700, color: '#334155' }}>Sensitivity</div>
+        <div style={{ fontSize: "var(--tf-fs-xs)", fontWeight: 700, color: 'var(--tf-muted-strong)' }}>Sensitivity</div>
         {payload.sensitivity.cells.length === 0 ? (
-          <div style={{ fontSize: 12, color: '#64748b' }}>Sensitivity is unavailable until the valuation is ready.</div>
+          <div style={{ fontSize: "var(--tf-fs-base)", color: 'var(--tf-muted)' }}>Sensitivity is unavailable until the valuation is ready.</div>
         ) : (
           <div style={{ overflowX: 'auto' }}>
             <div
@@ -242,18 +242,18 @@ const DcfValuationPanel: React.FC<{
                       <div
                         key={`${tgShift}:${drShift}`}
                         style={{
-                          borderRadius: 10,
-                          border: '1px solid #e2e8f0',
+                          borderRadius: 'var(--tf-radius)',
+                          border: '1px solid var(--tf-border)',
                           padding: '8px 6px',
                           background: cellColor(cell?.upsidePct),
                           textAlign: 'center',
                         }}
                         aria-label={typeof cell?.upsidePct === 'number' ? `${cell.upsidePct.toFixed(2)}% upside` : 'No data'}
                       >
-                        <div style={{ fontSize: 11, fontWeight: 700, color: '#0f172a' }}>
+                        <div style={{ fontSize: "var(--tf-fs-xs)", fontWeight: 700, color: 'var(--tf-text)', fontFamily: 'var(--tf-mono)' }}>
                           {fmtCurrency(cell?.intrinsicValue)}
                         </div>
-                        <div style={{ marginTop: 2, fontSize: 10, color: '#475569' }}>{fmtPct(cell?.upsidePct)}</div>
+                        <div style={{ marginTop: 2, fontSize: "var(--tf-fs-micro)", color: 'var(--tf-muted)', fontFamily: 'var(--tf-mono)' }}>{fmtPct(cell?.upsidePct)}</div>
                       </div>
                     );
                   })}
@@ -270,14 +270,14 @@ const DcfValuationPanel: React.FC<{
 const SummaryMetric: React.FC<{ label: string; value: string; tone: string }> = ({ label, value, tone }) => (
   <div
     style={{
-      border: '1px solid #e2e8f0',
-      borderRadius: 10,
+      border: '1px solid var(--tf-border)',
+      borderRadius: 'var(--tf-radius)',
       padding: '10px 12px',
-      background: '#ffffff',
+      background: 'var(--tf-bg-elevated)',
     }}
   >
-    <div style={{ fontSize: 11, color: '#64748b' }}>{label}</div>
-    <div style={{ marginTop: 4, fontSize: 18, fontWeight: 700, color: tone, lineHeight: 1.25, overflowWrap: 'anywhere' }}>
+    <div style={{ fontSize: "var(--tf-fs-xs)", color: 'var(--tf-muted)' }}>{label}</div>
+    <div style={{ marginTop: 4, fontSize: "var(--tf-fs-lg)", fontWeight: 700, color: tone, lineHeight: 1.25, overflowWrap: 'anywhere', fontFamily: 'var(--tf-mono)' }}>
       {value}
     </div>
   </div>
@@ -285,28 +285,29 @@ const SummaryMetric: React.FC<{ label: string; value: string; tone: string }> = 
 
 const thStyle: React.CSSProperties = {
   padding: '7px 8px',
-  borderBottom: '1px solid #e2e8f0',
+  borderBottom: '1px solid var(--tf-border)',
   textAlign: 'left',
-  fontSize: 11,
-  color: '#64748b',
-  background: '#f8fafc',
+  fontSize: "var(--tf-fs-xs)",
+  color: 'var(--tf-muted)',
+  background: 'var(--tf-bg-pane)',
 };
 
 const tdStyle: React.CSSProperties = {
   padding: '7px 8px',
-  borderBottom: '1px solid #f1f5f9',
-  color: '#0f172a',
+  borderBottom: '1px solid var(--tf-border)',
+  color: 'var(--tf-text)',
+  fontFamily: 'var(--tf-mono)',
 };
 
 const axisHeaderStyle: React.CSSProperties = {
-  borderRadius: 10,
-  border: '1px solid #e2e8f0',
+  borderRadius: 'var(--tf-radius)',
+  border: '1px solid var(--tf-border)',
   padding: '8px 6px',
-  fontSize: 11,
+  fontSize: "var(--tf-fs-xs)",
   fontWeight: 700,
   textAlign: 'center',
-  color: '#334155',
-  background: '#f8fafc',
+  color: 'var(--tf-muted-strong)',
+  background: 'var(--tf-bg-pane)',
 };
 
 function formatAssumptionNumber(value: unknown): string {

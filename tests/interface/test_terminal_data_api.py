@@ -1,16 +1,16 @@
 from fastapi.testclient import TestClient
 
 import TerraFin.data.cache.manager as cache_manager_module
-import TerraFin.interface.watchlist_service as watchlist_service_module
+import TerraFin.data.watchlist_service as watchlist_service_module
 from TerraFin.data.cache.registry import reset_cache_manager
 from TerraFin.data.providers.private_access import PRIVATE_SERIES, clear_private_series_cache
 from TerraFin.data.providers.private_access.client import PrivateAccessClient
 from TerraFin.interface.server import create_app
-from TerraFin.interface.watchlist_service import reset_watchlist_service
+from TerraFin.data.watchlist_service import reset_watchlist_service
 
 
 def _assert_watchlist_item_shape(item: dict) -> None:
-    assert set(item) == {"symbol", "name", "move", "tags"}
+    assert set(item) == {"symbol", "name", "move", "tags", "last", "volume"}
     assert isinstance(item["symbol"], str)
     assert isinstance(item["name"], str)
     assert isinstance(item["move"], str)
@@ -29,14 +29,14 @@ def _reset_services() -> None:
     reset_watchlist_service()
 
 
-def test_dashboard_data_uses_fallback_when_private_source_unconfigured(monkeypatch, tmp_path) -> None:
+def test_terminal_data_uses_fallback_when_private_source_unconfigured(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr(cache_manager_module, "_FILE_CACHE_DIR", tmp_path)
     monkeypatch.delenv("TERRAFIN_MONGODB_URI", raising=False)
     monkeypatch.delenv("MONGODB_URI", raising=False)
     _reset_services()
     client = TestClient(create_app())
 
-    watchlist_response = client.get("/dashboard/api/watchlist")
+    watchlist_response = client.get("/terminal/api/watchlist")
     assert watchlist_response.status_code == 200
     watchlist_payload = watchlist_response.json()
     assert isinstance(watchlist_payload["items"], list)
@@ -45,7 +45,7 @@ def test_dashboard_data_uses_fallback_when_private_source_unconfigured(monkeypat
     assert len(watchlist_payload["items"]) >= 7
     _assert_watchlist_item_shape(watchlist_payload["items"][0])
 
-    breadth_response = client.get("/dashboard/api/market-breadth")
+    breadth_response = client.get("/terminal/api/market-breadth")
     assert breadth_response.status_code == 200
     breadth_payload = breadth_response.json()
     assert isinstance(breadth_payload["metrics"], list)
@@ -53,7 +53,7 @@ def test_dashboard_data_uses_fallback_when_private_source_unconfigured(monkeypat
     _assert_breadth_metric_shape(breadth_payload["metrics"][0])
 
 
-def test_dashboard_market_breadth_uses_private_source_when_available(monkeypatch, tmp_path) -> None:
+def test_terminal_market_breadth_uses_private_source_when_available(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr(cache_manager_module, "_FILE_CACHE_DIR", tmp_path)
 
     def _mock_panel(self, resource):
@@ -65,13 +65,13 @@ def test_dashboard_market_breadth_uses_private_source_when_available(monkeypatch
     _reset_services()
 
     client = TestClient(create_app())
-    breadth_payload = client.get("/dashboard/api/market-breadth").json()
+    breadth_payload = client.get("/terminal/api/market-breadth").json()
 
     _assert_breadth_metric_shape(breadth_payload["metrics"][0])
     assert breadth_payload["metrics"][0]["value"] == "500"
 
 
-def test_dashboard_fear_greed_falls_back_to_cached_history_when_current_misses(monkeypatch, tmp_path) -> None:
+def test_terminal_fear_greed_falls_back_to_cached_history_when_current_misses(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr(cache_manager_module, "_FILE_CACHE_DIR", tmp_path)
     _reset_services()
     clear_private_series_cache(PRIVATE_SERIES["fear_greed"])
@@ -105,7 +105,7 @@ def test_dashboard_fear_greed_falls_back_to_cached_history_when_current_misses(m
     monkeypatch.setattr(PrivateAccessClient, "fetch_series_history", _mock_history)
     monkeypatch.setattr(PrivateAccessClient, "fetch_series_current", _mock_current)
     client = TestClient(create_app())
-    payload = client.get("/dashboard/api/fear-greed").json()
+    payload = client.get("/terminal/api/fear-greed").json()
 
     assert payload["score"] == 70
     assert payload["rating"] == "Greed"
@@ -114,7 +114,7 @@ def test_dashboard_fear_greed_falls_back_to_cached_history_when_current_misses(m
     assert payload["previous_1_month"] == 25
 
 
-def test_dashboard_cape_falls_back_to_series_history_when_current_misses(monkeypatch, tmp_path) -> None:
+def test_terminal_cape_falls_back_to_series_history_when_current_misses(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr(cache_manager_module, "_FILE_CACHE_DIR", tmp_path)
     _reset_services()
     clear_private_series_cache(PRIVATE_SERIES["cape"])
@@ -138,13 +138,13 @@ def test_dashboard_cape_falls_back_to_series_history_when_current_misses(monkeyp
     monkeypatch.setattr(PrivateAccessClient, "fetch_series_history", _mock_history)
     monkeypatch.setattr(PrivateAccessClient, "fetch_series_current", _mock_current)
     client = TestClient(create_app())
-    payload = client.get("/dashboard/api/cape").json()
+    payload = client.get("/terminal/api/cape").json()
 
     assert payload["date"] == "2026-01"
     assert payload["cape"] == 31.1
 
 
-def test_dashboard_watchlist_crud(monkeypatch, tmp_path) -> None:
+def test_terminal_watchlist_crud(monkeypatch, tmp_path) -> None:
     storage: dict[str, dict] = {}
 
     class _FakeCollection:
@@ -179,7 +179,7 @@ def test_dashboard_watchlist_crud(monkeypatch, tmp_path) -> None:
     _reset_services()
     client = TestClient(create_app())
 
-    initial = client.get("/dashboard/api/watchlist")
+    initial = client.get("/terminal/api/watchlist")
     assert initial.status_code == 200
     assert initial.json()["items"] == []
     assert initial.json()["backendConfigured"] is True
@@ -193,22 +193,22 @@ def test_dashboard_watchlist_crud(monkeypatch, tmp_path) -> None:
         "item_order": {},
     }
 
-    created = client.post("/dashboard/api/watchlist", json={"symbol": "meta"})
+    created = client.post("/terminal/api/watchlist", json={"symbol": "meta"})
     assert created.status_code == 200
     created_payload = created.json()
     assert created_payload["backendConfigured"] is True
     assert created_payload["mode"] == "mongo"
-    assert created_payload["items"] == [{"symbol": "META", "name": "META Holdings", "move": "+2.00%", "tags": []}]
+    assert created_payload["items"] == [{"symbol": "META", "name": "META Holdings", "move": "+2.00%", "tags": [], "last": 102.0, "volume": None}]
 
-    duplicate = client.post("/dashboard/api/watchlist", json={"symbol": "META"})
+    duplicate = client.post("/terminal/api/watchlist", json={"symbol": "META"})
     assert duplicate.status_code == 409
 
-    removed = client.delete("/dashboard/api/watchlist/META")
+    removed = client.delete("/terminal/api/watchlist/META")
     assert removed.status_code == 200
     assert removed.json()["items"] == []
 
 
-def test_dashboard_watchlist_falls_back_when_mongo_backend_is_unreachable(monkeypatch, tmp_path) -> None:
+def test_terminal_watchlist_falls_back_when_mongo_backend_is_unreachable(monkeypatch, tmp_path) -> None:
     class _UnavailableCollection:
         def find_one(self, query):
             _ = query
@@ -238,7 +238,7 @@ def test_dashboard_watchlist_falls_back_when_mongo_backend_is_unreachable(monkey
     _reset_services()
     client = TestClient(create_app())
 
-    response = client.get("/dashboard/api/watchlist")
+    response = client.get("/terminal/api/watchlist")
     assert response.status_code == 200
     payload = response.json()
     assert payload["backendConfigured"] is False
@@ -246,11 +246,11 @@ def test_dashboard_watchlist_falls_back_when_mongo_backend_is_unreachable(monkey
     assert len(payload["items"]) >= 1
 
 
-def test_dashboard_cache_status_endpoint(tmp_path, monkeypatch) -> None:
+def test_terminal_cache_status_endpoint(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(cache_manager_module, "_FILE_CACHE_DIR", tmp_path)
     _reset_services()
     client = TestClient(create_app())
-    response = client.get("/dashboard/api/cache-status")
+    response = client.get("/terminal/api/cache-status")
     assert response.status_code == 200
     body = response.json()
     assert "sources" in body
@@ -278,11 +278,11 @@ def test_watchlist_page_route_serves_frontend(tmp_path, monkeypatch) -> None:
     assert response.headers["content-type"].startswith("text/html")
 
 
-def test_dashboard_cache_refresh_endpoint(tmp_path, monkeypatch) -> None:
+def test_terminal_cache_refresh_endpoint(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(cache_manager_module, "_FILE_CACHE_DIR", tmp_path)
     _reset_services()
     client = TestClient(create_app())
-    response = client.post("/dashboard/api/cache-refresh?force=true")
+    response = client.post("/terminal/api/cache-refresh?force=true")
     assert response.status_code == 200
     body = response.json()
     assert body["ok"] is True

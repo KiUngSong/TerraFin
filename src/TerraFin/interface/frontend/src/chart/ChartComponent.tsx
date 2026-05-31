@@ -718,7 +718,7 @@ const ChartComponentInner = React.forwardRef<ChartComponentHandle, ChartComponen
 
   if (error) {
     return (
-      <div style={{ padding: 20, color: '#c62828', fontFamily: FONT_FAMILY }}>
+      <div style={{ padding: 20, color: 'var(--tf-down)', fontFamily: FONT_FAMILY }}>
         Chart: failed to load data ({error}). Is the server running?
       </div>
     );
@@ -740,7 +740,7 @@ const ChartComponentInner = React.forwardRef<ChartComponentHandle, ChartComponen
         height: '100%',
         minWidth: 0,
         overflow: 'hidden',
-        background: '#fff',
+        background: 'var(--tf-bg)',
         fontFamily: FONT_FAMILY,
       }}
     >
@@ -784,9 +784,9 @@ const ChartComponentInner = React.forwardRef<ChartComponentHandle, ChartComponen
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              background: '#fafafa',
-              color: '#bbb',
-              fontSize: 13,
+              background: 'var(--tf-bg-pane)',
+              color: 'var(--tf-muted)',
+              fontSize: "var(--tf-fs-base)",
               zIndex: 1,
             }}
           >

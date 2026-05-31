@@ -38,7 +38,7 @@ def test_resolve_universe_uses_watchlist_when_present():
             return fake
 
     with patch(
-        "TerraFin.interface.watchlist_service.get_watchlist_service",
+        "TerraFin.data.watchlist_service.get_watchlist_service",
         return_value=_Service(),
     ):
         items, is_sample = _resolve_universe()
@@ -53,7 +53,7 @@ def test_resolve_universe_falls_back_to_m7():
             return []
 
     with patch(
-        "TerraFin.interface.watchlist_service.get_watchlist_service",
+        "TerraFin.data.watchlist_service.get_watchlist_service",
         return_value=_Service(),
     ):
         items, is_sample = _resolve_universe()
@@ -191,38 +191,13 @@ def _ticker(
     )
 
 
-def test_action_anomaly_with_headline():
-    t = _ticker(
-        wow_pct=28.4,
-        anomaly=True,
-        catalysts=[{"date": "2026-04-23", "move_pct": 14.0, "vol_ratio": 3.0, "headlines": ["beat est"]}],
-    )
-    notes = _action_signal(t)
-    assert any("catalyst named" in n for n in notes)
-
-
-def test_action_anomaly_without_headline():
-    t = _ticker(
-        wow_pct=28.4,
-        anomaly=True,
-        catalysts=[{"date": "2026-04-23", "move_pct": 14.0, "vol_ratio": 3.0, "headlines": []}],
-    )
-    notes = _action_signal(t)
-    assert any("dig before adding" in n for n in notes)
-
-
-def test_action_breakdown_thin_volume_no_headline_is_drift():
-    t = _ticker(
-        wow_pct=-9.0,
-        catalysts=[{"date": "2026-04-23", "move_pct": -7.0, "vol_ratio": 0.9, "headlines": []}],
-    )
-    notes = _action_signal(t)
-    assert any("drift" in n for n in notes)
-
-
-def test_action_below_threshold_no_note():
-    t = _ticker(wow_pct=2.5)
-    assert _action_signal(t) == []
+def test_action_signal_is_noop_stub():
+    # The canned "Action:" heuristic notes were removed — they were generic
+    # boilerplate; per-week analysis now comes from the agent (TA) enrichment
+    # section. _action_signal is a kept stub that always returns no notes.
+    assert _action_signal(_ticker(wow_pct=28.4, anomaly=True)) == []
+    assert _action_signal(_ticker(wow_pct=-9.0)) == []
+    assert _action_signal(_ticker(wow_pct=2.5)) == []
 
 
 # ---------------------------------------------------------------------------

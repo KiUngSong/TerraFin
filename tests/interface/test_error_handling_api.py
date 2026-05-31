@@ -19,7 +19,7 @@ def test_validation_error_payload_is_standardized() -> None:
 
 
 def test_uncaught_exception_payload_is_standardized(monkeypatch) -> None:
-    import TerraFin.interface.health.routes as _health_routes
+    import TerraFin.interface.infra.health.routes as _health_routes
 
     async def _raise(force: bool = False) -> dict:
         raise Exception("unexpected failure")

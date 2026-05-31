@@ -3,7 +3,7 @@
 import pytest
 
 from TerraFin.configuration import WatchlistConfig
-from TerraFin.interface.watchlist_service import (
+from TerraFin.data.watchlist_service import (
     WatchlistConfigurationError,
     WatchlistNotFoundError,
     WatchlistService,
@@ -43,7 +43,7 @@ class _FakeCollection:
 
 
 def _make_service(initial_items: list[dict] | None = None) -> tuple[WatchlistService, _FakeMongoDB]:
-    import TerraFin.interface.watchlist_service as mod
+    import TerraFin.data.watchlist_service as mod
 
     fake_db = _FakeMongoDB()
     if initial_items is not None:
@@ -62,7 +62,7 @@ def _make_service(initial_items: list[dict] | None = None) -> tuple[WatchlistSer
     svc = WatchlistService(config)
 
     # Patch MongoClient so the service uses our fake
-    import TerraFin.interface.watchlist_service as watchlist_mod
+    import TerraFin.data.watchlist_service as watchlist_mod
 
     original_mongo = watchlist_mod.MongoClient
 
@@ -100,7 +100,7 @@ def test_normalize_tags_empty_list():
 
 
 def test_watchlist_item_record_to_dict_includes_tags():
-    from TerraFin.interface.watchlist_service import WatchlistItemRecord
+    from TerraFin.data.watchlist_service import WatchlistItemRecord
 
     record = WatchlistItemRecord(symbol="AAPL", name="Apple", move="+1.23%", tags=["tech", "mega-cap"])
     d = record.to_dict()
@@ -108,7 +108,7 @@ def test_watchlist_item_record_to_dict_includes_tags():
 
 
 def test_watchlist_item_record_default_empty_tags():
-    from TerraFin.interface.watchlist_service import WatchlistItemRecord
+    from TerraFin.data.watchlist_service import WatchlistItemRecord
 
     record = WatchlistItemRecord(symbol="AAPL", name="Apple", move="+1.23%")
     assert record.tags == []

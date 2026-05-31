@@ -71,12 +71,12 @@ const SearchInput: React.FC<SearchInputProps> = ({
         inputStyle={{
           width: '100%',
           height: 28,
-          border: `1px solid ${error ? '#ef5350' : '#e0e0e0'}`,
-          borderRadius: 6,
+          border: `1px solid ${error ? 'var(--tf-down)' : 'var(--tf-border)'}`,
+          borderRadius: 'var(--tf-radius)',
           padding: '0 12px',
-          fontSize: 12,
-          color: '#333',
-          background: disabled ? '#f5f5f5' : '#fff',
+          fontSize: "var(--tf-fs-xs)",
+          color: 'var(--tf-text)',
+          background: disabled ? 'var(--tf-bg-pane)' : 'var(--tf-bg-elevated)',
           outline: 'none',
           boxSizing: 'border-box',
         }}

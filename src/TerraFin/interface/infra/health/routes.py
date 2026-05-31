@@ -31,7 +31,7 @@ from typing import Any
 from fastapi import APIRouter, Response
 from fastapi.responses import HTMLResponse, JSONResponse
 
-from TerraFin.interface.channels.env import signals_env
+from TerraFin.interface.infra.channels.env import signals_env
 
 
 log = logging.getLogger(__name__)

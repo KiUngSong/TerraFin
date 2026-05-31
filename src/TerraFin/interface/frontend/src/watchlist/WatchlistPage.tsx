@@ -16,8 +16,7 @@ import {
   arrayMove,
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import DashboardHeader from '../dashboard/components/DashboardHeader';
-import InsightCard from '../dashboard/components/InsightCard';
+import InsightCard from '../terminal/components/InsightCard';
 import { BREAKPOINTS } from '../shared/responsive';
 import TickerSearchInput from '../shared/TickerSearchInput';
 import { WatchlistItem, useWatchlist } from './useWatchlist';
@@ -41,8 +40,8 @@ function nextDefaultGroupName(existingNames: string[]): string {
 }
 
 function moveColor(move: string): string {
-  if (!move || move === '--' || move === '-') return '#94a3b8';
-  return move.startsWith('-') ? '#b91c1c' : '#047857';
+  if (!move || move === '--' || move === '-') return 'var(--tf-muted)';
+  return move.startsWith('-') ? 'var(--tf-down)' : 'var(--tf-up)';
 }
 
 interface GroupDropdownProps {
@@ -78,7 +77,7 @@ const GroupDropdown: React.FC<GroupDropdownProps> = ({ value, options, onChange,
         <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
           {value || 'Select group'}
         </span>
-        <span style={{ marginLeft: 8, color: '#64748b', fontSize: 10 }}>▼</span>
+        <span style={{ marginLeft: 8, color: 'var(--tf-muted)', fontSize: "var(--tf-fs-micro)" }}>▼</span>
       </button>
       {open && (
         <ul style={groupDropdownListStyle}>
@@ -168,10 +167,10 @@ const SortableGroupTab: React.FC<SortableGroupTabProps> = ({ id, group, isActive
         }}
       >
         {isReorderMode && !group.isSynthetic && (
-          <span style={{ marginRight: 4, color: '#94a3b8', fontSize: 11 }}>⠿</span>
+          <span style={{ marginRight: 4, color: 'var(--tf-muted)', fontSize: "var(--tf-fs-xs)" }}>⠿</span>
         )}
         {group.name}
-        <span style={{ marginLeft: 5, fontSize: 11, opacity: 0.65 }}>
+        <span style={{ marginLeft: 5, fontSize: "var(--tf-fs-xs)", opacity: 0.65 }}>
           {group.items.length}
         </span>
       </button>
@@ -215,10 +214,13 @@ const SortableTickerRow: React.FC<SortableTickerRowProps> = ({
     (g) => !item.tags.includes(g) && !isReservedTag(g),
   );
   const isMonitored = item.tags.some((t) => t.toLowerCase() === MONITOR_TAG);
+  const [hover, setHover] = React.useState(false);
 
   return (
     <div
       ref={setNodeRef}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
       style={{
         ...tickerRowStyle(isNarrowLayout, canDrag),
         transform: CSS.Transform.toString(transform),
@@ -228,21 +230,23 @@ const SortableTickerRow: React.FC<SortableTickerRowProps> = ({
     >
       {canDrag && (
         <span
-          style={{ color: '#cbd5e1', fontSize: 16, cursor: 'grab', flexShrink: 0, userSelect: 'none', paddingRight: 4, touchAction: 'none' }}
+          style={{ color: 'var(--tf-muted)', fontSize: "var(--tf-fs-xs)", cursor: 'grab', flexShrink: 0, userSelect: 'none', paddingRight: 4, touchAction: 'none' }}
           {...attributes}
           {...listeners}
         >⠿</span>
       )}
       <div style={{ minWidth: 0, flex: 1 }}>
-        <a href={`/stock/${item.symbol}`} style={symbolLinkStyle}>{item.symbol}</a>
-        {item.name && item.name !== item.symbol ? (
-          <div
-            style={{ fontSize: 12, color: '#64748b', marginTop: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}
-            title={item.name}
-          >
-            {item.name}
-          </div>
-        ) : null}
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, minWidth: 0 }}>
+          <a href={`/stock/${item.symbol}`} style={symbolLinkStyle}>{item.symbol}</a>
+          {item.name && item.name !== item.symbol ? (
+            <span
+              style={{ fontSize: "var(--tf-fs-xs)", color: 'var(--tf-muted)', minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}
+              title={item.name}
+            >
+              {item.name}
+            </span>
+          ) : null}
+        </div>
         {(otherGroupTags.length > 0 || (backendConfigured && availableGroups.length > 0)) && (
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 3, marginTop: 5, alignItems: 'center' }}>
             {otherGroupTags.map((tag) => (
@@ -254,7 +258,7 @@ const SortableTickerRow: React.FC<SortableTickerRowProps> = ({
                     title={`Remove from ${tag}`}
                     onClick={() => { onSetTags(item.symbol, [tag], 'remove'); }}
                     disabled={busy}
-                    style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, fontSize: 9, color: '#94a3b8', lineHeight: 1 }}
+                    style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, fontSize: "var(--tf-fs-micro)", color: 'var(--tf-muted)', lineHeight: 1 }}
                   >×</button>
                 )}
               </span>
@@ -269,7 +273,7 @@ const SortableTickerRow: React.FC<SortableTickerRowProps> = ({
                     onAssign(null);
                   }}
                   onBlur={() => onAssign(null)}
-                  style={{ fontSize: 11, borderRadius: 6, border: '1px solid #cbd5e1', padding: '2px 4px', color: '#475569' }}
+                  style={{ fontSize: "var(--tf-fs-xs)", borderRadius: 'var(--tf-radius)', border: '1px solid var(--tf-border)', padding: '2px 4px', color: 'var(--tf-text)', background: 'var(--tf-bg-elevated)', fontFamily: 'var(--tf-sans)' }}
                 >
                   <option value="" disabled>Add to group…</option>
                   {availableGroups.map((g) => (
@@ -291,7 +295,7 @@ const SortableTickerRow: React.FC<SortableTickerRowProps> = ({
         display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0,
         justifyContent: isNarrowLayout ? 'flex-start' : 'flex-end', flexWrap: 'wrap',
       }}>
-        <span style={{ fontSize: 13, fontWeight: 700, color: moveColor(item.move) }}>
+        <span style={{ fontSize: "var(--tf-fs-base)", fontWeight: 700, color: moveColor(item.move), fontFamily: 'var(--tf-mono)', fontVariantNumeric: 'tabular-nums' }}>
           {item.move}
         </span>
         {backendConfigured && monitorEnabled ? (
@@ -304,7 +308,6 @@ const SortableTickerRow: React.FC<SortableTickerRowProps> = ({
             style={monitorToggleStyle(isMonitored, busy)}
           >
             <span aria-hidden="true">{isMonitored ? '🔔' : '🔕'}</span>
-            <span>{isMonitored ? 'Monitoring' : 'Monitor'}</span>
           </button>
         ) : null}
         {backendConfigured ? (
@@ -314,7 +317,16 @@ const SortableTickerRow: React.FC<SortableTickerRowProps> = ({
               onRemove(item.symbol, activeDisplayGroup && !activeDisplayGroup.isSynthetic ? activeDisplayGroup.name : undefined);
             }}
             disabled={busy}
-            style={secondaryButtonStyle(busy)}
+            // Hover-reveal on desktop to keep rows dense; always visible on narrow (no hover).
+            // When hidden it must also be unfocusable + unclickable (opacity:0 alone left an
+            // invisible button in the layout that keyboard/blind clicks could still hit).
+            tabIndex={isNarrowLayout || hover ? 0 : -1}
+            style={{
+              ...secondaryButtonStyle(busy),
+              opacity: isNarrowLayout || hover ? 1 : 0,
+              pointerEvents: isNarrowLayout || hover ? 'auto' : 'none',
+              transition: 'opacity 120ms linear',
+            }}
           >
             Remove
           </button>
@@ -375,7 +387,7 @@ const GroupManagePanel: React.FC<GroupManagePanelProps> = ({
   return (
     <div style={panelStyle}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
-        <span style={{ fontSize: 13, fontWeight: 700, color: '#0f172a' }}>Manage Groups</span>
+        <span style={{ fontSize: "var(--tf-fs-md)", fontWeight: 700, color: 'var(--tf-text-strong)' }}>Manage Groups</span>
         <button type="button" onClick={onClose} style={panelCloseBtnStyle}>✕</button>
       </div>
 
@@ -403,7 +415,7 @@ const GroupManagePanel: React.FC<GroupManagePanelProps> = ({
                   <button
                     type="button"
                     onClick={() => { void confirmRename(); }}
-                    style={{ ...panelActionBtnStyle, color: '#0f172a', borderColor: '#0f172a', flexShrink: 0 }}
+                    style={{ ...panelActionBtnStyle, color: 'var(--tf-amber)', borderColor: 'var(--tf-amber)', flexShrink: 0 }}
                   >Save</button>
                   <button
                     type="button"
@@ -413,13 +425,13 @@ const GroupManagePanel: React.FC<GroupManagePanelProps> = ({
                 </>
               ) : (
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <span style={{ fontSize: 13, fontWeight: 600, color: '#0f172a' }}>{group.name}</span>
+                  <span style={{ fontSize: "var(--tf-fs-base)", fontWeight: 600, color: 'var(--tf-text)' }}>{group.name}</span>
                   {group.items.length === 0 && (
-                    <span style={{ fontSize: 10, color: '#94a3b8', marginLeft: 6 }}>empty</span>
+                    <span style={{ fontSize: "var(--tf-fs-micro)", color: 'var(--tf-muted)', marginLeft: 6 }}>empty</span>
                   )}
                 </div>
               )}
-              <span style={{ fontSize: 11, color: '#94a3b8', marginRight: 8, flexShrink: 0 }}>
+              <span style={{ fontSize: "var(--tf-fs-xs)", color: 'var(--tf-muted)', marginRight: 8, flexShrink: 0 }}>
                 {group.items.length} ticker{group.items.length !== 1 ? 's' : ''}
               </span>
               {!isRenaming && (
@@ -437,7 +449,7 @@ const GroupManagePanel: React.FC<GroupManagePanelProps> = ({
                         type="button"
                         onClick={() => { void onDelete(group); setConfirmDeleteFor(null); }}
                         disabled={busy}
-                        style={{ ...panelActionBtnStyle, color: '#b91c1c', borderColor: '#fca5a5' }}
+                        style={{ ...panelActionBtnStyle, color: 'var(--tf-down)', borderColor: 'var(--tf-down)' }}
                       >Confirm</button>
                       <button
                         type="button"
@@ -462,7 +474,7 @@ const GroupManagePanel: React.FC<GroupManagePanelProps> = ({
       </div>
 
       {/* Add new group */}
-      <div style={{ display: 'flex', gap: 6, borderTop: '1px solid #f1f5f9', paddingTop: 12 }}>
+      <div style={{ display: 'flex', gap: 6, borderTop: '1px solid var(--tf-border)', paddingTop: 12 }}>
         <input
           value={newGroupInput}
           onChange={(e) => setNewGroupInput(e.target.value)}
@@ -484,7 +496,6 @@ const GroupManagePanel: React.FC<GroupManagePanelProps> = ({
 // ─── Main page ───────────────────────────────────────────────────────────────
 
 const WatchlistPage: React.FC = () => {
-  const [searchValue, setSearchValue] = useState('');
   const [watchlistInput, setWatchlistInput] = useState('');
   const [isNarrowLayout, setIsNarrowLayout] = useState(false);
   const [activeGroup, setActiveGroup] = useState<string | null>(null);
@@ -679,31 +690,31 @@ const WatchlistPage: React.FC = () => {
 
   return (
     <div style={pageStyle}>
-      <DashboardHeader
-        searchValue={searchValue}
-        onSearchChange={setSearchValue}
-        sectionLabel="Watchlist"
-        title="TerraFin"
-        placeholder="Search ticker or company"
-      />
-
       <main style={{
-        display: 'grid',
+        display: 'flex',
+        flexDirection: 'column',
         gap: 16,
         padding: 16,
-        gridTemplateColumns: isNarrowLayout ? '1fr' : 'minmax(300px, 380px) minmax(0, 1fr)',
-        alignItems: 'start',
+        width: '100%',
+        maxWidth: 1100,
+        margin: '0 auto',
+        boxSizing: 'border-box',
+        // Single full-width column: a slim management card on top, then the
+        // groups+tickers card below. The old 2-col split put a 70%-empty add
+        // form next to the list, reading as two unrelated widgets (DA).
+        alignItems: 'stretch',
       }}>
 
-        {/* ── Left: management card ── */}
+        {/* ── Left: management card — row 1, hugs its content ── */}
+        <div>
         <InsightCard title="Watchlist" subtitle={subtitle} minHeight={0} allowOverflow>
           <div style={{ display: 'grid', gap: 14 }}>
             {!backendConfigured ? (
-              <div style={{ border: '1px solid #cbd5e1', borderRadius: 14, padding: 14, background: '#fff7ed', color: '#9a3412' }}>
-                <div style={{ fontSize: 12, fontWeight: 800, textTransform: 'uppercase', letterSpacing: 0.5 }}>
+              <div style={{ border: '1px solid var(--tf-border)', borderRadius: 'var(--tf-radius)', padding: 14, background: 'var(--tf-bg-elevated)', color: 'var(--tf-amber)' }}>
+                <div style={{ fontSize: "var(--tf-fs-xs)", fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5 }}>
                   Optional Local Backend
                 </div>
-                <div style={{ marginTop: 6, fontSize: 13, lineHeight: 1.6 }}>
+                <div style={{ marginTop: 6, fontSize: "var(--tf-fs-base)", lineHeight: 1.6 }}>
                   Connect MongoDB with <code>TERRAFIN_MONGODB_URI</code> or <code>MONGODB_URI</code> to manage a
                   writable local watchlist. Until then, TerraFin shows a sample watchlist in read-only mode.
                 </div>
@@ -734,17 +745,23 @@ const WatchlistPage: React.FC = () => {
               )}
             </form>
             {error ? (
-              <div style={{ fontSize: 12, color: '#b91c1c' }}>{error}</div>
+              <div style={{ fontSize: "var(--tf-fs-base)", color: 'var(--tf-down)' }}>{error}</div>
             ) : null}
           </div>
         </InsightCard>
+        </div>
 
-        {/* ── Right: group tabs + ticker list ── */}
-        <InsightCard title="" subtitle="" minHeight={0}>
+        {/* ── Groups + ticker list — stacks under the chart (flex column parent) ── */}
+        <div style={{
+          minWidth: 0,
+          display: 'flex',
+          flexDirection: 'column',
+        }}>
+        <InsightCard title="Groups" subtitle="Switch groups, reorder, or manage." minHeight={0} fillContent>
           {loading ? (
-            <div style={{ fontSize: 13, color: '#475569', padding: '8px 0' }}>Loading watchlist...</div>
+            <div style={{ fontSize: "var(--tf-fs-base)", color: 'var(--tf-muted)', padding: '8px 0' }}>Loading watchlist...</div>
           ) : (
-            <div>
+            <div style={{ display: 'flex', flexDirection: 'column', minHeight: 0, flex: 1 }}>
               {/* Tab bar */}
               <div style={{
                 ...tabBarWrapperStyle,
@@ -807,10 +824,10 @@ const WatchlistPage: React.FC = () => {
               {/* Ticker list */}
               <DndContext sensors={itemSensors} collisionDetection={closestCenter} onDragEnd={handleItemDragEnd}>
                 <SortableContext items={visibleItems.map((i) => i.symbol)} strategy={verticalListSortingStrategy}>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 12 }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 12, minHeight: 0, flex: 1, overflowY: 'auto' }}>
                     {visibleItems.length === 0 ? (
-                      <div style={{ fontSize: 13, color: '#94a3b8', padding: '12px 0' }}>
-                        No tickers in this group yet. Add one using the form on the left.
+                      <div style={{ fontSize: "var(--tf-fs-base)", color: 'var(--tf-muted)', padding: '12px 0' }}>
+                        No tickers in this group yet. Add one using the Watchlist form.
                       </div>
                     ) : (
                       visibleItems.map((item, itemIdx) => {
@@ -846,6 +863,7 @@ const WatchlistPage: React.FC = () => {
             </div>
           )}
         </InsightCard>
+        </div>
       </main>
     </div>
   );
@@ -858,27 +876,31 @@ const pageStyle: React.CSSProperties = {
   flexDirection: 'column',
   width: '100%',
   height: '100%',
-  overflow: 'auto',
-  background: 'linear-gradient(180deg, #f8fafc 0%, #f1f5f9 100%)',
-  fontFamily: 'Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif',
-  color: '#0f172a',
+  // Vertical scroll only — overflow:auto on both axes let wide content scroll
+  // the page sideways (the "shifted right" bug).
+  overflowY: 'auto',
+  overflowX: 'hidden',
+  background: 'var(--tf-bg)',
+  fontFamily: 'var(--tf-sans)',
+  color: 'var(--tf-text)',
 };
 
 const inputStyle: React.CSSProperties = {
-  border: '1px solid #cbd5e1',
-  borderRadius: 12,
+  border: '1px solid var(--tf-border)',
+  borderRadius: 'var(--tf-radius)',
   padding: '11px 14px',
-  fontSize: 14,
-  color: '#0f172a',
-  background: '#ffffff',
+  fontSize: "var(--tf-fs-base)",
+  color: 'var(--tf-text)',
+  background: 'var(--tf-bg-elevated)',
   width: '100%',
   boxSizing: 'border-box',
+  fontFamily: 'var(--tf-sans)',
 };
 
 const tabBarWrapperStyle: React.CSSProperties = {
   display: 'flex',
   alignItems: 'center',
-  borderBottom: '1px solid #e2e8f0',
+  borderBottom: '1px solid var(--tf-border)',
   gap: 0,
 };
 
@@ -896,37 +918,39 @@ const tabStyle = (active: boolean): React.CSSProperties => ({
   flexShrink: 0,
   background: 'none',
   border: 'none',
-  borderBottom: active ? '2.5px solid #0f172a' : '2.5px solid transparent',
+  borderBottom: active ? '2.5px solid var(--tf-amber)' : '2.5px solid transparent',
   padding: '8px 14px',
-  fontSize: 13,
+  fontSize: "var(--tf-fs-base)",
   fontWeight: active ? 700 : 500,
-  color: active ? '#0f172a' : '#64748b',
+  color: active ? 'var(--tf-amber)' : 'var(--tf-muted)',
   cursor: 'pointer',
   whiteSpace: 'nowrap',
   transition: 'color 0.15s, border-color 0.15s',
+  fontFamily: 'var(--tf-sans)',
 });
 
 const manageTabBtnStyle = (active: boolean): React.CSSProperties => ({
   flexShrink: 0,
-  background: active ? '#f1f5f9' : 'none',
-  border: active ? '1px solid #e2e8f0' : '1px solid transparent',
-  borderRadius: 8,
+  background: active ? 'var(--tf-bg-elevated)' : 'none',
+  border: active ? '1px solid var(--tf-border)' : '1px solid transparent',
+  borderRadius: 'var(--tf-radius)',
   padding: '5px 10px',
-  fontSize: 11,
+  fontSize: "var(--tf-fs-xs)",
   fontWeight: 600,
-  color: active ? '#0f172a' : '#94a3b8',
+  color: active ? 'var(--tf-text)' : 'var(--tf-muted)',
   cursor: 'pointer',
   whiteSpace: 'nowrap',
   marginLeft: 8,
   marginBottom: 2,
   transition: 'background 0.1s, color 0.1s',
+  fontFamily: 'var(--tf-sans)',
 });
 
 // Panel styles
 const panelStyle: React.CSSProperties = {
-  background: '#f8fafc',
-  border: '1px solid #e2e8f0',
-  borderRadius: 12,
+  background: 'var(--tf-bg-elevated)',
+  border: '1px solid var(--tf-border)',
+  borderRadius: 'var(--tf-radius)',
   padding: 14,
   marginTop: 10,
 };
@@ -935,8 +959,8 @@ const panelCloseBtnStyle: React.CSSProperties = {
   background: 'none',
   border: 'none',
   cursor: 'pointer',
-  fontSize: 14,
-  color: '#94a3b8',
+  fontSize: "var(--tf-fs-xs)",
+  color: 'var(--tf-muted)',
   padding: '2px 4px',
   lineHeight: 1,
 };
@@ -946,31 +970,33 @@ const groupRowStyle: React.CSSProperties = {
   alignItems: 'center',
   gap: 8,
   padding: '8px 10px',
-  background: '#f8fafc',
-  borderRadius: 10,
-  border: '1px solid #f1f5f9',
+  background: 'var(--tf-bg-elevated)',
+  borderRadius: 'var(--tf-radius)',
+  border: '1px solid var(--tf-border)',
 };
 
 const panelInputStyle: React.CSSProperties = {
-  border: '1px solid #cbd5e1',
-  borderRadius: 8,
+  border: '1px solid var(--tf-border)',
+  borderRadius: 'var(--tf-radius)',
   padding: '6px 10px',
-  fontSize: 13,
-  color: '#0f172a',
-  background: '#ffffff',
+  fontSize: "var(--tf-fs-base)",
+  color: 'var(--tf-text)',
+  background: 'var(--tf-bg-elevated)',
   outline: 'none',
+  fontFamily: 'var(--tf-sans)',
 };
 
 const panelActionBtnStyle: React.CSSProperties = {
-  border: '1px solid #e2e8f0',
-  borderRadius: 8,
+  border: '1px solid var(--tf-border)',
+  borderRadius: 'var(--tf-radius)',
   padding: '4px 10px',
-  fontSize: 11,
+  fontSize: "var(--tf-fs-xs)",
   fontWeight: 600,
-  color: '#475569',
-  background: '#ffffff',
+  color: 'var(--tf-text)',
+  background: 'var(--tf-bg-elevated)',
   cursor: 'pointer',
   whiteSpace: 'nowrap',
+  fontFamily: 'var(--tf-sans)',
 };
 
 const tickerRowStyle = (isNarrow: boolean, hasDragHandle: boolean): React.CSSProperties => ({
@@ -986,64 +1012,69 @@ const tickerRowStyle = (isNarrow: boolean, hasDragHandle: boolean): React.CSSPro
       : 'minmax(0, 1fr) auto',
   alignItems: isNarrow ? 'stretch' : 'center',
   gap: isNarrow ? 8 : 12,
-  border: '1px solid #e2e8f0',
-  borderRadius: 12,
-  padding: '10px 14px',
-  background: '#f8fafc',
+  border: '1px solid var(--tf-border)',
+  borderRadius: 'var(--tf-radius)',
+  padding: isNarrow ? '8px 12px' : '6px 10px',
+  background: 'var(--tf-bg-elevated)',
 });
 
 const symbolLinkStyle: React.CSSProperties = {
-  fontSize: 14,
+  fontSize: "var(--tf-fs-base)",
   fontWeight: 700,
-  color: '#1d4ed8',
+  color: 'var(--tf-amber)',
   textDecoration: 'none',
+  fontFamily: 'var(--tf-mono)',
+  letterSpacing: '0.04em',
 };
 
 const tagPillStyle: React.CSSProperties = {
-  fontSize: 10,
+  fontSize: "var(--tf-fs-micro)",
   fontWeight: 600,
-  color: '#475569',
-  background: '#e2e8f0',
+  color: 'var(--tf-text)',
+  background: 'var(--tf-bg-elevated)',
+  border: '1px solid var(--tf-border)',
   borderRadius: 999,
   padding: '1px 7px',
 };
 
 const addGroupPillStyle: React.CSSProperties = {
-  fontSize: 10,
+  fontSize: "var(--tf-fs-micro)",
   fontWeight: 600,
-  color: '#94a3b8',
+  color: 'var(--tf-muted)',
   background: 'none',
-  border: '1px dashed #cbd5e1',
+  border: '1px dashed var(--tf-border)',
   borderRadius: 999,
   padding: '1px 7px',
   cursor: 'pointer',
 };
 
 const primaryButtonStyle = (disabled: boolean): React.CSSProperties => ({
-  border: 'none',
-  borderRadius: 12,
+  border: '1px solid var(--tf-amber)',
+  borderRadius: 'var(--tf-radius)',
   padding: '11px 14px',
-  fontSize: 12,
+  fontSize: "var(--tf-fs-base)",
   fontWeight: 700,
-  color: '#ffffff',
-  background: disabled ? '#94a3b8' : '#0f172a',
+  color: disabled ? 'var(--tf-muted)' : 'var(--tf-bg)',
+  background: disabled ? 'var(--tf-bg-elevated)' : 'var(--tf-amber)',
   cursor: disabled ? 'not-allowed' : 'pointer',
   whiteSpace: 'nowrap',
+  fontFamily: 'var(--tf-sans)',
 });
 
 const groupDropdownButtonStyle = (disabled: boolean): React.CSSProperties => ({
-  border: '1px solid #cbd5e1',
-  borderRadius: 10,
+  border: '1px solid var(--tf-border)',
+  borderRadius: 'var(--tf-radius)',
   padding: '8px 12px',
-  fontSize: 13,
-  color: '#0f172a',
-  background: '#ffffff',
+  fontSize: "var(--tf-fs-base)",
+  color: 'var(--tf-text)',
+  background: 'var(--tf-bg-elevated)',
   cursor: disabled ? 'not-allowed' : 'pointer',
   width: '100%',
   display: 'flex',
   alignItems: 'center',
   justifyContent: 'space-between',
   outline: 'none',
+  fontFamily: 'var(--tf-sans)',
 });
 
 const groupDropdownListStyle: React.CSSProperties = {
@@ -1051,13 +1082,12 @@ const groupDropdownListStyle: React.CSSProperties = {
   top: 'calc(100% + 4px)',
   left: 0,
   right: 0,
-  background: '#ffffff',
-  border: '1px solid #cbd5e1',
-  borderRadius: 10,
+  background: 'var(--tf-bg-elevated)',
+  border: '1px solid var(--tf-border)',
+  borderRadius: 'var(--tf-radius)',
   margin: 0,
   padding: 4,
   listStyle: 'none',
-  boxShadow: '0 4px 12px rgba(15, 23, 42, 0.08)',
   maxHeight: 240,
   overflowY: 'auto',
   zIndex: 10,
@@ -1067,38 +1097,41 @@ const groupDropdownItemStyle = (selected: boolean): React.CSSProperties => ({
   width: '100%',
   textAlign: 'left',
   padding: '8px 10px',
-  fontSize: 13,
+  fontSize: "var(--tf-fs-base)",
   border: 'none',
-  borderRadius: 6,
-  background: selected ? '#f1f5f9' : 'transparent',
-  color: '#0f172a',
+  borderRadius: 'var(--tf-radius)',
+  background: selected ? 'var(--tf-bg)' : 'transparent',
+  color: 'var(--tf-text)',
   cursor: 'pointer',
   outline: 'none',
+  fontFamily: 'var(--tf-sans)',
 });
 
 const secondaryButtonStyle = (disabled: boolean): React.CSSProperties => ({
-  border: '1px solid #cbd5e1',
-  borderRadius: 999,
+  border: '1px solid var(--tf-border)',
+  borderRadius: 'var(--tf-radius)',
   padding: '5px 10px',
-  fontSize: 11,
+  fontSize: "var(--tf-fs-xs)",
   fontWeight: 700,
-  color: '#475569',
-  background: '#ffffff',
+  color: 'var(--tf-text)',
+  background: 'var(--tf-bg-elevated)',
   cursor: disabled ? 'not-allowed' : 'pointer',
+  fontFamily: 'var(--tf-sans)',
 });
 
 const monitorToggleStyle = (active: boolean, disabled: boolean): React.CSSProperties => ({
-  border: `1px solid ${active ? '#10b981' : '#cbd5e1'}`,
-  borderRadius: 999,
+  border: `1px solid ${active ? 'var(--tf-up)' : 'var(--tf-border)'}`,
+  borderRadius: 'var(--tf-radius)',
   padding: '5px 10px',
-  fontSize: 11,
+  fontSize: "var(--tf-fs-xs)",
   fontWeight: 700,
-  color: active ? '#065f46' : '#475569',
-  background: active ? '#ecfdf5' : '#ffffff',
+  color: active ? 'var(--tf-up)' : 'var(--tf-text)',
+  background: 'var(--tf-bg-elevated)',
   cursor: disabled ? 'not-allowed' : 'pointer',
   display: 'inline-flex',
   alignItems: 'center',
   gap: 4,
+  fontFamily: 'var(--tf-sans)',
 });
 
 export default WatchlistPage;

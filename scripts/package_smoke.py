@@ -33,7 +33,7 @@ def _wait_for_server(proc: subprocess.Popen, port: int, timeout_seconds: float =
     # ``json.loads`` is what produced the legacy "Expecting value" smoke
     # failure — keep this commented anchor in case the URL drifts again.
     health_url = f"http://127.0.0.1:{port}/health.json"
-    dashboard_url = f"http://127.0.0.1:{port}/dashboard"
+    terminal_url = f"http://127.0.0.1:{port}/terminal"
     deadline = time.time() + timeout_seconds
     last_error: Exception | None = None
     while time.time() < deadline:
@@ -41,7 +41,7 @@ def _wait_for_server(proc: subprocess.Popen, port: int, timeout_seconds: float =
             stderr = proc.stderr.read() if proc.stderr is not None else ""
             raise RuntimeError(f"Package smoke server exited early: {stderr.strip()}")
         try:
-            return _fetch_json(health_url), _fetch_text(dashboard_url)
+            return _fetch_json(health_url), _fetch_text(terminal_url)
         except (TimeoutError, URLError, ConnectionError, json.JSONDecodeError) as exc:
             last_error = exc
             time.sleep(0.25)
@@ -73,7 +73,7 @@ def main() -> int:
     )
 
     try:
-        health, dashboard_html = _wait_for_server(proc, port)
+        health, terminal_html = _wait_for_server(proc, port)
         _require(
             health.get("status") in {"ok", "degraded", "down"},
             f"Unexpected /health.json payload: {health}",
@@ -82,8 +82,8 @@ def main() -> int:
             isinstance(health.get("components"), dict) and {"agent", "telegram", "signals"} <= set(health["components"]),
             f"/health.json missing expected components: {health}",
         )
-        _require("TerraFin" in dashboard_html, "Dashboard HTML did not include TerraFin branding.")
-        _require('<div id="root"></div>' in dashboard_html, "Dashboard page did not serve the SPA shell.")
+        _require("TerraFin" in terminal_html, "Terminal HTML did not include TerraFin branding.")
+        _require('<div id="root"></div>' in terminal_html, "Terminal page did not serve the SPA shell.")
     finally:
         proc.terminate()
         try:

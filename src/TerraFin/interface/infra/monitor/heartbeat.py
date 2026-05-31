@@ -34,7 +34,7 @@ def _monitored_symbols(items: list[dict]) -> list[str]:
 
 async def registration_heartbeat(provider, interval: int = 60) -> None:
     """Reconcile the provider's subscribed set against the watchlist."""
-    from TerraFin.interface.watchlist_service import get_watchlist_service
+    from TerraFin.data.watchlist_service import get_watchlist_service
 
     while True:
         try:

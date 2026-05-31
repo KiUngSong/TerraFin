@@ -4,7 +4,7 @@ import { placeBelowOrAbove } from '../shared/positioningUtils';
 
 const VIEWPORT_MARGIN = 12;
 const PANEL_GAP = 8;
-const UI_FONT_STACK = 'Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif';
+const UI_FONT_STACK = 'var(--tf-sans)';
 
 // Visibility gate. When a parent provides `false`, the icon is hidden entirely.
 // Default `true` keeps existing usage outside the gated subtree unchanged.
@@ -104,11 +104,11 @@ const buttonStyle: React.CSSProperties = {
   width: 16,
   height: 16,
   borderRadius: '50%',
-  border: '1px solid #93c5fd',
-  background: '#eff6ff',
-  color: '#1d4ed8',
-  fontSize: 9,
-  fontWeight: 800,
+  border: '1px solid var(--tf-border-strong)',
+  background: 'var(--tf-bg-elevated)',
+  color: 'var(--tf-amber)',
+  fontSize: "var(--tf-fs-micro)",
+  fontWeight: 700,
   lineHeight: 1,
   cursor: 'pointer',
   display: 'inline-flex',
@@ -121,21 +121,20 @@ const compactButtonStyle: React.CSSProperties = {
   ...buttonStyle,
   width: 14,
   height: 14,
-  fontSize: 8,
+  fontSize: "var(--tf-fs-micro)",
 };
 
 const panelStyle: React.CSSProperties = {
   position: 'fixed',
   zIndex: 1200,
-  border: '1px solid #bfdbfe',
-  borderRadius: 12,
+  border: '1px solid var(--tf-border)',
+  borderRadius: 'var(--tf-radius)',
   padding: '10px 12px',
-  background: '#f8fbff',
-  color: '#334155',
-  fontSize: 12,
+  background: 'var(--tf-bg-elevated)',
+  color: 'var(--tf-text)',
+  fontSize: "var(--tf-fs-base)",
   fontFamily: UI_FONT_STACK,
   lineHeight: 1.55,
-  boxShadow: '0 16px 28px rgba(15, 23, 42, 0.12)',
   pointerEvents: 'none',
 };
 

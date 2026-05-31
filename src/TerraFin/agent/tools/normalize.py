@@ -1,8 +1,8 @@
 """Argument repair, alias maps, and heuristic helpers for hosted tools."""
 from typing import Any
 
-from TerraFin.interface.market_insights.payloads import canonical_macro_name, resolve_macro_type
-from TerraFin.interface.stock.payloads import resolve_ticker_query
+from TerraFin.interface.pages.market_insights.payloads import canonical_macro_name, resolve_macro_type
+from TerraFin.interface.pages.stock.payloads import resolve_ticker_query
 
 
 # Map of persona-consult tool name -> guru name. Lives here because the

@@ -211,8 +211,8 @@ const dropdownStyle: React.CSSProperties = {
   top: 'calc(100% + 4px)',
   left: 0,
   right: 0,
-  background: '#ffffff',
-  border: '1px solid #cbd5e1',
+  background: 'var(--tf-bg-elevated)',
+  border: '1px solid var(--tf-border-strong)',
   borderRadius: 10,
   margin: 0,
   padding: 4,
@@ -225,22 +225,25 @@ const dropdownStyle: React.CSSProperties = {
 
 const headerStyle: React.CSSProperties = {
   padding: '6px 10px 4px',
-  fontSize: 10,
-  fontWeight: 700,
+  fontSize: 'var(--tf-fs-xs)',
+  fontWeight: 600,
   textTransform: 'uppercase',
   letterSpacing: 0.6,
-  color: '#94a3b8',
+  color: 'var(--tf-muted)',
 };
 
 const itemStyle = (active: boolean): React.CSSProperties => ({
   width: '100%',
   textAlign: 'left',
   padding: '8px 10px',
-  fontSize: 13,
+  fontSize: 'var(--tf-fs-base)',
   border: 'none',
   borderRadius: 6,
-  background: active ? '#eff6ff' : 'transparent',
-  color: '#0f172a',
+  background: active ? 'var(--tf-bg-hover)' : 'transparent',
+  // Amber inset marker — bg-hover alone is ~1 step off the dropdown surface in
+  // light mode, not enough to read the active row. The accent always reads.
+  boxShadow: active ? 'inset 2px 0 0 var(--tf-amber)' : 'none',
+  color: 'var(--tf-text-strong)',
   cursor: 'pointer',
   outline: 'none',
   display: 'flex',
@@ -249,8 +252,8 @@ const itemStyle = (active: boolean): React.CSSProperties => ({
 });
 
 const nameStyle: React.CSSProperties = {
-  color: '#475569',
-  fontSize: 12,
+  color: 'var(--tf-muted)',
+  fontSize: 'var(--tf-fs-xs)',
   flex: 1,
   overflow: 'hidden',
   textOverflow: 'ellipsis',
@@ -258,18 +261,19 @@ const nameStyle: React.CSSProperties = {
 };
 
 const badgeStyle: React.CSSProperties = {
-  fontSize: 10,
-  color: '#64748b',
-  background: '#f1f5f9',
+  fontSize: 'var(--tf-fs-micro)',
+  color: 'var(--tf-muted)',
+  background: 'transparent',
+  border: '1px solid var(--tf-border-strong)',
   padding: '2px 6px',
   borderRadius: 4,
 };
 
 const translatedRowStyle: React.CSSProperties = {
   padding: '6px 10px',
-  fontSize: 11,
-  color: '#475569',
-  background: '#f8fafc',
+  fontSize: 'var(--tf-fs-xs)',
+  color: 'var(--tf-muted)',
+  background: 'var(--tf-bg)',
   borderRadius: 6,
   marginBottom: 4,
 };

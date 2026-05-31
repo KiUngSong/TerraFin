@@ -41,12 +41,12 @@ const SeriesTags: React.FC<{ tags: SeriesTag[]; onRemove: (name: string) => void
           display: 'flex',
           alignItems: 'center',
           gap: 5,
-          background: '#eee',
-          borderRadius: 12,
+          background: 'var(--tf-bg-elevated)',
+          borderRadius: 'var(--tf-radius)',
           padding: compact ? '2px 5px 2px 7px' : '3px 6px 3px 8px',
-          fontSize: compact ? 10 : 11,
-          fontWeight: 500,
-          color: '#333',
+          fontSize: compact ? 'var(--tf-fs-micro)' : 'var(--tf-fs-xs)',
+          fontWeight: 600,
+          color: 'var(--tf-text)',
           whiteSpace: 'nowrap',
           flexShrink: 0,
         }}
@@ -67,16 +67,16 @@ const SeriesTags: React.FC<{ tags: SeriesTag[]; onRemove: (name: string) => void
               width: 18,
               height: 18,
               borderRadius: 999,
-              fontSize: 12,
-              color: '#999',
+              fontSize: "var(--tf-fs-xs)",
+              color: 'var(--tf-muted)',
               lineHeight: 1,
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
               flexShrink: 0,
             }}
-            onMouseEnter={(e) => { e.currentTarget.style.color = '#333'; }}
-            onMouseLeave={(e) => { e.currentTarget.style.color = '#999'; }}
+            onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--tf-text)'; }}
+            onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--tf-muted)'; }}
           >
             <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
               <line x1="18" y1="6" x2="6" y2="18" />
@@ -94,7 +94,7 @@ const Divider: React.FC<{ compact?: boolean }> = ({ compact = false }) => (
     style={{
       width: 1,
       height: compact ? 16 : 20,
-      background: '#e0e0e0',
+      background: 'var(--tf-border)',
       marginRight: compact ? 3 : 4,
       marginLeft: compact ? 3 : 4,
       flexShrink: 0,
@@ -110,7 +110,7 @@ const PriceScaleControls: React.FC<{
 }> = ({ mode, onChange, forcePercentage, compact = false }) => {
   const [hovered, setHovered] = useState<'%' | 'log' | null>(null);
   const buttonPadding = compact ? '4px 8px' : '6px 10px';
-  const buttonFontSize = compact ? 12 : 13;
+  const buttonFontSize = compact ? 'var(--tf-fs-xs)' : 'var(--tf-fs-base)';
 
   return (
     <>
@@ -131,14 +131,14 @@ const PriceScaleControls: React.FC<{
           fontSize: buttonFontSize,
           fontWeight: 500,
           border: 'none',
-          borderRadius: 6,
+          borderRadius: 'var(--tf-radius)',
           background:
             forcePercentage || mode === PriceScaleMode.Percentage
-              ? '#e8e8e8'
+              ? 'var(--tf-bg-pane)'
               : hovered === '%'
-                ? '#f0f0f0'
+                ? 'var(--tf-bg-pane)'
                 : 'transparent',
-          color: forcePercentage || mode === PriceScaleMode.Percentage ? '#1976d2' : '#444',
+          color: forcePercentage || mode === PriceScaleMode.Percentage ? 'var(--tf-amber)' : 'var(--tf-text)',
           cursor: forcePercentage ? 'default' : 'pointer',
           lineHeight: 1,
           whiteSpace: 'nowrap',
@@ -163,9 +163,9 @@ const PriceScaleControls: React.FC<{
           fontSize: buttonFontSize,
           fontWeight: 500,
           border: 'none',
-          borderRadius: 6,
-          background: mode === PriceScaleMode.Logarithmic ? '#e8e8e8' : hovered === 'log' ? '#f0f0f0' : 'transparent',
-          color: forcePercentage ? '#bbb' : mode === PriceScaleMode.Logarithmic ? '#1976d2' : '#444',
+          borderRadius: 'var(--tf-radius)',
+          background: mode === PriceScaleMode.Logarithmic ? 'var(--tf-bg-pane)' : hovered === 'log' ? 'var(--tf-bg-pane)' : 'transparent',
+          color: forcePercentage ? 'var(--tf-muted)' : mode === PriceScaleMode.Logarithmic ? 'var(--tf-amber)' : 'var(--tf-text)',
           cursor: forcePercentage ? 'default' : 'pointer',
           lineHeight: 1,
           whiteSpace: 'nowrap',
@@ -186,7 +186,7 @@ const VolumeToggle: React.FC<{
 }> = ({ available, active, onToggle, compact = false }) => {
   const [hovered, setHovered] = useState(false);
   const buttonPadding = compact ? '4px 8px' : '6px 10px';
-  const buttonFontSize = compact ? 12 : 13;
+  const buttonFontSize = compact ? 'var(--tf-fs-xs)' : 'var(--tf-fs-base)';
   const disabled = !available;
   return (
     <>
@@ -211,15 +211,15 @@ const VolumeToggle: React.FC<{
           fontSize: buttonFontSize,
           fontWeight: 500,
           border: 'none',
-          borderRadius: 6,
+          borderRadius: 'var(--tf-radius)',
           background: disabled
             ? 'transparent'
             : active
-              ? '#e8e8e8'
+              ? 'var(--tf-bg-pane)'
               : hovered
-                ? '#f0f0f0'
+                ? 'var(--tf-bg-pane)'
                 : 'transparent',
-          color: disabled ? '#bbb' : active ? '#1976d2' : '#444',
+          color: disabled ? 'var(--tf-muted)' : active ? 'var(--tf-amber)' : 'var(--tf-text)',
           cursor: disabled ? 'default' : 'pointer',
           lineHeight: 1,
           whiteSpace: 'nowrap',
@@ -251,8 +251,8 @@ const BottomBar: React.FC<BottomBarProps> = ({
     const compactRowStyle: React.CSSProperties = {
       flexShrink: 0,
       height: 28,
-      background: '#f5f5f5',
-      borderTop: '1px solid #e8e8e8',
+      background: 'var(--tf-bg-pane)',
+      borderTop: '1px solid var(--tf-border)',
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'space-between',

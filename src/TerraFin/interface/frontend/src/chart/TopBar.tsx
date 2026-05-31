@@ -36,7 +36,7 @@ const Divider: React.FC<{ compact?: boolean }> = ({ compact = false }) => (
     style={{
       width: 1,
       height: compact ? 18 : 20,
-      background: compact ? '#c9d1dc' : '#e0e0e0',
+      background: 'var(--tf-border)',
       marginLeft: compact ? 4 : 4,
       marginRight: compact ? 4 : 4,
       flexShrink: 0,
@@ -54,21 +54,21 @@ const RiskAnalyticsButton = React.forwardRef<HTMLButtonElement, { active: boolea
     style={{
       fontFamily: FONT_FAMILY,
       padding: '5px 10px',
-      fontSize: 12,
+      fontSize: "var(--tf-fs-xs)",
       fontWeight: 500,
-      border: '1px solid #e0e0e0',
-      borderRadius: 6,
-      background: active ? '#e8e8e8' : '#fff',
+      border: '1px solid var(--tf-border)',
+      borderRadius: 'var(--tf-radius)',
+      background: active ? 'var(--tf-bg-pane)' : 'var(--tf-bg-elevated)',
       cursor: 'pointer',
       display: 'flex',
       alignItems: 'center',
       gap: 5,
-      color: active ? '#1976d2' : '#333',
+      color: active ? 'var(--tf-amber)' : 'var(--tf-text)',
       flexShrink: 0,
       whiteSpace: 'nowrap',
     }}
-    onMouseEnter={(e) => { if (!active) e.currentTarget.style.background = '#f0f0f0'; }}
-    onMouseLeave={(e) => { e.currentTarget.style.background = active ? '#e8e8e8' : '#fff'; }}
+    onMouseEnter={(e) => { if (!active) e.currentTarget.style.background = 'var(--tf-bg-pane)'; }}
+    onMouseLeave={(e) => { e.currentTarget.style.background = active ? 'var(--tf-bg-pane)' : 'var(--tf-bg-elevated)'; }}
   >
     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
       <rect x="3" y="3" width="18" height="18" rx="2" />
@@ -89,20 +89,20 @@ const ResetButton: React.FC<{ onClick: () => void }> = ({ onClick }) => (
       fontFamily: FONT_FAMILY,
       padding: '5px 12px',
       minHeight: 28,
-      fontSize: 12,
+      fontSize: "var(--tf-fs-xs)",
       fontWeight: 500,
-      border: '1px solid #e0e0e0',
-      borderRadius: 6,
-      background: '#fff',
+      border: '1px solid var(--tf-border)',
+      borderRadius: 'var(--tf-radius)',
+      background: 'var(--tf-bg-elevated)',
       cursor: 'pointer',
       display: 'flex',
       alignItems: 'center',
       gap: 5,
-      color: '#333',
+      color: 'var(--tf-text)',
       flexShrink: 0,
     }}
-    onMouseEnter={(e) => { e.currentTarget.style.background = '#f0f0f0'; }}
-    onMouseLeave={(e) => { e.currentTarget.style.background = '#fff'; }}
+    onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--tf-bg-pane)'; }}
+    onMouseLeave={(e) => { e.currentTarget.style.background = 'var(--tf-bg-elevated)'; }}
   >
     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
       <line x1="18" y1="6" x2="6" y2="18" />
@@ -120,14 +120,14 @@ const DatePickerButton: React.FC<{ onClick: () => void }> = ({ onClick }) => (
     style={{
       fontFamily: FONT_FAMILY,
       padding: '6px 8px',
-      fontSize: 16,
+      fontSize: "var(--tf-fs-base)",
       border: 'none',
-      borderRadius: 6,
+      borderRadius: 'var(--tf-radius)',
       background: 'transparent',
       cursor: 'pointer',
       flexShrink: 0,
     }}
-    onMouseEnter={(e) => { e.currentTarget.style.background = '#f0f0f0'; }}
+    onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--tf-bg-pane)'; }}
     onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
   >
     <svg
@@ -161,14 +161,12 @@ const StatusBadgeOverlay: React.FC<{ label: string }> = ({ label }) => (
       alignItems: 'center',
       padding: '5px 10px',
       borderRadius: 999,
-      border: '1px solid rgba(191, 219, 254, 0.96)',
-      background: 'rgba(239, 246, 255, 0.96)',
-      color: '#1d4ed8',
-      fontSize: 11,
+      border: '1px solid var(--tf-border-strong)',
+      background: 'var(--tf-bg-pane)',
+      color: 'var(--tf-amber)',
+      fontSize: "var(--tf-fs-xs)",
       fontWeight: 700,
       whiteSpace: 'nowrap',
-      boxShadow: '0 4px 14px rgba(15, 23, 42, 0.08)',
-      backdropFilter: 'blur(6px)',
     }}
   >
     {label}

@@ -149,12 +149,12 @@ const TimeframeSelector: React.FC<TimeframeSelectorProps> = ({
               minWidth: 0,
               minHeight: 0,
               padding: '5px 8px',
-              borderRadius: 6,
+              borderRadius: 'var(--tf-radius)',
               border: 'none',
-              background: dropdownOpen ? '#f0f0f0' : 'transparent',
-              color: '#1a1a1a',
+              background: dropdownOpen ? 'var(--tf-bg-pane)' : 'transparent',
+              color: 'var(--tf-text)',
               fontFamily: FONT_FAMILY,
-              fontSize: 12,
+              fontSize: "var(--tf-fs-xs)",
               fontWeight: 600,
               lineHeight: 1,
               cursor: 'pointer',
@@ -178,12 +178,10 @@ const TimeframeSelector: React.FC<TimeframeSelectorProps> = ({
                   display: 'grid',
                   gridTemplateColumns: 'repeat(4, minmax(0, 1fr))',
                   gap: 4,
-                  background: 'rgba(255, 255, 255, 0.98)',
-                  border: '1px solid rgba(215, 220, 227, 0.92)',
-                  borderRadius: 10,
-                  boxShadow: '0 10px 24px rgba(15, 23, 42, 0.12)',
+                  background: 'var(--tf-bg-pane)',
+                  border: '1px solid var(--tf-border)',
+                  borderRadius: 'var(--tf-radius)',
                   zIndex: 10000,
-                  backdropFilter: 'blur(8px)',
                 }}
               >
                 {DAYS_OPTIONS.map(({ id }) => {
@@ -196,15 +194,14 @@ const TimeframeSelector: React.FC<TimeframeSelectorProps> = ({
                       onClick={() => setView(id)}
                       style={{
                         minHeight: 32,
-                        border: active ? '1px solid #0f172a' : '1px solid transparent',
-                        borderRadius: 6,
-                        background: active ? '#0f172a' : 'transparent',
-                        color: active ? '#ffffff' : '#475569',
+                        border: active ? '1px solid var(--tf-amber)' : '1px solid transparent',
+                        borderRadius: 'var(--tf-radius)',
+                        background: active ? 'var(--tf-amber)' : 'transparent',
+                        color: active ? 'var(--tf-bg)' : 'var(--tf-muted)',
                         fontFamily: FONT_FAMILY,
-                        fontSize: 12,
+                        fontSize: "var(--tf-fs-xs)",
                         fontWeight: active ? 700 : 600,
                         cursor: 'pointer',
-                        boxShadow: active ? '0 1px 2px rgba(15, 23, 42, 0.08)' : 'none',
                       }}
                     >
                       {letter}
@@ -239,12 +236,12 @@ const TimeframeSelector: React.FC<TimeframeSelectorProps> = ({
           style={{
             fontFamily: FONT_FAMILY,
             padding: '6px 10px',
-            fontSize: 13,
+            fontSize: "var(--tf-fs-base)",
             fontWeight: 500,
             border: 'none',
-            borderRadius: 6,
-            background: buttonHover || dropdownOpen ? '#f0f0f0' : 'transparent',
-            color: '#1a1a1a',
+            borderRadius: 'var(--tf-radius)',
+            background: buttonHover || dropdownOpen ? 'var(--tf-bg-pane)' : 'transparent',
+            color: 'var(--tf-text)',
             cursor: 'pointer',
           }}
         >
@@ -259,15 +256,15 @@ const TimeframeSelector: React.FC<TimeframeSelectorProps> = ({
               transform: 'translateX(-50%)',
               marginTop: 6,
               padding: '6px 10px',
-              background: '#2d2d2d',
-              color: '#fff',
-              fontSize: 12,
+              background: 'var(--tf-bg-elevated)',
+              color: 'var(--tf-text)',
+              border: '1px solid var(--tf-border)',
+              fontSize: "var(--tf-fs-xs)",
               fontFamily: FONT_FAMILY,
               fontWeight: 500,
-              borderRadius: 6,
+              borderRadius: 'var(--tf-radius)',
               whiteSpace: 'nowrap',
               zIndex: 11,
-              boxShadow: '0 2px 8px rgba(0,0,0,0.2)',
             }}
           >
             <span
@@ -279,7 +276,7 @@ const TimeframeSelector: React.FC<TimeframeSelectorProps> = ({
                 width: 0,
                 height: 0,
                 border: '6px solid transparent',
-                borderBottomColor: '#2d2d2d',
+                borderBottomColor: 'var(--tf-bg-elevated)',
               }}
             />
             {tooltipLabel}
@@ -293,10 +290,9 @@ const TimeframeSelector: React.FC<TimeframeSelectorProps> = ({
               left: 0,
               marginTop: 4,
               minWidth: 160,
-              background: '#fff',
-              border: '1px solid #e0e0e0',
-              borderRadius: 6,
-              boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
+              background: 'var(--tf-bg-pane)',
+              border: '1px solid var(--tf-border)',
+              borderRadius: 'var(--tf-radius)',
               zIndex: 10,
               overflow: 'hidden',
             }}
@@ -312,10 +308,10 @@ const TimeframeSelector: React.FC<TimeframeSelectorProps> = ({
                 onMouseLeave={() => setHoveredOption((current) => (current === id ? null : current))}
                 style={{
                   padding: '8px 12px',
-                  fontSize: 13,
+                  fontSize: "var(--tf-fs-base)",
                   fontFamily: FONT_FAMILY,
-                  background: displayedView === id ? '#e8e8e8' : hoveredOption === id ? '#f0f0f0' : 'transparent',
-                  color: '#333',
+                  background: displayedView === id ? 'var(--tf-bg-elevated)' : hoveredOption === id ? 'var(--tf-bg-elevated)' : 'transparent',
+                  color: displayedView === id ? 'var(--tf-amber)' : 'var(--tf-text)',
                   cursor: 'pointer',
                 }}
               >

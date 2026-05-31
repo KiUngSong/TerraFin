@@ -3,14 +3,6 @@ from fastapi import APIRouter, HTTPException, Query
 from TerraFin.agent.contracts.conversation import is_internal_only_message
 from TerraFin.agent.contracts.conversation_state import RUNTIME_MODEL_METADATA_KEY
 from TerraFin.agent.contracts.definitions import is_internal_agent_definition
-from TerraFin.agent.runtime.hosted import (
-    TerraFinAgentApprovalRequiredError,
-    TerraFinAgentPolicyError,
-    TerraFinAgentSessionConflictError,
-)
-from TerraFin.agent.service.hosted import get_hosted_agent_loop
-from TerraFin.agent.runtime.loop import TerraFinConversationMessage, TerraFinHostedRunResult
-from TerraFin.agent.models.runtime import TerraFinModelConfigError, TerraFinModelResponseError
 from TerraFin.agent.models import (
     CalendarResponse,
     CompanyInfoResponse,
@@ -52,8 +44,16 @@ from TerraFin.agent.models import (
     ResolveResponse,
 )
 from TerraFin.agent.models.providers.openai import TerraFinOpenAIConfigError, TerraFinOpenAIResponseError
+from TerraFin.agent.models.runtime import TerraFinModelConfigError, TerraFinModelResponseError
 from TerraFin.agent.runtime import TerraFinArtifact, TerraFinCapabilityCall, TerraFinTaskRecord
+from TerraFin.agent.runtime.hosted import (
+    TerraFinAgentApprovalRequiredError,
+    TerraFinAgentPolicyError,
+    TerraFinAgentSessionConflictError,
+)
+from TerraFin.agent.runtime.loop import TerraFinConversationMessage, TerraFinHostedRunResult
 from TerraFin.agent.service import TerraFinAgentService
+from TerraFin.agent.service.hosted import get_hosted_agent_loop
 from TerraFin.agent.storage.session_store import (
     TerraFinHostedApprovalRequest,
     TerraFinHostedPermissionEvent,
@@ -62,7 +62,7 @@ from TerraFin.agent.storage.session_store import (
 )
 from TerraFin.agent.tools import TerraFinToolDefinition, TerraFinToolInvocationResult
 from TerraFin.data import SecEdgarConfigurationError, SecEdgarUnavailableError
-from TerraFin.interface.errors import AppRuntimeError
+from TerraFin.interface.core.errors import AppRuntimeError
 
 
 AGENT_API_PREFIX = "/agent/api"
@@ -322,7 +322,9 @@ def _session_response(
         tools=[_tool_response(tool) for tool in tools],
         messages=[]
         if conversation is None
-        else [_message_response(message) for message in conversation.snapshot() if not is_internal_only_message(message)],
+        else [
+            _message_response(message) for message in conversation.snapshot() if not is_internal_only_message(message)
+        ],
     )
 
 
@@ -355,7 +357,11 @@ def _run_response(
         agentName=run_result.agent_name,
         steps=run_result.steps,
         finalMessage=None if run_result.final_message is None else _message_response(run_result.final_message),
-        messagesAdded=[_message_response(message) for message in run_result.messages_added if not is_internal_only_message(message)],
+        messagesAdded=[
+            _message_response(message)
+            for message in run_result.messages_added
+            if not is_internal_only_message(message)
+        ],
         toolResults=[_tool_invocation_response(result) for result in run_result.tool_results],
         session=_session_response(record, loop=loop, tools=tools),
     )
@@ -816,9 +822,7 @@ def create_agent_data_router() -> APIRouter:
     def api_agent_valuation(
         ticker: str = Query(..., min_length=1),
         projection_years: int | None = Query(default=None, ge=1, le=20),
-        fcf_base_source: str | None = Query(
-            default=None, pattern="^(auto|3yr_avg|ttm|latest_annual)$"
-        ),
+        fcf_base_source: str | None = Query(default=None, pattern="^(auto|3yr_avg|ttm|latest_annual)$"),
         breakeven_year: int | None = Query(default=None, ge=1, le=15),
         breakeven_cash_flow_per_share: float | None = Query(default=None),
         post_breakeven_growth_pct: float | None = Query(default=None),
@@ -840,7 +844,7 @@ def create_agent_data_router() -> APIRouter:
         ticker: str = Query(..., min_length=1),
         years: int = Query(default=10, ge=1, le=20),
     ) -> dict:
-        from TerraFin.interface.stock.payloads import build_fcf_history_payload
+        from TerraFin.interface.pages.stock.payloads import build_fcf_history_payload
 
         try:
             return build_fcf_history_payload(ticker, years=years)
@@ -850,7 +854,10 @@ def create_agent_data_router() -> APIRouter:
     @router.get(f"{AGENT_API_PREFIX}/similarity-search")
     def api_agent_similarity_search(
         ticker: str = Query(..., min_length=1),
-        universe: str = Query(default="sp500+nasdaq100+kospi200", pattern="^(sp500|nasdaq100|kospi200|sp500\\+kospi200|sp500\\+nasdaq100\\+kospi200|watchlist)$"),
+        universe: str = Query(
+            default="sp500+nasdaq100+kospi200",
+            pattern="^(sp500|nasdaq100|kospi200|sp500\\+kospi200|sp500\\+nasdaq100\\+kospi200|watchlist)$",
+        ),
         period: str = Query(default="1y", pattern="^(1y|2y|6m)$"),
         top_n: int = Query(default=20, ge=1, le=50),
     ) -> dict:
@@ -905,9 +912,7 @@ def create_agent_data_router() -> APIRouter:
         form: str = Query(default="10-Q", min_length=1),
     ) -> dict:
         try:
-            return service.sec_filing_document(
-                ticker, accession, primaryDocument, form=form
-            )
+            return service.sec_filing_document(ticker, accession, primaryDocument, form=form)
         except Exception as exc:
             _raise_http_error(exc)
 
@@ -920,9 +925,7 @@ def create_agent_data_router() -> APIRouter:
         form: str = Query(default="10-Q", min_length=1),
     ) -> dict:
         try:
-            return service.sec_filing_section(
-                ticker, accession, primaryDocument, sectionSlug, form=form
-            )
+            return service.sec_filing_section(ticker, accession, primaryDocument, sectionSlug, form=form)
         except Exception as exc:
             _raise_http_error(exc)
 

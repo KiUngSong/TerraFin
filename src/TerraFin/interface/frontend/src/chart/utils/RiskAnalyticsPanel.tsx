@@ -90,13 +90,12 @@ const RiskAnalyticsPanel: React.FC<RiskAnalyticsPanelProps> = ({ visible, onClos
       ref={containerRef}
       style={{
         ...positionStyle,
-        background: 'rgba(255,255,255,0.95)',
-        border: '1px solid #e0e0e0',
-        borderRadius: 8,
-        boxShadow: '0 4px 16px rgba(0,0,0,0.1)',
+        background: 'var(--tf-bg-pane)',
+        border: '1px solid var(--tf-border)',
+        borderRadius: 'var(--tf-radius)',
         zIndex: 100,
         fontFamily: FONT_FAMILY,
-        fontSize: 12,
+        fontSize: "var(--tf-fs-xs)",
         minWidth: 220,
         maxWidth: 'calc(100vw - 16px)',
         maxHeight: 'min(60vh, 440px)',
@@ -112,10 +111,10 @@ const RiskAnalyticsPanel: React.FC<RiskAnalyticsPanelProps> = ({ visible, onClos
           alignItems: 'center',
           justifyContent: 'space-between',
           padding: '8px 12px',
-          borderBottom: '1px solid #eee',
+          borderBottom: '1px solid var(--tf-border)',
           fontWeight: 600,
-          fontSize: 12,
-          color: '#333',
+          fontSize: "var(--tf-fs-xs)",
+          color: 'var(--tf-text)',
         }}
       >
         Risk Analytics
@@ -127,8 +126,8 @@ const RiskAnalyticsPanel: React.FC<RiskAnalyticsPanelProps> = ({ visible, onClos
             background: 'transparent',
             cursor: 'pointer',
             padding: '2px 4px',
-            fontSize: 14,
-            color: '#999',
+            fontSize: "var(--tf-fs-base)",
+            color: 'var(--tf-muted)',
             lineHeight: 1,
           }}
         >
@@ -152,8 +151,8 @@ const RiskAnalyticsPanel: React.FC<RiskAnalyticsPanelProps> = ({ visible, onClos
                   gap: 16,
                 }}
               >
-                <span style={{ color: '#666' }}>{key}</span>
-                <span style={{ fontWeight: 500, color: isNeg ? '#ef5350' : '#333', fontVariantNumeric: 'tabular-nums' }}>
+                <span style={{ color: 'var(--tf-muted)' }}>{key}</span>
+                <span style={{ fontWeight: 500, color: isNeg ? 'var(--tf-down)' : 'var(--tf-text)', fontVariantNumeric: 'tabular-nums' }}>
                   {val}
                   {unit}
                 </span>
@@ -162,7 +161,7 @@ const RiskAnalyticsPanel: React.FC<RiskAnalyticsPanelProps> = ({ visible, onClos
           })}
         </div>
       ) : (
-        <div style={{ padding: '12px', color: '#999', textAlign: 'center' }}>No data</div>
+        <div style={{ padding: '12px', color: 'var(--tf-muted)', textAlign: 'center' }}>No data</div>
       )}
     </div>
   );

@@ -2,7 +2,7 @@ import pandas as pd
 import pytest
 from fastapi import HTTPException
 
-from TerraFin.interface.stock import payloads
+from TerraFin.interface.pages.stock import payloads
 
 
 def _stub_filings_df() -> pd.DataFrame:

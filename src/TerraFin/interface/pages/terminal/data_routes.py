@@ -5,7 +5,7 @@ from pydantic import BaseModel
 
 from TerraFin.data import get_data_factory
 from TerraFin.data.cache.registry import get_cache_manager, refresh_all_due
-from TerraFin.interface.watchlist_service import (
+from TerraFin.data.watchlist_service import (
     WatchlistConfigurationError,
     WatchlistConflictError,
     WatchlistNotFoundError,
@@ -15,7 +15,7 @@ from TerraFin.interface.watchlist_service import (
 )
 
 
-DASHBOARD_API_PREFIX = "/dashboard/api"
+TERMINAL_API_PREFIX = "/terminal/api"
 
 
 class WatchlistItemResponse(BaseModel):
@@ -23,6 +23,8 @@ class WatchlistItemResponse(BaseModel):
     name: str
     move: str
     tags: list[str] = []
+    last: float | None = None
+    volume: int | None = None
 
 
 class WatchlistSnapshotResponse(BaseModel):
@@ -89,6 +91,27 @@ class MarketBreadthResponse(BaseModel):
     metrics: list[BreadthMetricResponse]
 
 
+class SectorTileResponse(BaseModel):
+    symbol: str
+    name: str
+    movePct: float | None = None
+
+
+class SectorsResponse(BaseModel):
+    tiles: list[SectorTileResponse]
+
+
+class IndexTickResponse(BaseModel):
+    symbol: str
+    label: str
+    last: float | None = None
+    changePct: float | None = None
+
+
+class IndicesResponse(BaseModel):
+    ticks: list[IndexTickResponse]
+
+
 class TrailingForwardPeHistoryPointResponse(BaseModel):
     date: str
     value: float
@@ -139,29 +162,39 @@ class SpxGexHistoryResponse(BaseModel):
     source: str
 
 
-def create_dashboard_data_router() -> APIRouter:
+def create_terminal_data_router() -> APIRouter:
     router = APIRouter()
     data_factory = get_data_factory()
     watchlist_service = get_watchlist_service()
     cache_manager = get_cache_manager()
 
-    def _live_move(symbol: str) -> str:
+    def _live_quote(symbol: str) -> tuple[str, float | None, int | None]:
         try:
             from TerraFin.data.providers.market.ticker_info import get_ticker_info
             info = get_ticker_info(symbol) or {}
             current = info.get("currentPrice") or info.get("regularMarketPrice")
             prev = info.get("previousClose") or info.get("regularMarketPreviousClose")
-            if current and prev and prev != 0:
-                return f"{((current / prev) - 1.0) * 100.0:+.2f}%"
+            vol = info.get("regularMarketVolume") or info.get("volume")
+            move = (
+                f"{((current / prev) - 1.0) * 100.0:+.2f}%"
+                if current and prev and prev != 0
+                else "--"
+            )
+            return move, (float(current) if current else None), (int(vol) if vol else None)
         except Exception:
-            pass
-        return "--"
+            return "--", None, None
+
+    def _live_move(symbol: str) -> str:
+        return _live_quote(symbol)[0]
 
     def _watchlist_response(items: list[dict]) -> WatchlistSnapshotResponse:
-        from TerraFin.interface.monitor.http_provider import is_signal_provider_configured
+        from TerraFin.interface.infra.monitor.http_provider import is_signal_provider_configured
 
         backend_configured = watchlist_service.is_backend_configured()
-        live_items = [{**item, "move": _live_move(item["symbol"])} for item in items]
+        live_items = []
+        for item in items:
+            move, last, vol = _live_quote(item["symbol"])
+            live_items.append({**item, "move": move, "last": last, "volume": vol})
         return WatchlistSnapshotResponse(
             items=[WatchlistItemResponse.model_validate(item) for item in live_items],
             backendConfigured=backend_configured,
@@ -190,7 +223,7 @@ def create_dashboard_data_router() -> APIRouter:
         "monitor daemon is down — start it" message instead of swallowing a
         connection-refused as a vague heartbeat-retry warning.
         """
-        from TerraFin.interface.monitor.http_provider import get_signal_provider_from_env
+        from TerraFin.interface.infra.monitor.http_provider import get_signal_provider_from_env
 
         provider = get_signal_provider_from_env()
         if provider is None:
@@ -241,7 +274,7 @@ def create_dashboard_data_router() -> APIRouter:
         import logging
 
         try:
-            from TerraFin.interface.channels.telegram import TelegramChannel
+            from TerraFin.interface.infra.channels.telegram import TelegramChannel
 
             ch = TelegramChannel.from_config()
         except Exception:
@@ -266,15 +299,15 @@ def create_dashboard_data_router() -> APIRouter:
                 "Failed to send monitor-toggle Telegram notice for %s", symbol, exc_info=True
             )
 
-    @router.get(f"{DASHBOARD_API_PREFIX}/watchlist", response_model=WatchlistSnapshotResponse)
+    @router.get(f"{TERMINAL_API_PREFIX}/watchlist", response_model=WatchlistSnapshotResponse)
     def api_get_watchlist_snapshot(group: str | None = Query(default=None)):
         return _watchlist_response(watchlist_service.get_watchlist_snapshot(group=group))
 
-    @router.get(f"{DASHBOARD_API_PREFIX}/watchlist/groups", response_model=WatchlistGroupsResponse)
+    @router.get(f"{TERMINAL_API_PREFIX}/watchlist/groups", response_model=WatchlistGroupsResponse)
     def api_get_watchlist_groups():
         return WatchlistGroupsResponse(groups=[WatchlistGroupResponse(**g) for g in watchlist_service.list_groups()])
 
-    @router.post(f"{DASHBOARD_API_PREFIX}/watchlist/groups", response_model=WatchlistGroupsResponse)
+    @router.post(f"{TERMINAL_API_PREFIX}/watchlist/groups", response_model=WatchlistGroupsResponse)
     def api_create_watchlist_group(body: WatchlistCreateGroupRequest = Body(...)):
         try:
             watchlist_service.create_group(body.name)
@@ -284,7 +317,7 @@ def create_dashboard_data_router() -> APIRouter:
         except WatchlistConfigurationError as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
 
-    @router.delete(f"{DASHBOARD_API_PREFIX}/watchlist/groups/{{name}}", response_model=WatchlistSnapshotResponse)
+    @router.delete(f"{TERMINAL_API_PREFIX}/watchlist/groups/{{name}}", response_model=WatchlistSnapshotResponse)
     def api_delete_watchlist_group(name: str):
         try:
             return _watchlist_response(watchlist_service.delete_group(name))
@@ -293,7 +326,7 @@ def create_dashboard_data_router() -> APIRouter:
         except WatchlistConfigurationError as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
 
-    @router.put(f"{DASHBOARD_API_PREFIX}/watchlist/groups/order", response_model=WatchlistGroupsResponse)
+    @router.put(f"{TERMINAL_API_PREFIX}/watchlist/groups/order", response_model=WatchlistGroupsResponse)
     def api_reorder_watchlist_groups(body: WatchlistReorderGroupsRequest = Body(...)):
         try:
             watchlist_service.reorder_groups(body.groups)
@@ -301,14 +334,14 @@ def create_dashboard_data_router() -> APIRouter:
         except WatchlistConfigurationError as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
 
-    @router.put(f"{DASHBOARD_API_PREFIX}/watchlist/groups/{{group}}/item-order", response_model=WatchlistSnapshotResponse)
+    @router.put(f"{TERMINAL_API_PREFIX}/watchlist/groups/{{group}}/item-order", response_model=WatchlistSnapshotResponse)
     def api_reorder_watchlist_items(group: str, body: WatchlistReorderItemsRequest = Body(...)):
         try:
             return _watchlist_response(watchlist_service.reorder_items(group, body.symbols))
         except WatchlistConfigurationError as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
 
-    @router.post(f"{DASHBOARD_API_PREFIX}/watchlist/groups/rename", response_model=WatchlistSnapshotResponse)
+    @router.post(f"{TERMINAL_API_PREFIX}/watchlist/groups/rename", response_model=WatchlistSnapshotResponse)
     def api_rename_watchlist_group(body: WatchlistRenameGroupRequest = Body(...)):
         try:
             return _watchlist_response(watchlist_service.rename_group(body.old, body.new))
@@ -317,7 +350,7 @@ def create_dashboard_data_router() -> APIRouter:
         except WatchlistConfigurationError as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
 
-    @router.patch(f"{DASHBOARD_API_PREFIX}/watchlist/{{symbol}}/tags", response_model=WatchlistSnapshotResponse)
+    @router.patch(f"{TERMINAL_API_PREFIX}/watchlist/{{symbol}}/tags", response_model=WatchlistSnapshotResponse)
     async def api_patch_watchlist_tags(symbol: str, body: WatchlistTagsRequest = Body(...)):
         try:
             pre = _is_monitored(_find_item(watchlist_service.get_watchlist_snapshot(), symbol))
@@ -341,7 +374,7 @@ def create_dashboard_data_router() -> APIRouter:
         except WatchlistValidationError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    @router.post(f"{DASHBOARD_API_PREFIX}/watchlist", response_model=WatchlistSnapshotResponse)
+    @router.post(f"{TERMINAL_API_PREFIX}/watchlist", response_model=WatchlistSnapshotResponse)
     def api_add_watchlist_symbol(body: WatchlistCreateRequest = Body(...)):
         try:
             return _watchlist_response(watchlist_service.add_symbol(body.symbol, tags=body.tags))
@@ -360,7 +393,7 @@ def create_dashboard_data_router() -> APIRouter:
         except WatchlistValidationError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    @router.put(f"{DASHBOARD_API_PREFIX}/watchlist", response_model=WatchlistSnapshotResponse)
+    @router.put(f"{TERMINAL_API_PREFIX}/watchlist", response_model=WatchlistSnapshotResponse)
     def api_replace_watchlist(body: WatchlistReplaceRequest = Body(...)):
         try:
             normalized = [s if isinstance(s, str) else s.model_dump() for s in body.symbols]
@@ -370,7 +403,7 @@ def create_dashboard_data_router() -> APIRouter:
         except WatchlistValidationError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    @router.delete(f"{DASHBOARD_API_PREFIX}/watchlist/{{symbol}}", response_model=WatchlistSnapshotResponse)
+    @router.delete(f"{TERMINAL_API_PREFIX}/watchlist/{{symbol}}", response_model=WatchlistSnapshotResponse)
     async def api_remove_watchlist_symbol(symbol: str, group: str | None = Query(default=None)):
         try:
             if group:
@@ -399,13 +432,13 @@ def create_dashboard_data_router() -> APIRouter:
         except WatchlistValidationError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    @router.get(f"{DASHBOARD_API_PREFIX}/reports/weekly")
+    @router.get(f"{TERMINAL_API_PREFIX}/reports/weekly")
     def api_list_weekly_reports():
         from TerraFin.analytics.reports import list_report_summaries
 
         return {"reports": list_report_summaries(limit=12)}
 
-    @router.get(f"{DASHBOARD_API_PREFIX}/reports/weekly/{{as_of}}")
+    @router.get(f"{TERMINAL_API_PREFIX}/reports/weekly/{{as_of}}")
     def api_get_weekly_report(as_of: str):
         from TerraFin.analytics.reports import load_report
 
@@ -414,7 +447,7 @@ def create_dashboard_data_router() -> APIRouter:
             raise HTTPException(status_code=404, detail=f"No report for {as_of}")
         return {**rec.summary(), "markdown": rec.markdown}
 
-    @router.post(f"{DASHBOARD_API_PREFIX}/reports/weekly/run")
+    @router.post(f"{TERMINAL_API_PREFIX}/reports/weekly/run")
     async def api_run_weekly_report():
         import asyncio
 
@@ -427,12 +460,71 @@ def create_dashboard_data_router() -> APIRouter:
         await asyncio.get_event_loop().run_in_executor(None, build_weekly_report)
         return {"reports": list_report_summaries(limit=1)}
 
-    @router.get(f"{DASHBOARD_API_PREFIX}/market-breadth", response_model=MarketBreadthResponse)
+    _SECTOR_ETFS: list[tuple[str, str]] = [
+        # SPDR sector ETFs + key sub-sector slices (semis, software, internet, biotech).
+        ("XLK", "Technology"),
+        ("SOXX", "Semiconductors"),
+        ("IGV", "Software"),
+        ("FDN", "Internet"),
+        ("XLF", "Financials"),
+        ("XLV", "Health Care"),
+        ("XBI", "Biotech"),
+        ("XLY", "Cons. Discr."),
+        ("XLP", "Cons. Staples"),
+        ("XLE", "Energy"),
+        ("XLI", "Industrials"),
+        ("XLB", "Materials"),
+        ("XLU", "Utilities"),
+        ("XLRE", "Real Estate"),
+        ("XLC", "Comm. Svcs."),
+        ("SPY", "S&P 500"),
+    ]
+
+    def _move_pct(symbol: str) -> float | None:
+        try:
+            from TerraFin.data.providers.market.ticker_info import get_ticker_info
+            info = get_ticker_info(symbol) or {}
+            current = info.get("currentPrice") or info.get("regularMarketPrice")
+            prev = info.get("previousClose") or info.get("regularMarketPreviousClose")
+            if current and prev and prev != 0:
+                return ((current / prev) - 1.0) * 100.0
+        except Exception:
+            pass
+        return None
+
+    _INDEX_TICKS: list[tuple[str, str]] = [
+        ("^GSPC", "S&P 500"),
+        ("^IXIC", "Nasdaq"),
+        ("^DJI", "Dow"),
+        ("^VIX", "VIX"),
+    ]
+
+    @router.get(f"{TERMINAL_API_PREFIX}/indices", response_model=IndicesResponse)
+    def api_get_indices():
+        ticks = []
+        for sym, label in _INDEX_TICKS:
+            _move, last, _vol = _live_quote(sym)
+            try:
+                pct = float(_move.replace("%", "").replace("+", "")) if _move != "--" else None
+            except Exception:
+                pct = None
+            ticks.append(IndexTickResponse(symbol=sym, label=label, last=last, changePct=pct))
+        return IndicesResponse(ticks=ticks)
+
+    @router.get(f"{TERMINAL_API_PREFIX}/sectors", response_model=SectorsResponse)
+    def api_get_sectors():
+        tiles = [
+            SectorTileResponse(symbol=sym, name=name, movePct=_move_pct(sym))
+            for sym, name in _SECTOR_ETFS
+        ]
+        return SectorsResponse(tiles=tiles)
+
+    @router.get(f"{TERMINAL_API_PREFIX}/market-breadth", response_model=MarketBreadthResponse)
     def api_get_market_breadth():
         metrics = data_factory.get_panel_data("market_breadth")
         return MarketBreadthResponse(metrics=[BreadthMetricResponse.model_validate(metric) for metric in metrics])
 
-    @router.get(f"{DASHBOARD_API_PREFIX}/trailing-forward-pe-spread", response_model=TrailingForwardPeSpreadResponse)
+    @router.get(f"{TERMINAL_API_PREFIX}/trailing-forward-pe-spread", response_model=TrailingForwardPeSpreadResponse)
     def api_get_trailing_forward_pe_spread():
         payload = data_factory.get_panel_data("trailing_forward_pe")
         summary = payload.get("summary", {}) if isinstance(payload, dict) else {}
@@ -451,25 +543,25 @@ def create_dashboard_data_router() -> APIRouter:
             history=[TrailingForwardPeHistoryPointResponse.model_validate(point) for point in history],
         )
 
-    @router.get(f"{DASHBOARD_API_PREFIX}/cape", response_model=CapeResponse)
+    @router.get(f"{TERMINAL_API_PREFIX}/cape", response_model=CapeResponse)
     def api_get_cape():
         data = data_factory.get_panel_data("cape")
         return CapeResponse(date=data.get("date"), cape=data.get("cape"))
 
-    @router.get(f"{DASHBOARD_API_PREFIX}/fear-greed", response_model=FearGreedResponse)
+    @router.get(f"{TERMINAL_API_PREFIX}/fear-greed", response_model=FearGreedResponse)
     def api_get_fear_greed():
         return FearGreedResponse.model_validate(data_factory.get_panel_data("fear_greed"))
 
-    @router.get(f"{DASHBOARD_API_PREFIX}/cache-status", response_model=CacheStatusResponse)
+    @router.get(f"{TERMINAL_API_PREFIX}/cache-status", response_model=CacheStatusResponse)
     def api_get_cache_status():
         return {"sources": cache_manager.get_status()}
 
-    @router.post(f"{DASHBOARD_API_PREFIX}/cache-refresh", response_model=CacheRefreshResponse)
+    @router.post(f"{TERMINAL_API_PREFIX}/cache-refresh", response_model=CacheRefreshResponse)
     def api_post_cache_refresh(force: bool = Query(default=False)):
         refresh_all_due(force=force)
         return CacheRefreshResponse(ok=True, force=force, sources=cache_manager.get_status())
 
-    @router.get(f"{DASHBOARD_API_PREFIX}/spx-gex-history", response_model=SpxGexHistoryResponse)
+    @router.get(f"{TERMINAL_API_PREFIX}/spx-gex-history", response_model=SpxGexHistoryResponse)
     def api_get_spx_gex_history(force: bool = Query(default=False)):
         from TerraFin.data.providers.market.spx_gex_history import get_spx_gex_history
 

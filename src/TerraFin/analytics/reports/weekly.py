@@ -17,7 +17,6 @@ import threading
 import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ET
-from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
@@ -156,7 +155,7 @@ def _fetch_market(ticker: str, as_of: date) -> list[dict]:
     start_str = (as_of - timedelta(days=45)).isoformat()
     as_of_str = as_of.isoformat()
     try:
-        chunk = get_yf_recent_history(ticker, period="3m")
+        chunk = get_yf_recent_history(ticker, period="3m", force_refresh=True)
         df = chunk.frame
         if df.empty:
             return []
@@ -181,7 +180,7 @@ def _fetch_market(ticker: str, as_of: date) -> list[dict]:
 
 def _fetch_earnings(ticker: str) -> list[dict]:
     try:
-        from TerraFin.interface.stock.payloads import build_earnings_payload
+        from TerraFin.interface.pages.stock.payloads import build_earnings_payload
         payload = build_earnings_payload(ticker)
         return payload.get("earnings") or []
     except Exception as exc:
@@ -291,32 +290,9 @@ def _attribute(events: list[dict], news: list[dict], ticker: str, name: str, day
 
 
 def _action_signal(t: TickerReport) -> list[str]:
-    notes: list[str] = []
-    pct = (t.wow or {}).get("wow_pct", 0)
-    dominant = max(t.catalysts, key=lambda c: abs(c.get("move_pct", 0)), default=None)
-    dom_vol = dominant.get("vol_ratio") if dominant else None
-    has_headline = bool(dominant and dominant.get("headlines"))
-
-    if t.anomaly_flag:
-        if has_headline:
-            notes.append("⚠ outsized weekly move — catalyst named, size into earnings if thesis intact")
-        else:
-            notes.append("⚠ outsized weekly move — no headline match, dig before adding")
-    elif pct >= 8:
-        if has_headline:
-            notes.append("up week with named catalyst — consider trim or trail stop")
-        elif dom_vol and dom_vol >= 1.5:
-            notes.append("strong tape on heavy volume but no headline — verify cause")
-        else:
-            notes.append("up week on tepid volume + no headline — momentum unconfirmed")
-    elif pct <= -8:
-        if has_headline:
-            notes.append("down week with named catalyst — re-test thesis before adding")
-        elif dom_vol and dom_vol >= 1.5:
-            notes.append("breakdown on heavy volume but no headline — verify cause")
-        else:
-            notes.append("down week on thin volume + no headline — drift, not breakdown")
-    return notes
+    # Removed: canned heuristic "Action:" notes were generic boilerplate. The
+    # agent (TA) enrichment section provides the real per-week analysis now.
+    return []
 
 
 def _days_until(date_str: str, as_of: date) -> int | None:
@@ -517,8 +493,10 @@ def _build_weekly_report(
 ) -> str:
     anchor = as_of or _last_completed_friday()
     items, is_sample = _resolve_universe()
-    with ThreadPoolExecutor(max_workers=6) as pool:
-        tickers = list(pool.map(lambda it: _build_ticker(it, anchor), items))
+    # Sequential, not threaded: the yfinance managed-artifact cache isn't
+    # concurrency-safe, so a ThreadPoolExecutor cross-contaminated tickers (VOO
+    # rendered DRAM's WoW). Weekly build runs once a week — sequential is fine.
+    tickers = [_build_ticker(it, anchor) for it in items]
     md = _render(tickers, anchor, is_sample=is_sample)
     if enrich:
         try:
@@ -557,7 +535,7 @@ def _build_weekly_report(
 
 def _resolve_universe() -> tuple[list[dict], bool]:
     try:
-        from TerraFin.interface.watchlist_service import get_watchlist_service
+        from TerraFin.data.watchlist_service import get_watchlist_service
         snapshot = get_watchlist_service().get_watchlist_snapshot() or []
     except Exception as exc:
         log.debug("watchlist unavailable: %s", exc)

@@ -128,7 +128,13 @@ export function useChartData(options: UseChartDataOptions): {
     applySnapshot({ payload: nextPayload, entries: initialEntries });
   }, [initialPayload, initialEntries]);
 
+  // Track the active session so a slow in-flight request from a previous
+  // session can't land late and overwrite newer data.
+  const sessionRef = useRef(sessionId);
+  sessionRef.current = sessionId;
+
   const fetchData = () => {
+    const reqSession = sessionId;
     chartRequest(`${CHART_API_BASE}/chart-data`, sessionId)
       .then((res) => (res.ok ? res.json() : Promise.reject(new Error(`${res.status}`))))
       .then((next: ChartPayload & {
@@ -138,9 +144,13 @@ export function useChartData(options: UseChartDataOptions): {
         entries?: unknown;
         historyBySeries?: unknown;
       }) => {
+        if (reqSession !== sessionRef.current) return; // stale session — drop
         applySnapshot(normalizeSnapshot(next));
       })
-      .catch((err) => setError(err instanceof Error ? err.message : 'Failed to load chart data'));
+      .catch((err) => {
+        if (reqSession !== sessionRef.current) return;
+        setError(err instanceof Error ? err.message : 'Failed to load chart data');
+      });
   };
 
   useEffect(() => {

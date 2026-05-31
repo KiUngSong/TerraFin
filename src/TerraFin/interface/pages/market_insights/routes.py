@@ -13,6 +13,9 @@ def create_market_insights_router(build_dir: Path) -> APIRouter:
     @router.get(MARKET_INSIGHTS_PATH)
     @router.get(f"{MARKET_INSIGHTS_PATH}/")
     def market_insights_index():
-        return FileResponse(build_dir / "index.html")
+        return FileResponse(
+            build_dir / "index.html",
+            headers={"Cache-Control": "no-cache"},
+        )
 
     return router

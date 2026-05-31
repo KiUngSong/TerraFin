@@ -1,0 +1,95 @@
+from typing import Literal
+
+from fastapi import APIRouter, Query, Request
+from pydantic import BaseModel, Field
+
+from TerraFin.data import get_data_factory
+from TerraFin.interface.pages.calendar.state import (
+    get_calendar_selection,
+    set_calendar_selection,
+)
+
+
+CALENDAR_API_PATH = "/calendar/api"
+
+
+def _session_id(request: Request) -> str:
+    return request.headers.get("X-Session-ID", "default")
+
+
+class CalendarEvent(BaseModel):
+    id: str
+    title: str
+    start: str
+    category: Literal["earning", "macro", "event"] = "event"
+    importance: str | None = None
+    displayTime: str | None = None
+    description: str | None = None
+    source: str | None = None
+
+
+class CalendarSelection(BaseModel):
+    eventId: str | None = None
+    month: int | None = Field(default=None, ge=1, le=12)
+    year: int | None = Field(default=None, ge=1970, le=2200)
+
+
+class CalendarEventsResponse(BaseModel):
+    events: list[CalendarEvent]
+    count: int
+    month: int
+    year: int
+
+
+class UpsertEventsRequest(BaseModel):
+    events: list[CalendarEvent]
+
+
+class UpsertEventsResponse(BaseModel):
+    ok: bool
+    count: int
+
+
+class OkResponse(BaseModel):
+    ok: bool
+
+
+def create_calendar_data_router() -> APIRouter:
+    router = APIRouter()
+    data_factory = get_data_factory()
+
+    @router.get(f"{CALENDAR_API_PATH}/events", response_model=CalendarEventsResponse)
+    def api_get_calendar_events(
+        month: int = Query(..., ge=1, le=12),
+        year: int = Query(..., ge=1970, le=2200),
+        categories: str | None = Query(default=None),
+        limit: int | None = Query(default=None, ge=1, le=500),
+    ):
+        category_filter = None
+        if categories:
+            category_filter = {item.strip() for item in categories.split(",") if item.strip()}
+        filtered = data_factory.get_calendar_events(
+            year=year,
+            month=month,
+            categories=category_filter,
+            limit=limit,
+        )
+        model_events = [CalendarEvent.model_validate(event) for event in filtered]
+        return CalendarEventsResponse(events=model_events, count=len(model_events), month=month, year=year)
+
+    @router.post(f"{CALENDAR_API_PATH}/events", response_model=UpsertEventsResponse)
+    def api_post_calendar_events(body: UpsertEventsRequest):
+        data_factory.set_calendar_events([event.model_dump() for event in body.events])
+        return {"ok": True, "count": len(body.events)}
+
+    @router.get(f"{CALENDAR_API_PATH}/selection", response_model=CalendarSelection | None)
+    def api_get_calendar_selection(request: Request):
+        return get_calendar_selection(_session_id(request))
+
+    @router.post(f"{CALENDAR_API_PATH}/selection", response_model=OkResponse)
+    def api_post_calendar_selection(request: Request, body: CalendarSelection):
+        payload = body.model_dump(exclude_none=False)
+        set_calendar_selection(payload, _session_id(request))
+        return {"ok": True}
+
+    return router

@@ -64,20 +64,20 @@ def test_probe_endpoints_remain_root_when_base_path_enabled() -> None:
 def test_feature_routes_use_base_path_prefix_when_enabled() -> None:
     client = TestClient(server_module.create_app(base_path="/terrafin"))
 
-    prefixed = client.get("/terrafin/dashboard/api/watchlist")
-    unprefixed = client.get("/dashboard/api/watchlist")
+    prefixed = client.get("/terrafin/terminal/api/watchlist")
+    unprefixed = client.get("/terminal/api/watchlist")
 
     assert prefixed.status_code == 200
     assert unprefixed.status_code == 404
 
 
-def test_root_redirects_to_dashboard() -> None:
+def test_root_redirects_to_terminal() -> None:
     client = TestClient(server_module.create_app())
 
     response = client.get("/", follow_redirects=False)
 
     assert response.status_code in {302, 307}
-    assert response.headers["location"] == "/dashboard"
+    assert response.headers["location"] == "/terminal"
 
 
 def test_root_redirect_respects_base_path() -> None:
@@ -86,7 +86,7 @@ def test_root_redirect_respects_base_path() -> None:
     response = client.get("/", follow_redirects=False)
 
     assert response.status_code in {302, 307}
-    assert response.headers["location"] == "/terrafin/dashboard"
+    assert response.headers["location"] == "/terrafin/terminal"
 
 
 def test_create_app_raises_clear_error_when_frontend_build_is_missing(monkeypatch, tmp_path) -> None:

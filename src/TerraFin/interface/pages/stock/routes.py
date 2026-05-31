@@ -13,10 +13,16 @@ def create_stock_router(build_dir: Path) -> APIRouter:
     @router.get("/stock/")
     @router.get("/stock")
     def stock_index():
-        return FileResponse(build_dir / "index.html")
+        return FileResponse(
+            build_dir / "index.html",
+            headers={"Cache-Control": "no-cache"},
+        )
 
     @router.get("/stock/{ticker}")
     def stock_detail(ticker: str):
-        return FileResponse(build_dir / "index.html")
+        return FileResponse(
+            build_dir / "index.html",
+            headers={"Cache-Control": "no-cache"},
+        )
 
     return router

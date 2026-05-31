@@ -15,24 +15,24 @@ interface Props {
   lineIndexEnd?: number;
 }
 
-const H2_STYLE: React.CSSProperties = { fontSize: 16, fontWeight: 800, color: '#0f172a', margin: '18px 0 8px', lineHeight: 1.3 };
-const H3_STYLE: React.CSSProperties = { fontSize: 14, fontWeight: 700, color: '#1e293b', margin: '14px 0 6px', lineHeight: 1.35 };
-const H4_STYLE: React.CSSProperties = { fontSize: 13, fontWeight: 700, color: '#334155', margin: '12px 0 4px' };
-const P_STYLE: React.CSSProperties = { fontSize: 13, color: '#334155', lineHeight: 1.6, margin: '0 0 8px' };
+const H2_STYLE: React.CSSProperties = { fontSize: "var(--tf-fs-md)", fontWeight: 700, color: 'var(--tf-text-strong)', margin: '18px 0 8px', lineHeight: 1.3 };
+const H3_STYLE: React.CSSProperties = { fontSize: "var(--tf-fs-md)", fontWeight: 700, color: 'var(--tf-text-strong)', margin: '14px 0 6px', lineHeight: 1.35 };
+const H4_STYLE: React.CSSProperties = { fontSize: "var(--tf-fs-base)", fontWeight: 700, color: 'var(--tf-text)', margin: '12px 0 4px' };
+const P_STYLE: React.CSSProperties = { fontSize: "var(--tf-fs-base)", color: 'var(--tf-text)', lineHeight: 1.6, margin: '0 0 8px' };
 const BLOCKQUOTE_STYLE: React.CSSProperties = {
-  borderLeft: '3px solid #fb923c',
-  background: '#fff7ed',
-  color: '#9a3412',
+  borderLeft: '3px solid var(--tf-amber)',
+  background: 'var(--tf-bg-pane)',
+  color: 'var(--tf-amber)',
   padding: '8px 12px',
-  fontSize: 12,
+  fontSize: "var(--tf-fs-base)",
   margin: '8px 0',
-  borderRadius: 4,
+  borderRadius: 'var(--tf-radius)',
 };
-const TABLE_STYLE: React.CSSProperties = { borderCollapse: 'collapse', fontSize: 12, margin: '8px 0', width: '100%' };
-const TH_STYLE: React.CSSProperties = { border: '1px solid #e2e8f0', background: '#f1f5f9', padding: '6px 8px', textAlign: 'left', fontWeight: 700 };
-const TD_STYLE: React.CSSProperties = { border: '1px solid #e2e8f0', padding: '6px 8px', verticalAlign: 'top' };
-const IMG_STYLE: React.CSSProperties = { maxWidth: '100%', border: '1px solid #e2e8f0', borderRadius: 4, margin: '8px 0' };
-const PLACEHOLDER_STYLE: React.CSSProperties = { ...P_STYLE, color: '#94a3b8', fontStyle: 'italic' };
+const TABLE_STYLE: React.CSSProperties = { borderCollapse: 'collapse', fontSize: "var(--tf-fs-base)", margin: '8px 0', width: '100%' };
+const TH_STYLE: React.CSSProperties = { border: '1px solid var(--tf-border)', background: 'var(--tf-bg-pane)', padding: '6px 8px', textAlign: 'left', fontWeight: 700, color: 'var(--tf-text)' };
+const TD_STYLE: React.CSSProperties = { border: '1px solid var(--tf-border)', padding: '6px 8px', verticalAlign: 'top', color: 'var(--tf-text)' };
+const IMG_STYLE: React.CSSProperties = { maxWidth: '100%', border: '1px solid var(--tf-border)', borderRadius: 'var(--tf-radius)', margin: '8px 0' };
+const PLACEHOLDER_STYLE: React.CSSProperties = { ...P_STYLE, color: 'var(--tf-muted)', fontStyle: 'italic' };
 
 const HEADING_RE = /^(#{2,4})\s+(.*?)\s*$/;
 const TABLE_SEPARATOR_RE = /^\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)*\|?\s*$/;

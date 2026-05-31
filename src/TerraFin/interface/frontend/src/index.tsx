@@ -1,6 +1,8 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import AppRouter from './AppRouter';
+import './styles/theme.css';
+import './styles/terminal.css';
 import './styles/responsive.css';
 
 const rootElement = document.getElementById('root');

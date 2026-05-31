@@ -1,6 +1,6 @@
 import pytest
 
-from TerraFin.interface.config import RuntimeConfigError, load_runtime_config
+from TerraFin.interface.core.config import RuntimeConfigError, load_runtime_config
 
 
 def test_runtime_config_defaults_when_env_missing() -> None:

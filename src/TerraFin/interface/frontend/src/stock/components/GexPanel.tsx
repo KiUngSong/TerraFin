@@ -7,15 +7,20 @@ interface Props {
   error: string | null;
 }
 
+// SVG fill/stroke values must be literal hex — CSS var() does not resolve in
+// SVG presentation attributes. These hex values mirror the dark-mode token
+// palette (tf-up / tf-down / tf-amber / tf-border / tf-text) and stay in sync
+// when tokens change.
 const COLOR_CALL = '#16a34a';
 const COLOR_PUT = '#dc2626';
-const COLOR_SPOT = '#0f172a';
+const COLOR_SPOT = '#e2e8f0';
 const COLOR_ZERO_GAMMA = '#f59e0b';
-const COLOR_GRID = '#e2e8f0';
+const COLOR_GRID = '#334155';
+const COLOR_AXIS = '#94a3b8';  // axis/tick labels — hex, var() doesn't resolve in SVG fill attrs
 
 const GexPanel: React.FC<Props> = ({ payload, loading, error }) => {
-  if (loading) return <div style={{ fontSize: 13, color: '#475569' }}>Loading GEX…</div>;
-  if (error) return <div style={{ fontSize: 13, color: '#b91c1c' }}>Failed to load GEX: {error}</div>;
+  if (loading) return <div style={{ fontSize: "var(--tf-fs-base)", color: 'var(--tf-muted)' }}>Loading GEX…</div>;
+  if (error) return <div style={{ fontSize: "var(--tf-fs-base)", color: 'var(--tf-down)' }}>Failed to load GEX: {error}</div>;
   if (!payload) return null;
   if (!payload.available) return null;
 
@@ -64,8 +69,8 @@ const SummaryRow: React.FC<{
   callWall: { strike: number; gex_b: number } | null;
   putWall: { strike: number; gex_b: number } | null;
 }> = ({ regime, isLong, totalB, spot, zeroGamma, callWall, putWall }) => {
-  const regimeColor = isLong ? '#16a34a' : '#dc2626';
-  const regimeLabel = isLong ? 'LONG GAMMA' : 'SHORT GAMMA';
+  const regimeColor = isLong ? 'var(--tf-up)' : 'var(--tf-down)';
+  const regimeLabel = isLong ? '▲ LONG GAMMA' : '▼ SHORT GAMMA';
   const regimeBlurb = isLong
     ? 'Dealers buy dips / sell rallies — mean-reverting flow.'
     : 'Dealers chase moves — amplifies trend.';
@@ -75,7 +80,7 @@ const SummaryRow: React.FC<{
   return (
     <div style={summaryRowStyle}>
       <div style={summaryBlockStyle}>
-        <div style={{ ...regimeBadgeStyle, background: isLong ? '#dcfce7' : '#fee2e2', color: regimeColor }}>
+        <div style={{ ...regimeBadgeStyle, background: 'var(--tf-bg-pane)', color: regimeColor }}>
           {regimeLabel}
         </div>
         <div style={metricLabelStyle}>Total GEX</div>
@@ -91,7 +96,7 @@ const SummaryRow: React.FC<{
             <div style={{ ...metricLabelStyle, marginTop: 8 }}>Zero-gamma strike</div>
             <div style={metricValueSecondaryStyle}>{zeroGamma.toFixed(2)}</div>
             {distance != null && (
-              <div style={{ ...metricFootnoteStyle, color: Math.abs(distance) < 0.5 ? '#dc2626' : '#64748b' }}>
+              <div style={{ ...metricFootnoteStyle, color: Math.abs(distance) < 0.5 ? 'var(--tf-down)' : 'var(--tf-muted)' }}>
                 spot is {distance >= 0 ? '+' : ''}
                 {distance.toFixed(2)}% vs zero-gamma
               </div>
@@ -102,11 +107,11 @@ const SummaryRow: React.FC<{
 
       <div style={summaryBlockStyle}>
         <div style={metricLabelStyle}>Largest call wall</div>
-        <div style={{ ...metricValueSecondaryStyle, color: COLOR_CALL }}>
+        <div style={{ ...metricValueSecondaryStyle, color: 'var(--tf-up)' }}>
           {callWall ? `${callWall.strike.toFixed(2)} (${formatB(callWall.gex_b)})` : '—'}
         </div>
         <div style={{ ...metricLabelStyle, marginTop: 8 }}>Largest put wall</div>
-        <div style={{ ...metricValueSecondaryStyle, color: COLOR_PUT }}>
+        <div style={{ ...metricValueSecondaryStyle, color: 'var(--tf-down)' }}>
           {putWall ? `${putWall.strike.toFixed(2)} (${formatB(putWall.gex_b)})` : '—'}
         </div>
       </div>
@@ -185,13 +190,13 @@ const ByStrikeChart: React.FC<{
       {spot >= minStrike && spot <= maxStrike && (
         <>
           <line x1={x(spot)} x2={x(spot)} y1={PAD_T} y2={H - PAD_B} stroke={COLOR_SPOT} strokeWidth={1.5} strokeDasharray="3 3" />
-          <text x={x(spot)} y={PAD_T - 10} fontSize={10} fill={COLOR_SPOT} textAnchor="middle">spot {spot.toFixed(2)}</text>
+          <text x={x(spot)} y={PAD_T - 10} style={{ fontSize: 'var(--tf-fs-micro)' }} fill={COLOR_SPOT} textAnchor="middle">spot {spot.toFixed(2)}</text>
         </>
       )}
       {zeroGamma != null && zeroGamma >= minStrike && zeroGamma <= maxStrike && (
         <>
           <line x1={x(zeroGamma)} x2={x(zeroGamma)} y1={PAD_T} y2={H - PAD_B} stroke={COLOR_ZERO_GAMMA} strokeWidth={1.5} />
-          <text x={x(zeroGamma)} y={H - PAD_B + 14} fontSize={10} fill={COLOR_ZERO_GAMMA} textAnchor="middle">γ=0 {zeroGamma.toFixed(2)}</text>
+          <text x={x(zeroGamma)} y={H - PAD_B + 14} style={{ fontSize: 'var(--tf-fs-micro)' }} fill={COLOR_ZERO_GAMMA} textAnchor="middle">γ=0 {zeroGamma.toFixed(2)}</text>
         </>
       )}
       {/* Wall markers — colored triangles at the bar top, no text overlay. */}
@@ -199,16 +204,16 @@ const ByStrikeChart: React.FC<{
       {putWall != null && wallMarker(putWall, COLOR_PUT, 'pw')}
       {/* x-axis ticks: min, mid, max */}
       {[minStrike, (minStrike + maxStrike) / 2, maxStrike].map((s, i) => (
-        <text key={i} x={x(s)} y={H - 14} fontSize={10} fill="#64748b" textAnchor={i === 0 ? 'start' : i === 2 ? 'end' : 'middle'}>
+        <text key={i} x={x(s)} y={H - 14} style={{ fontSize: 'var(--tf-fs-micro)' }} fill={COLOR_AXIS} textAnchor={i === 0 ? 'start' : i === 2 ? 'end' : 'middle'}>
           {s.toFixed(0)}
         </text>
       ))}
       {/* Single x-axis caption so the reader sees what the bottom number means. */}
-      <text x={(PAD_L + W - PAD_R) / 2} y={H - 2} fontSize={9} fill="#94a3b8" textAnchor="middle">strike</text>
+      <text x={(PAD_L + W - PAD_R) / 2} y={H - 2} style={{ fontSize: 'var(--tf-fs-micro)' }} fill={COLOR_AXIS} textAnchor="middle">strike</text>
       {/* y-axis labels */}
-      <text x={4} y={y(maxAbs) + 3} fontSize={10} fill="#64748b">+{maxAbs.toFixed(2)}B</text>
-      <text x={4} y={y(0) + 3} fontSize={10} fill="#64748b">0</text>
-      <text x={4} y={y(-maxAbs) + 3} fontSize={10} fill="#64748b">-{maxAbs.toFixed(2)}B</text>
+      <text x={4} y={y(maxAbs) + 3} style={{ fontSize: 'var(--tf-fs-micro)' }} fill={COLOR_AXIS}>+{maxAbs.toFixed(2)}B</text>
+      <text x={4} y={y(0) + 3} style={{ fontSize: 'var(--tf-fs-micro)' }} fill={COLOR_AXIS}>0</text>
+      <text x={4} y={y(-maxAbs) + 3} style={{ fontSize: 'var(--tf-fs-micro)' }} fill={COLOR_AXIS}>-{maxAbs.toFixed(2)}B</text>
     </svg>
   );
 };
@@ -246,22 +251,22 @@ const ByExpirationChart: React.FC<{ buckets: { expiration?: string | null; gex_b
               opacity={0.85}
             />
             {(i === 0 || i === buckets.length - 1 || i % Math.max(Math.floor(buckets.length / 4), 1) === 0) && (
-              <text x={xc} y={H - 18} fontSize={9} fill="#64748b" textAnchor="middle" transform={`rotate(-30 ${xc} ${H - 18})`}>
+              <text x={xc} y={H - 18} style={{ fontSize: 'var(--tf-fs-micro)' }} fill={COLOR_AXIS} textAnchor="middle" transform={`rotate(-30 ${xc} ${H - 18})`}>
                 {b.expiration?.slice(5)}
               </text>
             )}
           </g>
         );
       })}
-      <text x={4} y={y(maxAbs) + 3} fontSize={10} fill="#64748b">+{maxAbs.toFixed(2)}B</text>
-      <text x={4} y={y(0) + 3} fontSize={10} fill="#64748b">0</text>
-      <text x={4} y={y(-maxAbs) + 3} fontSize={10} fill="#64748b">-{maxAbs.toFixed(2)}B</text>
+      <text x={4} y={y(maxAbs) + 3} style={{ fontSize: 'var(--tf-fs-micro)' }} fill={COLOR_AXIS}>+{maxAbs.toFixed(2)}B</text>
+      <text x={4} y={y(0) + 3} style={{ fontSize: 'var(--tf-fs-micro)' }} fill={COLOR_AXIS}>0</text>
+      <text x={4} y={y(-maxAbs) + 3} style={{ fontSize: 'var(--tf-fs-micro)' }} fill={COLOR_AXIS}>-{maxAbs.toFixed(2)}B</text>
     </svg>
   );
 };
 
 const EmptyChart: React.FC<{ message: string }> = ({ message }) => (
-  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', fontSize: 12, color: '#94a3b8' }}>
+  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', fontSize: "var(--tf-fs-base)", color: 'var(--tf-muted)' }}>
     {message}
   </div>
 );
@@ -289,16 +294,16 @@ const summaryBlockStyle: React.CSSProperties = {
   flexDirection: 'column',
   gap: 4,
   padding: '12px 14px',
-  background: '#f8fafc',
-  border: '1px solid #e2e8f0',
-  borderRadius: 10,
+  background: 'var(--tf-bg-elevated)',
+  border: '1px solid var(--tf-border)',
+  borderRadius: 'var(--tf-radius)',
   minWidth: 0,
 };
 
 const regimeBadgeStyle: React.CSSProperties = {
   alignSelf: 'flex-start',
-  fontSize: 10,
-  fontWeight: 800,
+  fontSize: "var(--tf-fs-xs)",
+  fontWeight: 700,
   letterSpacing: '0.06em',
   padding: '3px 8px',
   borderRadius: 999,
@@ -306,28 +311,28 @@ const regimeBadgeStyle: React.CSSProperties = {
 };
 
 const metricLabelStyle: React.CSSProperties = {
-  fontSize: 11,
+  fontSize: "var(--tf-fs-xs)",
   fontWeight: 700,
-  color: '#64748b',
+  color: 'var(--tf-muted)',
   textTransform: 'uppercase',
   letterSpacing: '0.05em',
 };
 
 const metricValueStyle: React.CSSProperties = {
-  fontSize: 22,
+  fontSize: "var(--tf-fs-lg)",
   fontWeight: 700,
-  color: '#0f172a',
+  color: 'var(--tf-text-strong)',
 };
 
 const metricValueSecondaryStyle: React.CSSProperties = {
-  fontSize: 16,
+  fontSize: "var(--tf-fs-base)",
   fontWeight: 700,
-  color: '#0f172a',
+  color: 'var(--tf-text-strong)',
 };
 
 const metricFootnoteStyle: React.CSSProperties = {
-  fontSize: 11,
-  color: '#64748b',
+  fontSize: "var(--tf-fs-xs)",
+  color: 'var(--tf-muted)',
   marginTop: 2,
 };
 
@@ -342,15 +347,15 @@ const chartCardStyle: React.CSSProperties = {
   flexDirection: 'column',
   gap: 8,
   padding: 12,
-  background: '#fff',
-  border: '1px solid #e2e8f0',
-  borderRadius: 10,
+  background: 'var(--tf-bg-pane)',
+  border: '1px solid var(--tf-border)',
+  borderRadius: 'var(--tf-radius)',
 };
 
 const chartTitleStyle: React.CSSProperties = {
-  fontSize: 12,
+  fontSize: "var(--tf-fs-xs)",
   fontWeight: 700,
-  color: '#475569',
+  color: 'var(--tf-muted)',
   letterSpacing: '0.04em',
   textTransform: 'uppercase',
 };

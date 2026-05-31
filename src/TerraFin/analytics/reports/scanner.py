@@ -4,7 +4,7 @@ from concurrent.futures import ThreadPoolExecutor
 import pandas as pd
 
 from TerraFin.analytics.analysis.patterns import Signal, evaluate
-from TerraFin.interface.watchlist_service import get_watchlist_service
+from TerraFin.data.watchlist_service import get_watchlist_service
 
 
 log = logging.getLogger(__name__)

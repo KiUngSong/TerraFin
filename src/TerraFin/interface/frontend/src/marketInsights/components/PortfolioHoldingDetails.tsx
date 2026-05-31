@@ -24,17 +24,17 @@ interface PortfolioHoldingDetailsProps {
 }
 
 const sectionLabelStyle: React.CSSProperties = {
-  fontSize: 11,
+  fontSize: "var(--tf-fs-xs)",
   fontWeight: 700,
   letterSpacing: '0.04em',
   textTransform: 'uppercase',
-  color: '#64748b',
+  color: 'var(--tf-muted)',
 };
 
 const metaValueStyle: React.CSSProperties = {
-  fontSize: 13,
+  fontSize: "var(--tf-fs-base)",
   fontWeight: 700,
-  color: '#0f172a',
+  color: 'var(--tf-text)',
 };
 
 const listItemValueStyle: React.CSSProperties = {
@@ -86,29 +86,28 @@ const PortfolioHoldingDetails: React.FC<PortfolioHoldingDetailsProps> = ({
       {activeRow && activeTicker && activeTone ? (
         <div
           style={{
-            borderRadius: 14,
+            borderRadius: 'var(--tf-radius)',
             border: `1px solid ${activeTone.edge}`,
-            background: `linear-gradient(180deg, ${activeTone.fill} 0%, ${activeTone.edge} 100%)`,
+            background: activeTone.fill,
             color: '#ffffff',
             padding: 8,
             display: 'flex',
             flexDirection: 'column',
             justifyContent: 'space-between',
             gap: 6,
-            boxShadow: `0 12px 28px ${activeTone.edge}33`,
             overflow: 'hidden',
             minHeight: 0,
           }}
         >
           <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
             <div style={{ minWidth: 0, flex: 1 }}>
-              <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase', opacity: 0.78 }}>
+              <div style={{ fontSize: "var(--tf-fs-micro)", fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase', opacity: 0.78 }}>
                 Focused Holding
               </div>
               <div
                 style={{
-                  fontSize: 14,
-                  fontWeight: 800,
+                  fontSize: "var(--tf-fs-base)",
+                  fontWeight: 700,
                   lineHeight: 1.05,
                   ...(isMobile
                     ? { whiteSpace: 'normal', overflowWrap: 'anywhere' as const }
@@ -121,7 +120,7 @@ const PortfolioHoldingDetails: React.FC<PortfolioHoldingDetailsProps> = ({
                 <div
                   style={{
                     marginTop: 1,
-                    fontSize: 9.5,
+                    fontSize: "var(--tf-fs-micro)",
                     lineHeight: 1.15,
                     opacity: 0.9,
                     ...(isMobile
@@ -139,7 +138,7 @@ const PortfolioHoldingDetails: React.FC<PortfolioHoldingDetailsProps> = ({
                 padding: '4px 8px',
                 background: 'rgba(255, 255, 255, 0.14)',
                 border: '1px solid rgba(255, 255, 255, 0.22)',
-                fontSize: 10,
+                fontSize: "var(--tf-fs-micro)",
                 fontWeight: 700,
                 whiteSpace: 'nowrap',
               }}
@@ -164,9 +163,9 @@ const PortfolioHoldingDetails: React.FC<PortfolioHoldingDetailsProps> = ({
       ) : (
         <div
           style={{
-            borderRadius: 14,
-            border: '1px solid #dbe5f0',
-            background: 'linear-gradient(180deg, #f8fbff 0%, #eef4ff 100%)',
+            borderRadius: 'var(--tf-radius)',
+            border: '1px solid var(--tf-border)',
+            background: 'var(--tf-bg-elevated)',
             padding: 8,
             display: 'flex',
             flexDirection: 'column',
@@ -181,9 +180,9 @@ const PortfolioHoldingDetails: React.FC<PortfolioHoldingDetailsProps> = ({
               <div style={sectionLabelStyle}>Portfolio Snapshot</div>
               <div
               style={{
-                fontSize: 13,
-                fontWeight: 800,
-                color: '#0f172a',
+                fontSize: "var(--tf-fs-md)",
+                fontWeight: 700,
+                color: 'var(--tf-text-strong)',
                 ...(isMobile
                   ? { whiteSpace: 'normal', overflowWrap: 'anywhere' as const }
                   : { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const }),
@@ -195,9 +194,9 @@ const PortfolioHoldingDetails: React.FC<PortfolioHoldingDetailsProps> = ({
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 3 }}>
               <div
                 style={{
-                  fontSize: 10,
+                  fontSize: "var(--tf-fs-micro)",
                   fontWeight: 700,
-                  color: '#475569',
+                  color: 'var(--tf-muted)',
                   whiteSpace: isMobile ? 'normal' : 'nowrap',
                   textAlign: 'right',
                 }}
@@ -210,9 +209,9 @@ const PortfolioHoldingDetails: React.FC<PortfolioHoldingDetailsProps> = ({
                   target="_blank"
                   rel="noopener noreferrer"
                   style={{
-                    fontSize: 10,
+                    fontSize: "var(--tf-fs-micro)",
                     fontWeight: 700,
-                    color: '#1d4ed8',
+                    color: 'var(--tf-amber)',
                     textDecoration: 'none',
                     whiteSpace: 'nowrap',
                   }}
@@ -240,9 +239,9 @@ const PortfolioHoldingDetails: React.FC<PortfolioHoldingDetailsProps> = ({
 
       <div
         style={{
-          borderRadius: 12,
-          border: '1px solid #e2e8f0',
-          background: '#ffffff',
+          borderRadius: 'var(--tf-radius)',
+          border: '1px solid var(--tf-border)',
+          background: 'var(--tf-bg-elevated)',
           display: 'flex',
           flexDirection: 'column',
           minHeight: 0,
@@ -252,7 +251,7 @@ const PortfolioHoldingDetails: React.FC<PortfolioHoldingDetailsProps> = ({
         <div
           style={{
             padding: '8px 10px',
-            borderBottom: '1px solid #eef2f7',
+            borderBottom: '1px solid var(--tf-border)',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
@@ -260,7 +259,7 @@ const PortfolioHoldingDetails: React.FC<PortfolioHoldingDetailsProps> = ({
           }}
         >
           <div style={sectionLabelStyle}>Top Holdings</div>
-          <div style={{ fontSize: 9.5, color: '#64748b' }}>{rankedHoldings.length > 0 ? `${rankedHoldings.length} tracked` : 'No holdings'}</div>
+          <div style={{ fontSize: "var(--tf-fs-micro)", color: 'var(--tf-muted)' }}>{rankedHoldings.length > 0 ? `${rankedHoldings.length} tracked` : 'No holdings'}</div>
         </div>
 
         <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: 5 }}>
@@ -278,9 +277,9 @@ const PortfolioHoldingDetails: React.FC<PortfolioHoldingDetailsProps> = ({
                   <div
                     key={rowKey}
                     style={{
-                      borderRadius: 12,
-                      border: isActive ? `1px solid ${tone.edge}` : '1px solid #edf2f7',
-                      background: isActive ? `${tone.fill}12` : '#f8fafc',
+                      borderRadius: 'var(--tf-radius)',
+                      border: isActive ? `1px solid ${tone.edge}` : '1px solid var(--tf-border)',
+                      background: isActive ? 'var(--tf-bg-elevated)' : 'var(--tf-bg)',
                       padding: '6px 8px',
                       display: 'grid',
                       gap: 3,
@@ -293,32 +292,32 @@ const PortfolioHoldingDetails: React.FC<PortfolioHoldingDetailsProps> = ({
                             width: 24,
                             height: 24,
                             borderRadius: 999,
-                            background: isActive ? tone.fill : '#e2e8f0',
-                            color: isActive ? '#ffffff' : '#334155',
+                            background: isActive ? tone.fill : 'var(--tf-bg-elevated)',
+                            color: isActive ? '#ffffff' : 'var(--tf-text)',
                             display: 'flex',
                             alignItems: 'center',
                             justifyContent: 'center',
-                            fontSize: 10.5,
-                            fontWeight: 800,
+                            fontSize: "var(--tf-fs-micro)",
+                            fontWeight: 700,
                             flexShrink: 0,
                           }}
                         >
                           {index + 1}
                         </div>
                         <div style={{ minWidth: 0 }}>
-                          <div style={{ fontSize: 11, fontWeight: 800, color: '#0f172a' }}>{ticker.ticker}</div>
+                          <div style={{ fontSize: "var(--tf-fs-xs)", fontWeight: 700, color: 'var(--tf-text-strong)' }}>{ticker.ticker}</div>
                           {ticker.company ? (
-                            <div style={{ fontSize: 9.5, lineHeight: 1.15, color: '#64748b', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                            <div style={{ fontSize: "var(--tf-fs-micro)", lineHeight: 1.15, color: 'var(--tf-muted)', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                               {ticker.company}
                             </div>
                           ) : null}
                         </div>
                       </div>
-                      <div style={{ ...listItemValueStyle, fontSize: 10.5, fontWeight: 800, color: '#0f172a' }}>{weight.toFixed(2)}%</div>
+                      <div style={{ ...listItemValueStyle, fontSize: "var(--tf-fs-micro)", fontWeight: 700, color: 'var(--tf-text-strong)' }}>{weight.toFixed(2)}%</div>
                     </div>
 
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
-                      <div style={{ fontSize: 9.5, color: '#475569' }}>{formatPortfolioActivity(holding)}</div>
+                      <div style={{ fontSize: "var(--tf-fs-micro)", color: 'var(--tf-muted)' }}>{formatPortfolioActivity(holding)}</div>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                         {Array.isArray(holding.History) ? (
                           <HistorySparkline data={holding.History as (number | null)[]} />
@@ -326,9 +325,9 @@ const PortfolioHoldingDetails: React.FC<PortfolioHoldingDetailsProps> = ({
                         <div
                           style={{
                             ...listItemValueStyle,
-                            fontSize: 9.5,
+                            fontSize: "var(--tf-fs-micro)",
                             fontWeight: 700,
-                            color: update < 0 ? '#b42318' : update > 0 ? '#166534' : '#475569',
+                            color: update < 0 ? 'var(--tf-down)' : update > 0 ? 'var(--tf-up)' : 'var(--tf-muted)',
                           }}
                         >
                           {formatSignedPercent(update)}
@@ -344,8 +343,8 @@ const PortfolioHoldingDetails: React.FC<PortfolioHoldingDetailsProps> = ({
               style={{
                 padding: 20,
                 textAlign: 'center',
-                fontSize: 13,
-                color: '#94a3b8',
+                fontSize: "var(--tf-fs-base)",
+                color: 'var(--tf-muted)',
               }}
             >
               No holdings available yet.
@@ -381,7 +380,7 @@ const HistorySparkline: React.FC<SparklineProps> = ({ data, width = 48, height =
   const lastVal = data[data.length - 1];
   const prevVal = data.slice(0, -1).reverse().find((v) => v != null);
   const trending = lastVal != null && prevVal != null ? lastVal >= prevVal : null;
-  const color = trending === true ? '#166534' : trending === false ? '#b42318' : '#64748b';
+  const color = trending === true ? 'var(--tf-up)' : trending === false ? 'var(--tf-down)' : 'var(--tf-muted)';
   return (
     <svg width={width} height={height} style={{ display: 'block', flexShrink: 0 }}>
       <polyline points={points} fill="none" stroke={color} strokeWidth={1.5} strokeLinejoin="round" />
@@ -399,9 +398,9 @@ interface MetricProps {
 const InlineMetric: React.FC<MetricProps> = ({ label, value, inverse = false, subtle = false }) => (
   <div
     style={{
-      borderRadius: 999,
-      border: inverse ? '1px solid rgba(255, 255, 255, 0.16)' : '1px solid #e2e8f0',
-      background: inverse ? 'rgba(255, 255, 255, 0.12)' : subtle ? '#f8fafc' : '#ffffff',
+      borderRadius: 'var(--tf-radius)',
+      border: inverse ? '1px solid rgba(255, 255, 255, 0.16)' : '1px solid var(--tf-border)',
+      background: inverse ? 'rgba(255, 255, 255, 0.12)' : subtle ? 'var(--tf-bg)' : 'var(--tf-bg-elevated)',
       padding: '4px 7px',
       display: 'inline-flex',
       alignItems: 'baseline',
@@ -413,11 +412,11 @@ const InlineMetric: React.FC<MetricProps> = ({ label, value, inverse = false, su
   >
     <span
       style={{
-        fontSize: 8.5,
+        fontSize: "var(--tf-fs-micro)",
         fontWeight: 700,
         letterSpacing: '0.04em',
         textTransform: 'uppercase',
-        color: inverse ? 'rgba(255, 255, 255, 0.72)' : '#64748b',
+        color: inverse ? 'rgba(255, 255, 255, 0.72)' : 'var(--tf-muted)',
         whiteSpace: 'nowrap',
       }}
     >
@@ -425,7 +424,7 @@ const InlineMetric: React.FC<MetricProps> = ({ label, value, inverse = false, su
     </span>
     <span
       style={{
-        fontSize: 10,
+        fontSize: "var(--tf-fs-xs)",
         fontWeight: 700,
         lineHeight: 1.2,
         color: inverse ? '#ffffff' : metaValueStyle.color,

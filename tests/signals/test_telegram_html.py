@@ -1,5 +1,5 @@
 """Tests for markdown→Telegram-HTML conversion + chunk splitting."""
-from TerraFin.interface.channels.telegram import _markdown_to_telegram_html
+from TerraFin.interface.infra.channels.telegram import _markdown_to_telegram_html
 
 
 def test_headings_become_bold():

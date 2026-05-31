@@ -8,7 +8,7 @@ _cache_manager: CacheManager | None = None
 def get_cache_manager() -> CacheManager:
     global _cache_manager
     if _cache_manager is None:
-        from TerraFin.interface.config import load_runtime_config
+        from TerraFin.interface.core.config import load_runtime_config
 
         _cache_manager = CacheManager(timezone_name=load_runtime_config().cache_timezone)
         _register_default_sources(_cache_manager)

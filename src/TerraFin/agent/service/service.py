@@ -12,14 +12,14 @@ from TerraFin.analytics.analysis.risk.profile import run_risk_profile
 from TerraFin.analytics.analysis.risk.returns import extract_close_series
 from TerraFin.data import DataFactory, get_data_factory, indicator_registry
 from TerraFin.data.contracts import TimeSeriesDataFrame
-from TerraFin.interface.market_insights.payloads import (
+from TerraFin.interface.pages.market_insights.payloads import (
     build_macro_info_payload,
     canonical_macro_name,
     get_macro_description,
     resolve_macro_type,
 )
-from TerraFin.interface.stock.data_routes import build_beta_estimate_payload
-from TerraFin.interface.stock.payloads import (
+from TerraFin.interface.pages.stock.data_routes import build_beta_estimate_payload
+from TerraFin.interface.pages.stock.payloads import (
     build_company_info_payload,
     build_earnings_payload,
     build_filing_document_payload,
@@ -27,7 +27,7 @@ from TerraFin.interface.stock.payloads import (
     build_financial_statement_payload,
     resolve_ticker_query,
 )
-from TerraFin.interface.watchlist_service import get_watchlist_service
+from TerraFin.data.watchlist_service import get_watchlist_service
 
 _logger = logging.getLogger(__name__)
 
@@ -518,7 +518,7 @@ class TerraFinAgentService:
         session_frame = None
         if session_id:
             try:
-                from TerraFin.interface.chart.state import get_named_series
+                from TerraFin.interface.pages.chart.state import get_named_series
 
                 session_frame = get_named_series(session_id).get(resolved_name)
             except Exception:
@@ -764,7 +764,7 @@ class TerraFinAgentService:
     # -----------------------------------------------------------------
 
     def fear_greed(self) -> dict[str, Any]:
-        """CNN Fear & Greed index — matches `/dashboard/api/fear-greed`."""
+        """CNN Fear & Greed index — matches `/terminal/api/fear-greed`."""
         payload = dict(self._data_factory.get_panel_data("fear_greed"))
         payload["processing"] = _full_processing(
             requested_depth="full",
@@ -824,7 +824,7 @@ class TerraFinAgentService:
 
     def fcf_history(self, ticker: str, years: int = 10) -> dict[str, Any]:
         """FCF history candidates — matches `/agent/api/fcf-history`."""
-        from TerraFin.interface.stock.payloads import build_fcf_history_payload
+        from TerraFin.interface.pages.stock.payloads import build_fcf_history_payload
 
         return build_fcf_history_payload(ticker, years=years)
 
@@ -896,7 +896,7 @@ class TerraFinAgentService:
         }
 
     def trailing_forward_pe(self) -> dict[str, Any]:
-        """Trailing minus forward P/E spread — matches `/dashboard/api/trailing-forward-pe-spread`."""
+        """Trailing minus forward P/E spread — matches `/terminal/api/trailing-forward-pe-spread`."""
         payload = self._data_factory.get_panel_data("trailing_forward_pe") or {}
         summary = payload.get("summary", {}) if isinstance(payload, dict) else {}
         coverage = payload.get("coverage", {}) if isinstance(payload, dict) else {}
@@ -920,7 +920,7 @@ class TerraFinAgentService:
         }
 
     def market_breadth(self) -> dict[str, Any]:
-        """Market breadth metrics — matches `/dashboard/api/market-breadth`.
+        """Market breadth metrics — matches `/terminal/api/market-breadth`.
 
         Was previously bundled inside `market_snapshot`, which mixed a
         per-ticker view with whole-market state. Now a standalone capability

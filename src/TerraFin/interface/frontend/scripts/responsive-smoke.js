@@ -36,7 +36,7 @@ async function detectExecutablePath() {
 }
 
 async function main() {
-  const baseUrl = process.env.RESPONSIVE_SMOKE_URL || 'http://127.0.0.1:8001/dashboard';
+  const baseUrl = process.env.RESPONSIVE_SMOKE_URL || 'http://127.0.0.1:8001/terminal';
   const outputDir = process.env.RESPONSIVE_SMOKE_DIR || path.join(process.cwd(), 'artifacts', 'responsive-smoke');
   const executablePath = await detectExecutablePath();
 

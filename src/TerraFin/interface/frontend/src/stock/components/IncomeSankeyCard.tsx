@@ -56,10 +56,10 @@ const fmtPct = (value: number | null | undefined): string => {
 // rising "cost of sales" Y/Y is a negative signal even though the number is
 // up. The boolean signals which side of the ledger this metric sits on.
 const yoyColor = (yoy: number | null | undefined, costSide = false): string => {
-  if (typeof yoy !== 'number' || !Number.isFinite(yoy)) return '#64748b';
+  if (typeof yoy !== 'number' || !Number.isFinite(yoy)) return 'var(--tf-muted)';
   const positive = yoy >= 0;
   const good = costSide ? !positive : positive;
-  return good ? '#059669' : '#dc2626';
+  return good ? 'var(--tf-up)' : 'var(--tf-down)';
 };
 
 const COST_SIDE_METRICS = new Set([
@@ -93,12 +93,12 @@ const KpiCell: React.FC<{ label: string; metric: IncomeSankeyMetric | undefined;
   const costSide = COST_SIDE_METRICS.has(metricKey);
   return (
     <div style={{ minWidth: 0 }}>
-      <div style={{ fontSize: 12, color: '#475569', fontWeight: 500, textTransform: 'uppercase', letterSpacing: 0.4 }}>
+      <div style={{ fontSize: "var(--tf-fs-xs)", color: 'var(--tf-muted)', fontWeight: 500, textTransform: 'uppercase', letterSpacing: 0.4 }}>
         {label}
       </div>
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginTop: 4 }}>
-        <span style={{ fontSize: 22, fontWeight: 700, color: '#0f172a' }}>{fmtUSD(value)}</span>
-        <span style={{ fontSize: 12, fontWeight: 600, color: yoyColor(yoy, costSide) }}>
+        <span style={{ fontSize: "var(--tf-fs-lg)", fontWeight: 700, color: 'var(--tf-text-strong)' }}>{fmtUSD(value)}</span>
+        <span style={{ fontSize: "var(--tf-fs-base)", fontWeight: 600, color: yoyColor(yoy, costSide) }}>
           {fmtPct(yoy)} Y/Y
         </span>
       </div>
@@ -113,10 +113,10 @@ const PeriodToggle: React.FC<{
   <div
     style={{
       display: 'inline-flex',
-      border: '1px solid #e2e8f0',
-      borderRadius: 8,
+      border: '1px solid var(--tf-border)',
+      borderRadius: 'var(--tf-radius)',
       overflow: 'hidden',
-      background: '#fff',
+      background: 'var(--tf-bg-elevated)',
     }}
   >
     {PERIOD_OPTIONS.map((opt) => {
@@ -128,10 +128,10 @@ const PeriodToggle: React.FC<{
           onClick={() => onChange(opt.value)}
           style={{
             padding: '6px 14px',
-            background: active ? '#0f172a' : 'transparent',
-            color: active ? '#fff' : '#475569',
+            background: active ? 'var(--tf-amber)' : 'transparent',
+            color: active ? 'var(--tf-bg)' : 'var(--tf-muted)',
             border: 'none',
-            fontSize: 12,
+            fontSize: "var(--tf-fs-xs)",
             fontWeight: 600,
             cursor: 'pointer',
             transition: 'background 120ms ease',
@@ -209,14 +209,16 @@ const IncomeSankeyCard: React.FC<IncomeSankeyCardProps> = ({
   }, [payload]);
 
   const headerRight = (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+    <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
       {payload?.asOf ? (
-        <span style={{ fontSize: 12, color: '#475569', fontWeight: 500 }}>
+        <span style={{ fontSize: "var(--tf-fs-xs)", color: 'var(--tf-muted)', fontWeight: 500 }}>
           {payload.period === 'quarter' ? 'Period' : 'FY'} ending {payload.asOf}
           {payload.priorAsOf ? ` · vs ${payload.priorAsOf}` : ''}
         </span>
       ) : null}
-      <PeriodToggle period={period} onChange={onPeriodChange} />
+      <div style={{ flexShrink: 0 }}>
+        <PeriodToggle period={period} onChange={onPeriodChange} />
+      </div>
     </div>
   );
 
@@ -230,7 +232,7 @@ const IncomeSankeyCard: React.FC<IncomeSankeyCardProps> = ({
           </div>
           {headerRight}
         </div>
-        <div style={{ padding: '40px 16px', textAlign: 'center', color: '#dc2626', fontSize: 13 }}>
+        <div style={{ padding: '40px 16px', textAlign: 'center', color: 'var(--tf-down)', fontSize: "var(--tf-fs-base)" }}>
           {error.includes('404') || error.includes('422')
             ? 'Income statement data is not available for this ticker.'
             : `Failed to load income statement: ${error}`}
@@ -249,7 +251,7 @@ const IncomeSankeyCard: React.FC<IncomeSankeyCardProps> = ({
           </div>
           {headerRight}
         </div>
-        <div style={{ padding: '40px 16px', textAlign: 'center', color: '#475569', fontSize: 13 }}>
+        <div style={{ padding: '40px 16px', textAlign: 'center', color: 'var(--tf-muted)', fontSize: "var(--tf-fs-base)" }}>
           Loading income statement...
         </div>
       </div>
@@ -274,7 +276,7 @@ const IncomeSankeyCard: React.FC<IncomeSankeyCardProps> = ({
           gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))',
           gap: 16,
           padding: '0 4px 16px',
-          borderBottom: '1px solid #e2e8f0',
+          borderBottom: '1px solid var(--tf-border)',
           marginBottom: 12,
         }}
       >
@@ -357,10 +359,10 @@ const IncomeSankeyCard: React.FC<IncomeSankeyCardProps> = ({
               <div style={tooltipStyle}>
                 <div style={{ fontWeight: 700, display: 'flex', alignItems: 'center', gap: 8 }}>
                   <span>{node.label}</span>
-                  {tag ? <span style={{ fontSize: 10, fontWeight: 600, opacity: 0.75 }}>{tag}</span> : null}
+                  {tag ? <span style={{ fontSize: "var(--tf-fs-micro)", fontWeight: 600, opacity: 0.75 }}>{tag}</span> : null}
                 </div>
                 {showYoY ? (
-                  <div style={{ color: yoy! >= 0 ? '#86efac' : '#fca5a5', marginTop: 2 }}>
+                  <div style={{ color: yoy! >= 0 ? 'var(--tf-up)' : 'var(--tf-down)', marginTop: 2 }}>
                     {fmtPct(yoy)} Y/Y
                   </div>
                 ) : null}
@@ -381,8 +383,8 @@ const IncomeSankeyCard: React.FC<IncomeSankeyCardProps> = ({
           }}
           animate={false}
           theme={{
-            text: { fontSize: 11, fontFamily: 'inherit', fontWeight: 500 },
-            tooltip: { container: { fontSize: 12 } },
+            text: { fontSize: "var(--tf-fs-xs)", fontFamily: 'inherit', fontWeight: 500 },
+            tooltip: { container: { fontSize: "var(--tf-fs-base)" } },
           }}
         />
         </div>
@@ -392,11 +394,10 @@ const IncomeSankeyCard: React.FC<IncomeSankeyCardProps> = ({
 };
 
 const cardStyle: React.CSSProperties = {
-  background: '#fff',
-  border: '1px solid #e2e8f0',
-  borderRadius: 12,
+  background: 'var(--tf-bg-pane)',
+  border: '1px solid var(--tf-border)',
+  borderRadius: 'var(--tf-radius)',
   padding: 16,
-  boxShadow: '0 1px 2px rgba(15, 23, 42, 0.04)',
 };
 
 const cardHeaderStyle: React.CSSProperties = {
@@ -409,23 +410,24 @@ const cardHeaderStyle: React.CSSProperties = {
 };
 
 const cardTitleStyle: React.CSSProperties = {
-  fontSize: 15,
+  fontSize: "var(--tf-fs-md)",
   fontWeight: 700,
-  color: '#0f172a',
+  color: 'var(--tf-text-strong)',
 };
 
 const cardSubtitleStyle: React.CSSProperties = {
-  fontSize: 12,
-  color: '#64748b',
+  fontSize: "var(--tf-fs-xs)",
+  color: 'var(--tf-muted)',
   marginTop: 2,
 };
 
 const tooltipStyle: React.CSSProperties = {
-  background: '#0f172a',
-  color: '#f8fafc',
+  background: 'var(--tf-bg-elevated)',
+  color: 'var(--tf-text)',
+  border: '1px solid var(--tf-border)',
   padding: '6px 10px',
-  borderRadius: 6,
-  fontSize: 12,
+  borderRadius: 'var(--tf-radius)',
+  fontSize: "var(--tf-fs-base)",
   lineHeight: 1.45,
   whiteSpace: 'nowrap',
 };

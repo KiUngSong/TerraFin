@@ -9,7 +9,7 @@ from TerraFin.analytics.analysis.fundamental import build_stock_dcf_payload, bui
 from TerraFin.analytics.analysis.fundamental.dcf.models import StockDCFOverrides
 from TerraFin.analytics.analysis.options.gamma_exposure import get_gex_payload
 from TerraFin.analytics.analysis.risk import estimate_beta_5y_monthly, estimate_beta_5y_monthly_adjusted
-from TerraFin.interface.stock.payloads import (
+from TerraFin.interface.pages.stock.payloads import (
     build_company_info_payload,
     build_earnings_payload,
     build_fcf_history_payload,
@@ -18,7 +18,7 @@ from TerraFin.interface.stock.payloads import (
     build_income_sankey_payload,
     resolve_ticker_query,
 )
-from TerraFin.interface.valuation_models import (
+from TerraFin.data.contracts.valuation_models import (
     DCFValuationResponse,
     ReverseDCFResponse,
     StockDCFRequest,

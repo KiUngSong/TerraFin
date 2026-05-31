@@ -151,10 +151,9 @@ const CHART_PLACEHOLDER_STYLE: React.CSSProperties = {
   display: 'flex',
   alignItems: 'center',
   justifyContent: 'center',
-  fontSize: 13,
-  color: '#475569',
-  background:
-    'linear-gradient(180deg, rgba(248,250,252,0.96) 0%, rgba(255,255,255,0.98) 100%)',
+  fontSize: "var(--tf-fs-base)",
+  color: 'var(--tf-muted)',
+  background: 'var(--tf-bg-elevated)',
 };
 
 interface MacroFocusPanelProps {
@@ -570,7 +569,7 @@ const MacroFocusPanel: React.FC<MacroFocusPanelProps> = ({ onReadyChange }) => {
     selectedQuickPickSet,
   ]);
 
-  const changeColor = (info?.changePercent ?? 0) >= 0 ? '#047857' : '#b91c1c';
+  const changeColor = (info?.changePercent ?? 0) >= 0 ? 'var(--tf-up)' : 'var(--tf-down)';
   const changeSign = (info?.changePercent ?? 0) >= 0 ? '+' : '';
   const isLoading = pendingRequestCount > 0;
 
@@ -584,15 +583,16 @@ const MacroFocusPanel: React.FC<MacroFocusPanelProps> = ({ onReadyChange }) => {
             disabled={isLoading && !!chartSnapshot}
             onClick={() => handleQuickPick(p.name)}
             style={{
-              border: '1px solid ' + (selectedQuickPickSet.has(p.name) ? '#93c5fd' : '#e2e8f0'),
-              borderRadius: 999,
+              border: '1px solid ' + (selectedQuickPickSet.has(p.name) ? 'var(--tf-amber)' : 'var(--tf-border)'),
+              borderRadius: 'var(--tf-radius)',
               padding: '3px 10px',
-              fontSize: 11,
+              fontSize: "var(--tf-fs-xs)",
               fontWeight: 600,
-              background: selectedQuickPickSet.has(p.name) ? '#dbeafe' : '#fff',
-              color: selectedQuickPickSet.has(p.name) ? '#1e3a8a' : '#475569',
+              background: 'var(--tf-bg-elevated)',
+              color: selectedQuickPickSet.has(p.name) ? 'var(--tf-amber)' : 'var(--tf-text)',
               cursor: isLoading && chartSnapshot ? 'default' : 'pointer',
               opacity: isLoading && chartSnapshot ? 0.65 : 1,
+              fontFamily: 'var(--tf-mono)',
             }}
           >
             {p.label}
@@ -603,32 +603,32 @@ const MacroFocusPanel: React.FC<MacroFocusPanelProps> = ({ onReadyChange }) => {
       {info && (
         <div style={{ marginBottom: 10 }}>
           <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, flexWrap: 'wrap' }}>
-            <span style={{ fontSize: 16, fontWeight: 800, color: '#0f172a' }}>{info.name}</span>
+            <span style={{ fontSize: "var(--tf-fs-base)", fontWeight: 700, color: 'var(--tf-text-strong)' }}>{info.name}</span>
             {info.currentValue != null && (
-              <span style={{ fontSize: 15, fontWeight: 700, color: '#0f172a' }}>
+              <span style={{ fontSize: "var(--tf-fs-base)", fontWeight: 700, color: 'var(--tf-text-strong)' }}>
                 {info.currentValue.toLocaleString(undefined, { maximumFractionDigits: 2 })}
               </span>
             )}
             {info.changePercent != null && (
-              <span style={{ fontSize: 12, fontWeight: 600, color: changeColor }}>
+              <span style={{ fontSize: "var(--tf-fs-base)", fontWeight: 600, color: changeColor }}>
                 {changeSign}{info.changePercent.toFixed(2)}%
               </span>
             )}
             <span style={{
-              fontSize: 10,
+              fontSize: "var(--tf-fs-micro)",
               fontWeight: 600,
-              color: '#475569',
-              background: '#f1f5f9',
-              borderRadius: 999,
+              color: 'var(--tf-text)',
+              background: 'var(--tf-bg-elevated)',
+              borderRadius: 'var(--tf-radius)',
               padding: '2px 8px',
-              border: '1px solid #e2e8f0',
+              border: '1px solid var(--tf-border)',
               textTransform: 'uppercase',
             }}>
               {info.type}
             </span>
           </div>
           {info.description && (
-            <div style={{ fontSize: 11, color: '#64748b', marginTop: 2 }}>{info.description}</div>
+            <div style={{ fontSize: "var(--tf-fs-xs)", color: 'var(--tf-muted)', marginTop: 2 }}>{info.description}</div>
           )}
         </div>
       )}
@@ -637,10 +637,10 @@ const MacroFocusPanel: React.FC<MacroFocusPanelProps> = ({ onReadyChange }) => {
         style={{
           height: 480,
           position: 'relative',
-          border: '1px solid #e2e8f0',
-          borderRadius: 12,
+          border: '1px solid var(--tf-border)',
+          borderRadius: 'var(--tf-radius)',
           overflow: 'hidden',
-          background: '#ffffff',
+          background: 'var(--tf-bg-elevated)',
         }}
       >
         {chartSnapshot ? (
@@ -656,7 +656,7 @@ const MacroFocusPanel: React.FC<MacroFocusPanelProps> = ({ onReadyChange }) => {
             priceScaleMargins={MACRO_CHART_SCALE_MARGINS}
           />
         ) : (
-          <div style={{ ...CHART_PLACEHOLDER_STYLE, color: loadError ? '#b91c1c' : '#475569' }}>
+          <div style={{ ...CHART_PLACEHOLDER_STYLE, color: loadError ? 'var(--tf-down)' : 'var(--tf-muted)' }}>
             {loadError ?? 'Loading chart...'}
           </div>
         )}
@@ -668,12 +668,12 @@ const MacroFocusPanel: React.FC<MacroFocusPanelProps> = ({ onReadyChange }) => {
               top: 10,
               right: 10,
               padding: '4px 8px',
-              borderRadius: 999,
-              fontSize: 11,
+              borderRadius: 'var(--tf-radius)',
+              fontSize: "var(--tf-fs-xs)",
               fontWeight: 700,
-              color: '#334155',
-              background: 'rgba(255,255,255,0.9)',
-              border: '1px solid #e2e8f0',
+              color: 'var(--tf-text)',
+              background: 'var(--tf-bg-elevated)',
+              border: '1px solid var(--tf-border)',
             }}
           >
             Refreshing...

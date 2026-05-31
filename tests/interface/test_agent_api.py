@@ -7,8 +7,8 @@ from fastapi.testclient import TestClient
 
 import TerraFin.agent.service as agent_service
 import TerraFin.interface.agent.data_routes as agent_routes
-import TerraFin.interface.stock.data_routes as stock_routes
-import TerraFin.interface.stock.payloads as stock_payloads
+import TerraFin.interface.pages.stock.data_routes as stock_routes
+import TerraFin.interface.pages.stock.payloads as stock_payloads
 from TerraFin.agent.definitions import (
     DEFAULT_HOSTED_AGENT_NAME,
     TerraFinAgentDefinition,
@@ -27,7 +27,7 @@ from TerraFin.agent.tools import TerraFinToolDefinition, TerraFinToolInvocationR
 from TerraFin.data.contracts import HistoryChunk, TimeSeriesDataFrame
 from TerraFin.data.providers.corporate.filings.sec_edgar.filing import SecEdgarConfigurationError
 from TerraFin.interface.server import create_app
-from TerraFin.interface.watchlist_service import reset_watchlist_service
+from TerraFin.data.watchlist_service import reset_watchlist_service
 
 
 def _make_fake_tsdf(ticker: str = "TEST", n: int = 120) -> TimeSeriesDataFrame:

@@ -8,7 +8,7 @@ Env vars:
 
 import logging
 
-from TerraFin.interface.channels.env import signals_env
+from TerraFin.interface.infra.channels.env import signals_env
 
 
 log = logging.getLogger(__name__)

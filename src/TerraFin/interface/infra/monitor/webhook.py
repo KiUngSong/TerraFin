@@ -12,7 +12,7 @@ from collections import OrderedDict, deque
 from threading import Lock
 
 from TerraFin.data.contracts.signal_provider import InboundSignal
-from TerraFin.interface.channels.env import signals_env
+from TerraFin.interface.infra.channels.env import signals_env
 
 
 log = logging.getLogger(__name__)
@@ -98,7 +98,7 @@ def _resolve_ticker_name(ticker: str) -> str:
     """Look up company name from watchlist cache. Returns "" on any failure or
     when the stored name equals the ticker symbol (sentinel for missing data)."""
     try:
-        from TerraFin.interface.watchlist_service import get_watchlist_service
+        from TerraFin.data.watchlist_service import get_watchlist_service
         svc = get_watchlist_service()
         for item in svc.get_watchlist_snapshot():
             if item.get("symbol") == ticker:
@@ -110,7 +110,7 @@ def _resolve_ticker_name(ticker: str) -> str:
 
 
 def forward_to_telegram(signal: InboundSignal) -> None:
-    from TerraFin.interface.channels.telegram import TelegramChannel
+    from TerraFin.interface.infra.channels.telegram import TelegramChannel
 
     # Severity gate: only ``high`` and ``med`` reach Telegram. ``low``
     # (and unknown) are still dedup'd + persisted on the inbound path

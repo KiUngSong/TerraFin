@@ -1,8 +1,11 @@
 import React from "react";
+import { CATEGORY_COLORS } from "../constants";
 import type { CalendarEvent } from "../types";
 
 interface CalendarDetailPanelProps {
   event: CalendarEvent | null;
+  upcomingEvents?: CalendarEvent[];
+  onSelectEvent?: (event: CalendarEvent) => void;
 }
 
 interface EpsRow {
@@ -49,24 +52,24 @@ function parseMacroDesc(desc: string): MacroData | null {
 
 const cellBase: React.CSSProperties = {
   padding: "5px 8px",
-  fontSize: 11,
-  borderBottom: "1px solid #e2e8f0",
+  fontSize: "var(--tf-fs-xs)",
+  borderBottom: "1px solid var(--tf-border)",
 };
 
 const SurpriseCell: React.FC<{ value: string }> = ({ value }) => {
   if (!value || value === "-") return <td style={cellBase}>-</td>;
   const num = parseFloat(value.replace(/[+%]/g, ""));
-  const color = isNaN(num) ? "#334155" : num >= 0 ? "#047857" : "#b91c1c";
+  const color = isNaN(num) ? "var(--tf-text)" : num >= 0 ? "var(--tf-up)" : "var(--tf-down)";
   return <td style={{ ...cellBase, color, fontWeight: 600, textAlign: "right" }}>{value}</td>;
 };
 
 const EarningsDetail: React.FC<{ data: EarningsData }> = ({ data }) => {
   const thStyle: React.CSSProperties = {
     ...cellBase,
-    color: "#64748b",
+    color: "var(--tf-muted)",
     fontWeight: 600,
     textAlign: "left",
-    fontSize: 10,
+    fontSize: "var(--tf-fs-micro)",
     textTransform: "uppercase",
     letterSpacing: "0.5px",
   };
@@ -80,16 +83,16 @@ const EarningsDetail: React.FC<{ data: EarningsData }> = ({ data }) => {
       {showCurrent && (
         <>
           <div className="tf-calendar-detail-label" style={{ marginBottom: 6 }}>Current</div>
-          <table style={{ width: "100%", borderCollapse: "collapse", background: "#fff", borderRadius: 6, overflow: "hidden", border: "1px solid #e2e8f0", marginBottom: 10 }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", background: "var(--tf-bg-elevated)", borderRadius: "var(--tf-radius)", overflow: "hidden", border: "1px solid var(--tf-border)", marginBottom: 10 }}>
             <tbody>
               {data.estimate !== "-" && (
-                <tr><td style={{ ...cellBase, color: "#64748b", fontWeight: 600, width: 80 }}>Estimate</td><td style={tdRight}>{data.estimate}</td></tr>
+                <tr><td style={{ ...cellBase, color: "var(--tf-muted)", fontWeight: 600, width: 80 }}>Estimate</td><td style={tdRight}>{data.estimate}</td></tr>
               )}
               {data.reported !== "-" && (
-                <tr><td style={{ ...cellBase, color: "#64748b", fontWeight: 600, width: 80 }}>Reported</td><td style={tdRight}>{data.reported}</td></tr>
+                <tr><td style={{ ...cellBase, color: "var(--tf-muted)", fontWeight: 600, width: 80 }}>Reported</td><td style={tdRight}>{data.reported}</td></tr>
               )}
               {data.surprise !== "-" && (
-                <tr><td style={{ ...cellBase, color: "#64748b", fontWeight: 600, width: 80 }}>Surprise</td><SurpriseCell value={data.surprise} /></tr>
+                <tr><td style={{ ...cellBase, color: "var(--tf-muted)", fontWeight: 600, width: 80 }}>Surprise</td><SurpriseCell value={data.surprise} /></tr>
               )}
             </tbody>
           </table>
@@ -99,9 +102,9 @@ const EarningsDetail: React.FC<{ data: EarningsData }> = ({ data }) => {
       {history.length > 0 && (
         <>
           <div className="tf-calendar-detail-label" style={{ marginBottom: 6 }}>Recent History</div>
-          <table style={{ width: "100%", borderCollapse: "collapse", background: "#fff", borderRadius: 6, overflow: "hidden", border: "1px solid #e2e8f0" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", background: "var(--tf-bg-elevated)", borderRadius: "var(--tf-radius)", overflow: "hidden", border: "1px solid var(--tf-border)" }}>
             <thead>
-              <tr style={{ background: "#f8fafc" }}>
+              <tr style={{ background: "var(--tf-bg-elevated)" }}>
                 <th style={thStyle}>Date</th>
                 <th style={{ ...thStyle, textAlign: "right" }}>Est</th>
                 <th style={{ ...thStyle, textAlign: "right" }}>Actual</th>
@@ -111,7 +114,7 @@ const EarningsDetail: React.FC<{ data: EarningsData }> = ({ data }) => {
             <tbody>
               {history.map((h, i) => (
                 <tr key={i}>
-                  <td style={{ ...cellBase, fontSize: 11, color: "#334155" }}>{h.date ?? "-"}</td>
+                  <td style={{ ...cellBase, fontSize: "var(--tf-fs-xs)", color: "var(--tf-text)" }}>{h.date ?? "-"}</td>
                   <td style={tdRight}>{h.estimate || "-"}</td>
                   <td style={tdRight}>{h.reported || "-"}</td>
                   <SurpriseCell value={h.surprise} />
@@ -126,7 +129,7 @@ const EarningsDetail: React.FC<{ data: EarningsData }> = ({ data }) => {
 };
 
 const MacroDetail: React.FC<{ data: MacroData }> = ({ data }) => {
-  const tdLabel: React.CSSProperties = { ...cellBase, color: "#64748b", fontWeight: 600, width: 80 };
+  const tdLabel: React.CSSProperties = { ...cellBase, color: "var(--tf-muted)", fontWeight: 600, width: 80 };
   const tdRight: React.CSSProperties = { ...cellBase, textAlign: "right", fontVariantNumeric: "tabular-nums" };
 
   const hasData = data.actual !== "-" || data.expected !== "-" || data.last !== "-";
@@ -137,14 +140,14 @@ const MacroDetail: React.FC<{ data: MacroData }> = ({ data }) => {
       <div className="tf-calendar-detail-label" style={{ marginBottom: 6 }}>
         {data.label || "Values"}
       </div>
-      <table style={{ width: "100%", borderCollapse: "collapse", background: "#fff", borderRadius: 6, overflow: "hidden", border: "1px solid #e2e8f0" }}>
+      <table style={{ width: "100%", borderCollapse: "collapse", background: "var(--tf-bg-elevated)", borderRadius: "var(--tf-radius)", overflow: "hidden", border: "1px solid var(--tf-border)" }}>
         <tbody>
           {data.actual !== "-" && (
             <tr>
               <td style={tdLabel}>Latest</td>
               <td style={tdRight}>
                 {data.actual}
-                {data.actual_date && <span style={{ color: "#94a3b8", fontSize: 10, marginLeft: 6 }}>({data.actual_date})</span>}
+                {data.actual_date && <span style={{ color: "var(--tf-muted)", fontSize: "var(--tf-fs-micro)", marginLeft: 6 }}>({data.actual_date})</span>}
               </td>
             </tr>
           )}
@@ -160,8 +163,21 @@ const MacroDetail: React.FC<{ data: MacroData }> = ({ data }) => {
   );
 };
 
-const CalendarDetailPanel: React.FC<CalendarDetailPanelProps> = ({ event }) => {
-  if (!event) {
+const UpcomingAgenda: React.FC<{
+  events: CalendarEvent[];
+  onSelectEvent?: (event: CalendarEvent) => void;
+}> = ({ events, onSelectEvent }) => {
+  const now = Date.now();
+  const sorted = [...events].sort(
+    (a, b) => new Date(a.start).getTime() - new Date(b.start).getTime(),
+  );
+  const future = sorted.filter((e) => new Date(e.start).getTime() >= now - 12 * 60 * 60 * 1000);
+  // Prefer upcoming events; if the viewed month is entirely in the past,
+  // fall back to that month's full agenda so the rail is never empty.
+  const showingFuture = future.length > 0;
+  const agenda = (showingFuture ? future : sorted).slice(0, 14);
+
+  if (agenda.length === 0) {
     return (
       <aside className="tf-calendar-detail empty">
         Select an event to view details.
@@ -169,14 +185,48 @@ const CalendarDetailPanel: React.FC<CalendarDetailPanelProps> = ({ event }) => {
     );
   }
 
-  const localDate = new Date(event.start).toLocaleString(undefined, {
+  return (
+    <aside className="tf-calendar-detail">
+      <div>
+        <div className="tf-calendar-detail-label">{showingFuture ? "Upcoming" : "This month"}</div>
+        <div className="tf-calendar-detail-hint">Select an event on the calendar for full details.</div>
+      </div>
+      <div className="tf-calendar-agenda">
+        {agenda.map((e) => {
+          const color = CATEGORY_COLORS[e.category];
+          const day = new Date(e.start).toLocaleDateString("en-US", { month: "short", day: "2-digit" });
+          const title = e.title.includes(" - ") ? e.title.split(" - ")[0] : e.title;
+          return (
+            <button
+              key={e.id}
+              type="button"
+              className="tf-calendar-agenda-row"
+              onClick={() => onSelectEvent?.(e)}
+            >
+              <span className="tf-calendar-agenda-date">{day}</span>
+              <span className="tf-calendar-dot" style={{ backgroundColor: color }} />
+              <span className="tf-calendar-agenda-title">{title}</span>
+            </button>
+          );
+        })}
+      </div>
+    </aside>
+  );
+};
+
+const CalendarDetailPanel: React.FC<CalendarDetailPanelProps> = ({ event, upcomingEvents, onSelectEvent }) => {
+  if (!event) {
+    return <UpcomingAgenda events={upcomingEvents ?? []} onSelectEvent={onSelectEvent} />;
+  }
+
+  const localDate = new Date(event.start).toLocaleString("en-US", {
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
     hour: "2-digit",
     minute: "2-digit",
   });
-  const localDateOnly = new Date(event.start).toLocaleDateString(undefined, {
+  const localDateOnly = new Date(event.start).toLocaleDateString("en-US", {
     year: "numeric",
     month: "2-digit",
     day: "2-digit",

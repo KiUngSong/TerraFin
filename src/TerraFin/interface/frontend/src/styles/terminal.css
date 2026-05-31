@@ -1,0 +1,2061 @@
+/*
+ * TerraFin Terminal — component styles.
+ *
+ * Bloomberg-DNA primitives. Tokens come from theme.css; this file is the
+ * single home for terminal-component classes.
+ */
+
+/* --- TerminalPane ------------------------------------------------------- */
+
+.tf-pane {
+  --tf-pane-min-height: 156px;
+  display: flex;
+  flex-direction: column;
+  background: var(--tf-bg-pane);
+  border: 1px solid var(--tf-border);
+  border-radius: var(--tf-radius-panel);
+  color: var(--tf-text);
+  font-family: var(--tf-sans);
+  min-height: var(--tf-pane-min-height);
+  min-width: 0;
+  overflow: hidden;
+  text-decoration: none;
+}
+
+.tf-pane--interactive {
+  cursor: pointer;
+  transition: border-color 0.12s ease;
+}
+
+.tf-pane--interactive:focus-visible {
+  border-color: var(--tf-amber);
+  outline: none;
+}
+@media (hover: hover) {
+  .tf-pane--interactive:hover {
+    border-color: var(--tf-amber);
+  }
+}
+
+.tf-pane--overflow {
+  overflow: visible;
+}
+
+.tf-pane--fill {
+  height: 100%;
+  box-sizing: border-box;
+}
+
+.tf-pane__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--tf-border);
+  flex-shrink: 0;
+}
+
+.tf-pane__title-group {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+
+.tf-pane__title {
+  margin: 0;
+  font-family: var(--tf-sans);
+  font-size: var(--tf-fs-md);
+  font-weight: 700;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--tf-text-strong);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tf-pane__subtitle {
+  margin: 0;
+  font-family: var(--tf-sans);
+  font-size: var(--tf-fs-micro);
+  color: var(--tf-muted-strong);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tf-pane__meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--tf-sans);
+  font-size: var(--tf-fs-micro);
+  color: var(--tf-muted);
+  flex-shrink: 0;
+}
+
+.tf-pane__content {
+  flex: 1;
+  min-height: 0;
+  padding: 12px;
+  overflow: hidden;
+  font-family: var(--tf-sans);
+  font-size: var(--tf-fs-base);
+  line-height: 1.45;
+  color: var(--tf-text);
+}
+
+.tf-pane__content--fill {
+  display: flex;
+  flex-direction: column;
+}
+
+.tf-pane__content--overflow {
+  overflow: visible;
+}
+
+/* --- SignedDelta -------------------------------------------------------- */
+
+.tf-delta {
+  display: inline-flex;
+  align-items: baseline;
+  font-family: var(--tf-mono);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0;
+}
+
+.tf-delta--up   { color: var(--tf-up); }
+.tf-delta--down { color: var(--tf-down); }
+.tf-delta--zero { color: var(--tf-muted); }
+
+.tf-delta { font-size: var(--tf-fs-base); font-weight: 600; }
+.tf-delta--xs, .tf-delta--sm, .tf-delta--md, .tf-delta--lg, .tf-delta--xl {
+  font-size: var(--tf-fs-base);
+  font-weight: 600;
+}
+
+/* --- SourceTag ---------------------------------------------------------- */
+
+.tf-src {
+  display: inline-flex;
+  align-items: baseline;
+  margin-left: 6px;
+  font-family: var(--tf-mono);
+  font-size: var(--tf-fs-micro);
+  font-weight: 400;
+  letter-spacing: 0.04em;
+  color: var(--tf-muted);
+  white-space: nowrap;
+  vertical-align: baseline;
+}
+
+.tf-src::before { content: "["; }
+.tf-src::after  { content: "]"; }
+
+.tf-src__dot {
+  margin: 0 4px;
+  opacity: 0.7;
+}
+
+/* --- StatusBar ---------------------------------------------------------- */
+
+.tf-statusbar {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 10px;
+  height: 18px;
+  box-sizing: border-box;
+  background: var(--tf-bg-elevated);
+  border-top: 1px solid var(--tf-border);
+  font-family: var(--tf-sans);
+  font-size: var(--tf-fs-micro);
+  font-weight: 500;
+  letter-spacing: 0;
+  color: var(--tf-muted);
+  pointer-events: auto;
+}
+
+.tf-statusbar__sep {
+  color: var(--tf-border-strong);
+}
+
+.tf-statusbar__spacer {
+  flex: 1 1 auto;
+}
+
+.tf-statusbar__clock {
+  color: var(--tf-text);
+  font-variant-numeric: tabular-nums;
+}
+
+.tf-statusbar__ticker {
+  color: var(--tf-text);
+  text-transform: uppercase;
+}
+
+.tf-statusbar__muted {
+  color: var(--tf-muted);
+  text-transform: lowercase;
+}
+
+.tf-statusbar__led {
+  font-size: var(--tf-fs-micro);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--tf-muted);
+}
+
+.tf-statusbar__led--idle      { color: var(--tf-muted); }
+.tf-statusbar__led--thinking  { color: var(--tf-amber); }
+.tf-statusbar__led--streaming { color: var(--tf-up); }
+.tf-statusbar__led--error     { color: var(--tf-down); }
+
+.tf-statusbar__kbd {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.tf-statusbar__kbd kbd {
+  font-family: var(--tf-mono);
+  font-size: var(--tf-fs-micro);
+  font-weight: 600;
+  padding: 1px 4px;
+  border: 1px solid var(--tf-border-strong);
+  border-radius: 2px;
+  background: var(--tf-bg);
+  color: var(--tf-text);
+}
+
+/* Make room for the status bar so page content isn't covered. */
+body { padding-bottom: 0; box-sizing: border-box; }
+
+/* Kill the mobile tap-highlight flash (the dark overlay on tap). Inherited,
+   so setting it on html covers every element. */
+html { -webkit-tap-highlight-color: transparent; }
+
+/* --- Primitives demo ---------------------------------------------------- */
+
+.tf-demo {
+  padding: 24px;
+  background: var(--tf-bg);
+  color: var(--tf-text);
+  font-family: var(--tf-mono);
+  min-height: 100vh;
+  box-sizing: border-box;
+  overflow: auto;
+}
+
+.tf-demo h2 {
+  font-family: var(--tf-mono);
+  font-size: var(--tf-fs-xs);
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--tf-amber);
+  margin: 28px 0 10px;
+}
+
+.tf-demo__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 24px;
+  margin-bottom: 8px;
+}
+
+.tf-demo__panes {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 16px;
+}
+
+/* ============================================================
+   Function bar (Bloomberg-style command line, top of shell)
+   ============================================================ */
+
+.tf-funcbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  height: 44px;
+  min-height: 44px;
+  flex-shrink: 0;
+  box-sizing: border-box;
+  padding: 0 20px;
+  background: var(--tf-bg);
+  border-bottom: 1px solid var(--tf-border-strong);
+  font-family: var(--tf-mono);
+  font-size: var(--tf-fs-xs);
+  color: var(--tf-text);
+  position: sticky;
+  top: 0;
+  z-index: 90;
+}
+
+.tf-funcbar__brand {
+  color: var(--tf-amber);
+  font-weight: 600;
+  letter-spacing: 0.16em;
+}
+
+.tf-funcbar__sep {
+  color: var(--tf-border-strong);
+  font-weight: 300;
+}
+
+.tf-funcbar__chip {
+  display: inline-flex;
+  align-items: center;
+  height: 18px;
+  padding: 0 6px;
+  background: var(--tf-bg-elevated);
+  border: 1px solid var(--tf-border);
+  color: var(--tf-amber);
+  font-weight: 600;
+  letter-spacing: 0.08em;
+}
+
+.tf-funcbar__ticker {
+  color: var(--tf-text);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  min-width: 40px;
+}
+
+.tf-funcbar__preset {
+  color: var(--tf-muted);
+  letter-spacing: 0;
+  background: transparent;
+  border: 1px solid var(--tf-border);
+  padding: 4px 10px;
+  font-family: var(--tf-sans);
+  font-size: var(--tf-fs-base);
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.tf-funcbar__preset:hover {
+  border-color: var(--tf-amber);
+  color: var(--tf-amber);
+}
+
+.tf-funcbar__form {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1 1 auto;
+}
+
+.tf-funcbar__prompt {
+  color: var(--tf-amber);
+  font-weight: 600;
+}
+
+.tf-funcbar__input {
+  flex: 1 1 auto;
+  height: 22px;
+  background: var(--tf-bg-elevated);
+  border: 1px solid var(--tf-border);
+  color: var(--tf-text);
+  font-family: var(--tf-mono);
+  font-size: var(--tf-fs-base);
+  padding: 0 8px;
+  outline: none;
+  letter-spacing: 0.04em;
+}
+
+.tf-funcbar__input:focus {
+  border-color: var(--tf-amber);
+}
+
+.tf-funcbar__input::placeholder {
+  color: var(--tf-muted);
+}
+
+.tf-funcbar__go {
+  height: 22px;
+  padding: 0 10px;
+  background: var(--tf-amber);
+  border: 1px solid var(--tf-amber);
+  color: var(--tf-bg);
+  font-family: var(--tf-mono);
+  font-size: var(--tf-fs-base);
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  cursor: pointer;
+}
+
+.tf-funcbar__echo {
+  color: var(--tf-muted);
+  font-size: var(--tf-fs-micro);
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+  max-width: 280px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ============================================================
+   Workspace grid + numbered panels with tabs
+   ============================================================ */
+
+.tf-workspace {
+  display: grid;
+  width: 100%;
+  height: 100%;
+  gap: 16px;
+  padding: 16px;
+  box-sizing: border-box;
+  background: var(--tf-bg);
+}
+
+.tf-panel {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  background: var(--tf-bg-pane);
+  border: 1px solid var(--tf-border);
+  border-radius: var(--tf-radius-panel);
+  overflow: hidden;
+  outline: none;
+}
+
+/* Tape panel (panel 1) is the frameless marquee exception. */
+.tf-panel[data-panel-number='1'] {
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  overflow: visible;
+}
+
+.tf-panel:focus-visible {
+  box-shadow: inset 0 0 0 1px var(--tf-amber);
+}
+
+/* Global keyboard-focus ring — interactive elements lacking a bespoke
+   :focus-visible get a visible amber outline (keyboard nav only, not mouse). */
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+select:focus-visible,
+[tabindex]:focus-visible {
+  outline: 2px solid var(--tf-amber);
+  outline-offset: 2px;
+}
+
+.tf-panel__header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: var(--tf-pane-header-h);
+  padding: 0 12px;
+  background: var(--tf-bg-pane);
+  border-bottom: 1px solid var(--tf-border);
+  font-family: var(--tf-sans);
+  font-size: var(--tf-fs-micro);
+  letter-spacing: 0;
+  flex: 0 0 auto;
+}
+
+.tf-panel__number {
+  color: var(--tf-amber);
+  font-weight: 600;
+}
+
+.tf-panel__tabs {
+  display: flex;
+  align-items: stretch;
+  gap: 0;
+  height: 100%;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-x: auto;
+}
+
+.tf-panel__tab {
+  height: 100%;
+  padding: 0 12px;
+  background: transparent;
+  border: none;
+  color: var(--tf-muted);
+  font-family: var(--tf-sans);
+  /* Match the shared titled-panel pattern used on the 4 document pages
+     (.tf-pane__title — 15px/700) so Terminal reads as the same product. */
+  font-size: var(--tf-fs-md);
+  font-weight: 700;
+  letter-spacing: 0;
+  cursor: pointer;
+  text-transform: none;
+  display: inline-flex;
+  align-items: center;
+  white-space: nowrap;
+}
+
+.tf-panel__tab:hover {
+  /* no color change on hover */
+}
+
+.tf-panel__tab--active {
+  background: transparent;
+  color: var(--tf-text-strong);
+  box-shadow: inset 0 -2px 0 var(--tf-amber);
+}
+
+.tf-panel__hint {
+  color: var(--tf-muted);
+  font-size: var(--tf-fs-micro);
+  letter-spacing: 0.08em;
+  flex: 0 0 auto;
+}
+
+.tf-panel__body {
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
+  overflow: auto;
+  background: var(--tf-bg-pane);
+}
+
+/* Inner pane fills the panel cell but keeps its own 1px frame + header
+   (the panel is now a transparent grid cell, not a chrome provider). */
+.tf-panel__body .tf-pane {
+  height: 100%;
+  min-height: 0;
+  --tf-pane-min-height: 0;
+}
+
+/* Tape pane is the one frameless exception (thin marquee). */
+.tf-panel__body .tf-pane--tape {
+  border: 0;
+}
+
+/* ============================================================
+   Shell composition: funcbar + workspace + statusbar
+   ============================================================ */
+
+/* App shell — one wrapper owns the funcbar + the page area, replacing the
+   per-page root duplication. Two page models live underneath: terminal/chart
+   are fixed single-screen; the document pages scroll inside __main. */
+.tf-app {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  width: 100%;
+  max-width: 100%;
+  overflow-x: hidden;
+  background: var(--tf-bg);
+}
+.tf-app > .tf-funcbar {
+  flex: 0 0 auto;
+}
+.tf-app__main {
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  /* Never scroll sideways: clamp the x-axis here so no page root (several use
+     overflow:auto on both axes) can shift the page right. */
+  overflow-x: hidden;
+}
+@media (max-width: 900px) {
+  /* Mobile: the page scrolls naturally via the body, so the shell hugs content
+     instead of locking to one screen. */
+  .tf-app {
+    height: auto;
+    min-height: 100vh;
+    overflow: visible;
+  }
+  .tf-app__main {
+    overflow-x: hidden;
+    overflow-y: visible;
+  }
+}
+
+.tf-terminal-shell {
+  display: flex;
+  flex-direction: column;
+  /* Fills .tf-app__main (which provides the viewport-minus-funcbar height) — was
+     100vh back when the shell also held the funcbar. */
+  height: 100%;
+  width: 100%;
+  max-width: 100%;
+  overflow-x: hidden;
+  background: var(--tf-bg);
+}
+
+.tf-terminal-shell__workspace {
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+}
+
+@media (max-width: 900px) {
+  .tf-workspace {
+    grid-template-columns: 1fr !important;
+    grid-template-rows: auto !important;
+    grid-template-areas: none !important;
+    grid-auto-flow: row;
+    overflow-y: auto;
+  }
+  .tf-panel {
+    grid-area: auto !important;
+    min-height: 0 !important;
+    height: auto !important;
+  }
+  /* Mobile tape — TradingView reverts to 2-line layout at narrow width; bump height. */
+  .tf-pane--tape,
+  .tf-pane--tape .tf-pane__content,
+  .tf-pane--tape .tf-tradingview-embed,
+  .tf-pane--tape .tf-tradingview-embed__inner,
+  .tf-pane--tape .tradingview-widget-container,
+  .tf-pane--tape .tradingview-widget-container__widget,
+  .tf-pane--tape .tradingview-widget-container iframe {
+    height: 92px !important;
+    min-height: 92px !important;
+  }
+  .tf-panel[data-panel-number='1'],
+  .tf-panel[data-panel-number='1'] .tf-panel__body {
+    height: 92px !important;
+    min-height: 92px !important;
+  }
+  /* Sector grid — content-height, not stretched */
+  .tf-sector { min-height: 0 !important; }
+  /* Panel 3 (Stocks / Sectors): pin one shared mobile height so switching
+     tabs doesn't reflow the column. Without this the heatmap embed (~320px)
+     and the sector grid (~509px) made the panel jump between tab clicks. */
+  .tf-panel[data-panel-number='3'] .tf-panel__body {
+    height: var(--tf-panel-h-mobile) !important;
+  }
+  .tf-panel[data-panel-number='3'] .tf-sector__grid {
+    grid-auto-rows: minmax(0, 1fr);
+    overflow-y: hidden;
+  }
+  /* Tape panel mobile: hug content, no fixed 128px row that leaves big padding. */
+  .tf-panel[data-panel-number='1'] {
+    min-height: 0 !important;
+    height: auto !important;
+  }
+  .tf-panel[data-panel-number='1'] .tf-pane {
+    min-height: 0 !important;
+  }
+  /* Flush content like desktop (no extra vertical spacing), with the bottom
+     rule tight to the tape — closes the strip on mobile without padding gaps. */
+  .tf-panel[data-panel-number='1'] .tf-pane__content {
+    padding: 0 8px !important;
+    border-bottom: 1px solid var(--tf-border);
+  }
+}
+
+/* Funcbar — horizontal at wide, stacks at narrow. */
+.tf-funcbar__brand-row { display: flex; align-items: center; gap: 8px; }
+.tf-funcbar__brand-spacer { flex: 1 1 auto; }
+.tf-funcbar__nav { display: flex; align-items: center; gap: 2px; min-width: 0; }
+.tf-funcbar__nav-item { padding: 6px 12px; flex: 0 0 auto; }
+.tf-funcbar__search { flex: 1 1 auto; min-width: 200px; max-width: 420px; }
+.tf-funcbar__kbutton { height: 32px; min-width: 32px; }
+
+@media (max-width: 1023px) {
+  .tf-funcbar {
+    flex-direction: column !important;
+    align-items: stretch !important;
+    height: auto !important;
+    min-height: 0 !important;
+    gap: 8px;
+    padding: 8px 12px;
+  }
+  .tf-funcbar__nav {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    /* Lock the cross axis: overflow-x:auto otherwise promotes overflow-y to
+       auto, and the horizontal scrollbar eating into the fixed 28px height
+       then triggers a phantom VERTICAL scrollbar. Hide the bar entirely (the
+       right-edge fade below is the overflow affordance). */
+    overflow-y: hidden;
+    scrollbar-width: none;
+    width: 100%;
+    -webkit-overflow-scrolling: touch;
+    scroll-snap-type: x proximity;
+    /* Trailing pad so the last link clears the fade and never rests mid-word
+       at the clipped edge; leading pad keeps the first link off the gutter. */
+    padding-left: 4px;
+    padding-right: 28px;
+    /* Right-edge fade signals more items lie beyond the viewport. Wider and
+       earlier than the tab is wide, so the cut reads as deliberate overflow. */
+    -webkit-mask-image: linear-gradient(to right, #000 0, #000 calc(100% - 40px), transparent 100%);
+    mask-image: linear-gradient(to right, #000 0, #000 calc(100% - 40px), transparent 100%);
+  }
+  .tf-funcbar__nav::-webkit-scrollbar {
+    display: none;
+  }
+  .tf-funcbar__nav-item {
+    scroll-snap-align: start;
+  }
+  .tf-funcbar__search {
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+  }
+}
+@media (max-width: 768px) {
+  .tf-funcbar { padding: 8px 10px; --tf-header-search-font: 16px; }
+  .tf-funcbar__brand { font-size: var(--tf-fs-base); }
+  .tf-funcbar__nav-item { padding: 6px 10px; }
+  .tf-agent-widget__fab {
+    bottom: 24px !important;
+    right: 8px !important;
+    padding: 6px 10px;
+    font-size: var(--tf-fs-xs);
+  }
+}
+
+@media (max-width: 480px) {
+  /* Nav reads as primary chrome — keep it at body size, not the 10px micro
+     footnote size (it looked shrunken next to the 16px search + 13px brand).
+     The nav is a horizontal scroller, so full-size labels just scroll. */
+  .tf-funcbar__nav-item span,
+  .tf-funcbar__nav-item { font-size: var(--tf-fs-base); padding: 0 8px; }
+  .tf-funcbar__form { min-width: 140px; }
+}
+
+/* ============================================================
+   Flat Bloomberg-style table + kv list primitives
+   ============================================================ */
+
+.tf-table {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  font-family: var(--tf-mono);
+  font-size: var(--tf-fs-base);
+  color: var(--tf-text);
+  background: var(--tf-bg-pane);
+}
+
+.tf-table__head,
+.tf-table__row {
+  display: grid;
+  grid-template-columns: 56px 1fr 70px;
+  align-items: center;
+  column-gap: 8px;
+  height: 22px;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--tf-border);
+}
+
+.tf-table--watch .tf-table__head,
+.tf-table--watch .tf-table__row {
+  grid-template-columns: 60px 1fr 70px 70px;
+}
+
+.tf-table--events .tf-table__head,
+.tf-table--events .tf-table__row {
+  grid-template-columns: 44px 1fr 36px;
+  column-gap: 10px;
+}
+
+.tf-events__sym {
+  color: var(--tf-amber);
+  font-family: var(--tf-mono);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+
+.tf-table__head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--tf-bg);
+  color: var(--tf-muted);
+  font-size: var(--tf-fs-micro);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  border-bottom-color: var(--tf-border-strong);
+}
+
+.tf-table__body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.tf-table__row {
+  text-decoration: none;
+  color: var(--tf-text);
+  cursor: pointer;
+  transition: background 80ms linear;
+}
+
+/* Hover-capable pointers only — on touch, :hover sticks after a tap and the
+   row stays darkened until you tap elsewhere (the "tap darkens the row" bug). */
+@media (hover: hover) {
+  .tf-table__row:hover {
+    background: var(--tf-bg-hover);
+  }
+}
+
+.tf-table__row:focus-visible {
+  outline: 1px solid var(--tf-amber);
+  outline-offset: -1px;
+}
+
+.tf-table__col {
+  display: inline-block;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-variant-numeric: tabular-nums;
+}
+
+.tf-table__col--sym {
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--tf-amber);
+}
+
+.tf-table__col--name {
+  color: var(--tf-muted);
+}
+
+.tf-table__col--num {
+  text-align: right;
+  justify-self: end;
+}
+
+.tf-table__status {
+  padding: 8px 12px;
+  font-size: var(--tf-fs-micro);
+  color: var(--tf-muted);
+  letter-spacing: 0.04em;
+}
+
+.tf-table__status--err {
+  color: var(--tf-down);
+}
+
+/* Key/value list (Bloomberg label : value rows) */
+.tf-kv {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  font-family: var(--tf-mono);
+  font-size: var(--tf-fs-base);
+  color: var(--tf-text);
+  background: var(--tf-bg-pane);
+}
+
+.tf-kv__row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  column-gap: 12px;
+  height: 22px;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--tf-border);
+}
+
+.tf-kv__row--span {
+  display: block;
+  height: auto;
+  padding: 8px 12px;
+}
+
+.tf-kv__label {
+  font-size: var(--tf-fs-micro);
+  color: var(--tf-muted);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.tf-kv__value {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  color: var(--tf-text);
+  text-align: right;
+}
+
+.tf-kv__value--muted {
+  color: var(--tf-muted);
+  font-weight: 400;
+}
+
+/* Funcbar nav chips refinement */
+.tf-funcbar__nav {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 28px;
+  min-width: 0;
+}
+
+.tf-funcbar__nav-item {
+  height: 100%;
+  padding: 0 14px;
+  display: inline-flex;
+  align-items: center;
+  text-decoration: none;
+  color: var(--tf-muted);
+  font-family: var(--tf-sans);
+  font-size: var(--tf-fs-base);
+  font-weight: 500;
+  letter-spacing: 0;
+}
+
+.tf-funcbar__nav-item:last-child {
+  border-right: none;
+}
+
+.tf-funcbar__nav-item:hover {
+  color: var(--tf-text);
+}
+
+.tf-funcbar__nav-item--active {
+  background: var(--tf-amber);
+  color: var(--tf-bg);
+}
+
+.tf-funcbar__kbutton {
+  /* Uniform icon square — theme/bell/github/docs are all icon-only, so fix the
+     box so <button> and <a> render identically (were 32x22 vs 50x24, ragged). */
+  width: 28px;
+  min-width: 28px;
+  height: 28px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: 1px solid var(--tf-border);
+  color: var(--tf-muted);
+  font-family: var(--tf-mono);
+  font-size: var(--tf-fs-micro);
+  letter-spacing: 0.08em;
+  cursor: pointer;
+}
+
+.tf-funcbar__kbutton:hover {
+  color: var(--tf-amber);
+  border-color: var(--tf-amber);
+}
+
+/* Funcbar typeahead dropdown */
+.tf-funcbar__form {
+  position: relative;
+}
+
+.tf-funcbar__dropdown {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  margin-top: 4px;
+  background: var(--tf-bg);
+  border: 1px solid var(--tf-border-strong);
+  z-index: 200;
+  display: flex;
+  flex-direction: column;
+}
+
+.tf-funcbar__dropdown-item {
+  display: grid;
+  grid-template-columns: 100px 1fr;
+  column-gap: 10px;
+  align-items: center;
+  height: 24px;
+  padding: 0 10px;
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid var(--tf-border);
+  text-align: left;
+  cursor: pointer;
+  font-family: var(--tf-mono);
+}
+
+.tf-funcbar__dropdown-item:last-child {
+  border-bottom: none;
+}
+
+.tf-funcbar__dropdown-item:hover {
+  background: var(--tf-bg-elevated);
+}
+
+.tf-funcbar__dropdown-code {
+  color: var(--tf-amber);
+  font-size: var(--tf-fs-base);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+}
+
+.tf-funcbar__dropdown-hint {
+  color: var(--tf-muted);
+  font-size: var(--tf-fs-micro);
+  letter-spacing: 0.04em;
+}
+
+/* Panel tab number prefix + meta */
+.tf-panel__tab {
+  gap: 6px;
+  padding: 0 12px;
+}
+
+.tf-panel__tab-idx {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 12px;
+  height: 14px;
+  padding: 0 3px;
+  border: 1px solid var(--tf-border-strong);
+  font-size: var(--tf-fs-micro);
+  color: var(--tf-muted);
+  letter-spacing: 0;
+}
+
+.tf-panel__tab--active .tf-panel__tab-idx {
+  border-color: var(--tf-amber);
+  color: var(--tf-amber);
+}
+
+.tf-panel__tab-label {
+  letter-spacing: 0;
+}
+
+.tf-panel__meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+  padding-right: 4px;
+  color: var(--tf-muted);
+  font-size: var(--tf-fs-micro);
+}
+
+.tf-panel__open {
+  color: var(--tf-muted);
+  text-decoration: none;
+  font-size: var(--tf-fs-xs);
+}
+
+.tf-panel__open:hover {
+  color: var(--tf-amber);
+}
+
+/* TerminalPane inside a panel body fills the cell; tape stays frameless. */
+.tf-panel__body > .tf-pane {
+  height: 100%;
+}
+.tf-panel__body > .tf-pane.tf-pane--tape {
+  border: 0;
+  padding: 0;
+}
+.tf-panel__body > .tf-pane.tf-pane--tape > .tf-pane__content {
+  padding: 0;
+  height: 100%;
+}
+
+/* ============================================================
+   Sector grid — uniform diverging grid (11 GICS + SPY header + legend)
+   ============================================================ */
+
+.tf-sector {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  font-family: var(--tf-sans);
+}
+
+.tf-sector__grid {
+  display: grid;
+  gap: 1px;
+  background: var(--tf-border);
+  /* Tiles flex to fill the panel so the heatmap reaches the panel floor
+     instead of floating as a thin band over dead space. Equal-height rows
+     (1fr) consume the available column height; a comfortable min keeps each
+     tile information-dense on short viewports. */
+  grid-auto-rows: minmax(84px, 1fr);
+  align-content: stretch;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  grid-template-columns: repeat(4, 1fr);
+}
+@media (min-width: 1200px) {
+  .tf-sector__grid { grid-template-columns: repeat(6, 1fr); }
+}
+@media (max-width: 900px) {
+  .tf-sector__grid { grid-template-columns: repeat(3, 1fr); }
+}
+@media (max-width: 600px) {
+  .tf-sector__grid { grid-template-columns: repeat(2, 1fr); }
+}
+
+.tf-sector__cell {
+  display: flex;
+  flex-direction: column;
+  /* Name pinned top-left, dominant % centered in the remaining space so tall
+     fill tiles read as proper heatmap cells rather than top-loaded bands. */
+  justify-content: flex-start;
+  gap: var(--tf-space-1);
+  padding: var(--tf-space-3) var(--tf-space-3);
+  text-decoration: none;
+  border: 0;
+}
+
+.tf-sector__cell .tf-sector__pct {
+  margin: auto 0;
+  align-self: center;
+}
+
+@media (hover: hover) {
+  .tf-sector__cell:hover {
+    outline: 1px solid var(--tf-amber);
+    outline-offset: -1px;
+  }
+}
+
+/* SPY benchmark tile — amber frame marks it as the index anchor. */
+.tf-sector__cell--bench {
+  box-shadow: inset 0 0 0 2px var(--tf-amber);
+}
+
+.tf-sector__name {
+  font-size: var(--tf-fs-xs);
+  font-weight: 600;
+  letter-spacing: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.tf-sector__sym {
+  font-size: var(--tf-fs-micro);
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  opacity: 0.7;
+  text-transform: uppercase;
+}
+
+.tf-sector__pct {
+  font-size: var(--tf-fs-lg);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ============================================================
+   Round-3 aesthetic rewrite — DA-driven
+   - Demote amber: only wordmark + active funcbar tab + GO use it
+   - Section labels: muted gray, not amber screaming
+   - Drop card chrome: same bg as page, 1px hairlines only
+   - Inter everywhere except numbers/tickers/timestamps
+   ============================================================ */
+
+/* Pane chrome — elevated surface card with full hairline frame. */
+.tf-pane {
+  background: var(--tf-bg-pane);
+  border-color: var(--tf-border);
+}
+.tf-pane__title {
+  color: var(--tf-text-strong);
+  font-family: var(--tf-sans);
+  text-transform: none;
+  font-size: var(--tf-fs-md);
+  font-weight: 700;
+  letter-spacing: 0;
+}
+.tf-pane__subtitle {
+  font-family: var(--tf-sans);
+  color: var(--tf-muted);
+  letter-spacing: 0;
+}
+
+
+/* Insight card chrome (stock/MI/calendar/watchlist pages) — surface card. */
+.tf-insight-card {
+  background: var(--tf-bg-pane);
+  border: 1px solid var(--tf-border);
+  box-shadow: none;
+}
+.tf-insight-card__title {
+  color: var(--tf-text-strong);
+  font-family: var(--tf-sans);
+  text-transform: none;
+  font-size: var(--tf-fs-md);
+  font-weight: 700;
+  letter-spacing: 0;
+}
+
+/* Dashboard metric cards (stock OVERVIEW) — surface tile, 12px padding. */
+.tf-dashboard-metric-card {
+  background: var(--tf-bg-elevated);
+  border: 1px solid var(--tf-border);
+  border-radius: var(--tf-radius);
+  padding: 12px;
+}
+.tf-dashboard-metric-card__label {
+  color: var(--tf-muted);
+  font-family: var(--tf-sans);
+  font-size: var(--tf-fs-xs);
+  text-transform: none;
+  letter-spacing: 0.04em;
+  font-weight: 600;
+}
+.tf-dashboard-metric-card__value {
+  color: var(--tf-text);
+  font-family: var(--tf-mono);
+  font-size: var(--tf-fs-base);
+  font-weight: 600;
+}
+
+/* Section labels stay readable, not amber. */
+.tf-table__head,
+.tf-kv__label,
+.tf-funcbar__nav-item {
+  color: var(--tf-muted-strong);
+}
+
+
+
+body {
+  font-family: var(--tf-sans);
+  background: var(--tf-bg);
+  color: var(--tf-text);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Function bar — sans for chrome, mono only for input + ticker */
+.tf-funcbar,
+.tf-funcbar__brand,
+.tf-funcbar__nav-item,
+.tf-funcbar__preset,
+.tf-funcbar__chip,
+.tf-funcbar__kbutton,
+.tf-funcbar__go,
+.tf-funcbar__dropdown-hint,
+.tf-funcbar__echo {
+  font-family: var(--tf-sans);
+  letter-spacing: 0.02em;
+}
+
+.tf-funcbar__brand {
+  letter-spacing: 0.08em;
+  font-weight: 700;
+}
+
+.tf-funcbar__input,
+.tf-funcbar__ticker,
+.tf-funcbar__dropdown-code {
+  font-family: var(--tf-mono);
+  letter-spacing: 0;
+}
+
+.tf-funcbar__nav-item {
+  text-transform: none;
+  font-size: var(--tf-fs-base);
+  font-weight: 500;
+  letter-spacing: 0.01em;
+}
+
+.tf-funcbar__nav-item--active {
+  background: var(--tf-bg-elevated);
+  color: var(--tf-text-strong);
+  border-bottom: 2px solid var(--tf-amber);
+}
+
+/* Panel headers — sans, no shouty caps, subtle */
+.tf-panel__header {
+  font-family: var(--tf-sans);
+  letter-spacing: 0;
+  background: var(--tf-bg-pane);
+  border-bottom: 1px solid var(--tf-border);
+}
+
+.tf-panel__tab {
+  font-family: var(--tf-sans);
+  /* Tabs are panel nav, not body. Same 13px as body (user-set), but uppercase +
+     tracking gives a nav-chrome treatment so tabs never read as data cells. */
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-size: var(--tf-fs-base);
+  font-weight: 700;
+}
+
+.tf-panel__tab-idx {
+  font-family: var(--tf-mono);
+  letter-spacing: 0;
+}
+
+.tf-panel__tab-label {
+  letter-spacing: 0;
+}
+
+.tf-panel__number {
+  font-family: var(--tf-mono);
+}
+
+.tf-panel__meta {
+  font-family: var(--tf-mono);
+  font-size: var(--tf-fs-micro);
+  letter-spacing: 0;
+}
+
+/* Table headers — uppercase chrome, consistent with section eyebrows/tabs. */
+.tf-table__head {
+  font-family: var(--tf-sans);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-size: var(--tf-fs-xs);
+  font-weight: 700;
+  color: var(--tf-muted);
+}
+
+.tf-table__col--sym,
+.tf-table__col--num,
+.tf-table__col {
+  font-family: var(--tf-mono);
+}
+
+.tf-table__col--name {
+  font-family: var(--tf-sans);
+  letter-spacing: 0;
+}
+
+/* KV labels — sans, tighter */
+.tf-kv__label {
+  font-family: var(--tf-sans);
+  text-transform: none;
+  letter-spacing: 0.04em;
+  font-size: var(--tf-fs-xs);
+  font-weight: 600;
+}
+
+.tf-kv__value {
+  font-family: var(--tf-mono);
+}
+
+/* Sector tiles — sector name in sans, ticker + pct in mono */
+.tf-sector__name {
+  font-family: var(--tf-sans);
+  letter-spacing: 0;
+  font-weight: 600;
+}
+
+.tf-sector__sym,
+.tf-sector__pct {
+  font-family: var(--tf-mono);
+  letter-spacing: 0;
+}
+
+/* Status bar — sans for labels, mono for clock */
+.tf-statusbar,
+.tf-statusbar__muted,
+.tf-statusbar__led,
+.tf-statusbar__kbd {
+  font-family: var(--tf-sans);
+  letter-spacing: 0.02em;
+}
+
+.tf-statusbar__clock,
+.tf-statusbar__ticker {
+  font-family: var(--tf-mono);
+}
+
+/* Insight card titles + dashboard chrome (stock/mi pages) */
+.tf-insight-card__title,
+.tf-insight-card__subtitle,
+.tf-dashboard-status,
+.tf-dashboard-metric-card__label,
+.tf-dashboard-pe__label,
+.tf-dashboard-gex__label {
+  font-family: var(--tf-sans);
+  text-transform: none;
+  letter-spacing: 0.01em;
+}
+
+.tf-dashboard-metric-card__value,
+.tf-dashboard-pe__value,
+.tf-dashboard-gex__value,
+.tf-dashboard-watchlist__symbol {
+  font-family: var(--tf-mono);
+}
+
+/* Source tag — keep mono, tight */
+.tf-src {
+  font-family: var(--tf-mono);
+  letter-spacing: 0;
+  text-transform: lowercase;
+}
+
+/* ============================================================
+   Flat custom tape — replaces TradingView ticker-tape widget
+   ============================================================ */
+
+.tf-tape {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  height: 100%;
+  padding: 0 14px;
+  font-family: var(--tf-sans);
+  font-size: var(--tf-fs-base);
+  color: var(--tf-text);
+  background: var(--tf-bg);
+  overflow-x: auto;
+  white-space: nowrap;
+}
+
+.tf-tape--empty {
+  color: var(--tf-muted);
+  font-size: var(--tf-fs-xs);
+}
+
+.tf-tape__cell {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.tf-tape__label {
+  color: var(--tf-muted-strong);
+  font-family: var(--tf-sans);
+  font-weight: 600;
+  font-size: var(--tf-fs-micro);
+  letter-spacing: 0;
+}
+
+.tf-tape__last {
+  color: var(--tf-text);
+  font-family: var(--tf-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--tf-fs-base);
+}
+
+.tf-tape__pct {
+  font-family: var(--tf-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--tf-fs-micro);
+}
+
+.tf-tape__pct--up { color: var(--tf-up); }
+.tf-tape__pct--down { color: var(--tf-down); }
+.tf-tape__pct--zero { color: var(--tf-muted); }
+
+/* ============================================================
+   Font unification — kill remaining mono on prose/UI chrome
+   ============================================================ */
+.tf-funcbar__brand,
+.tf-funcbar__sep,
+.tf-funcbar__prompt {
+  font-family: var(--tf-sans) !important;
+}
+
+.tf-pane__title,
+.tf-pane__subtitle,
+.tf-pane__meta,
+.tf-pane__content,
+.tf-insight-card__title,
+.tf-insight-card__subtitle,
+.tf-panel__tab-label,
+.tf-panel__hint,
+.tf-statusbar__led {
+  font-family: var(--tf-sans) !important;
+}
+
+/* Mono only on numbers, tickers, timestamps, code */
+.tf-table__col--sym,
+.tf-table__col--num,
+.tf-delta,
+.tf-src,
+.tf-funcbar__input,
+.tf-funcbar__ticker,
+.tf-funcbar__dropdown-code,
+.tf-sector__sym,
+.tf-sector__pct,
+.tf-statusbar__clock,
+.tf-statusbar__ticker,
+.tf-kv__value {
+  font-family: var(--tf-mono) !important;
+}
+
+/* ============================================================
+   FINAL font discipline — Inter for all prose, mono ONLY for tabular nums
+   ============================================================ */
+.tf-pane__title,
+.tf-pane__subtitle,
+.tf-pane__content,
+.tf-pane__meta,
+.tf-panel__tab-label,
+.tf-funcbar__brand,
+.tf-funcbar__nav-item,
+.tf-funcbar__preset,
+.tf-funcbar__echo,
+.tf-funcbar__go,
+.tf-funcbar__kbutton,
+.tf-funcbar__dropdown-hint,
+.tf-statusbar__led,
+.tf-table__col--name,
+.tf-table__head .tf-table__col,
+.tf-kv__label,
+.tf-insight-card__title,
+.tf-insight-card__subtitle,
+.tf-sector__name,
+.fc-col-header-cell-cushion {
+  font-family: var(--tf-sans) !important;
+}
+
+/* Mono ONLY on these */
+.tf-table__col--sym,
+.tf-table__col--num,
+.tf-funcbar__input,
+.tf-funcbar__ticker,
+.tf-funcbar__dropdown-code,
+.tf-delta,
+.tf-src,
+.tf-sector__sym,
+.tf-sector__pct,
+.tf-statusbar__clock,
+.tf-statusbar__ticker,
+.tf-kv__value,
+.tf-tape__last,
+.tf-tape__pct {
+  font-family: var(--tf-mono) !important;
+}
+
+/* KV card → link affordance */
+.tf-kv--link {
+  display: flex;
+  flex-direction: column;
+  text-decoration: none;
+  color: inherit;
+}
+.tf-kv--link:hover { /* no hover color change */ }
+.tf-kv__cta {
+  font-family: var(--tf-sans);
+  font-size: var(--tf-fs-xs);
+  color: var(--tf-amber);
+  font-weight: 500;
+  padding: 8px 10px !important;
+  border-bottom: 0 !important;
+}
+
+/* ============================================================
+   Inline data viz — magnitude bars, tick flash
+   ============================================================ */
+
+/* #2 — magnitude bar fill behind ChgN% cells */
+.tf-table__col--mag {
+  position: relative;
+  isolation: isolate;
+}
+.tf-table__col--mag::before {
+  content: '';
+  position: absolute;
+  inset: 2px 0;
+  right: 0;
+  width: calc(var(--tf-mag, 0) * 100%);
+  background: linear-gradient(to left, color-mix(in srgb, var(--tf-mag-c, transparent) 22%, transparent), transparent);
+  z-index: -1;
+  pointer-events: none;
+}
+
+/* #3 — tick-flash keyframes (used by row.key bump + class) */
+@keyframes tf-flash-up {
+  0%   { background: color-mix(in srgb, var(--tf-up) 35%, transparent); }
+  100% { background: transparent; }
+}
+@keyframes tf-flash-dn {
+  0%   { background: color-mix(in srgb, var(--tf-down) 35%, transparent); }
+  100% { background: transparent; }
+}
+.tf-row--flash-up { animation: tf-flash-up 300ms ease-out; }
+.tf-row--flash-dn { animation: tf-flash-dn 300ms ease-out; }
+
+/* ============================================================
+   Aesthetic batch — DA-driven (pane corners, source-tag chip,
+   sentence-case section labels, funcbar slim, mobile fixes)
+   ============================================================ */
+
+/* Soft corners on panels & modals — sharp stays for inline. */
+.tf-pane,
+.tf-panel,
+.tf-insight-card {
+  border-radius: var(--tf-radius-panel);
+}
+
+/* SourceTag → proper chip (no literal [ ] brackets). */
+.tf-src::before,
+.tf-src::after { content: none !important; }
+.tf-src {
+  display: inline-flex !important;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 8px;
+  border: 1px solid var(--tf-border);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.02);
+  font-family: var(--tf-mono);
+  font-size: var(--tf-fs-micro);
+  color: var(--tf-muted);
+  margin-left: 0;
+}
+[data-theme="light"] .tf-src {
+  background: rgba(0, 0, 0, 0.03);
+}
+.tf-src__src { font-weight: 600; }
+.tf-src__dot { opacity: 0.4; }
+.tf-src__ts { font-variant-numeric: tabular-nums; }
+
+/* Pane titles — the single title step: 15px / 700 / sentence case. */
+.tf-pane__title {
+  color: var(--tf-text-strong) !important;
+  text-transform: none !important;
+  letter-spacing: 0 !important;
+  font-family: var(--tf-sans) !important;
+  font-size: var(--tf-fs-md);
+  font-weight: 700;
+  /* Never ellipsis-truncate a card title — short titles like "SPX Gamma
+     Exposure" must always read in full; wrap if the column is narrow. */
+  white-space: normal !important;
+  overflow: visible !important;
+  text-overflow: clip !important;
+}
+/* Title takes priority space over the meta slot in the header row. */
+.tf-pane__title-group { flex: 1 1 auto; min-width: 0; }
+
+@media (max-width: 767px) {
+  /* Stack title above subtitle on mobile — otherwise the baseline row squeezes
+     the title and it wraps mid-name ("Macro" / "Analysis") beside the subtitle.
+     Title gets full width and reads on one line; subtitle drops below. */
+  .tf-pane__title-group {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 2px;
+  }
+  .tf-pane__header { align-items: flex-start; }
+
+  /* Touch tap targets — chrome buttons render ~24px on desktop; bump to ~40px
+     on mobile so they're tappable. min-height + the elements' own flex centering
+     keeps labels centered. */
+  .tf-funcbar__nav-item,
+  .tf-funcbar__kbutton,
+  .tf-panel__tab {
+    min-height: 40px;
+  }
+  .tf-funcbar__kbutton {
+    min-width: 40px;
+  }
+  /* The 40px tap target above balloons each tab past the fixed 28px panel
+     header, so the label spilled below its box (dead space above the tabs).
+     Grow the header to match the tap target so tabs sit centered. */
+  .tf-panel__header {
+    height: 40px;
+  }
+}
+
+/* Funcbar slim — drop the `>` prompt visual, shrink GO. */
+.tf-funcbar__prompt {
+  display: none;
+}
+.tf-funcbar__go {
+  height: 24px !important;
+  padding: 0 10px !important;
+  font-size: var(--tf-fs-base) !important;
+  letter-spacing: 0.06em !important;
+  font-weight: 600 !important;
+}
+
+/* Tape — match original Live Market Tape: adaptive mode, ~96px row, fill width */
+/* tape iframe natural sizing — no constraints */
+
+/* Statusbar pills — sentence case, soft tint */
+.tf-statusbar__led {
+  text-transform: none !important;
+  letter-spacing: 0 !important;
+  font-family: var(--tf-sans) !important;
+}
+
+/* ============================================================
+   Single-font unification — Inter for everything.
+   Numerics get tabular-nums via font-feature-settings, not a font swap.
+   ============================================================ */
+body, html, #root,
+.tf-pane, .tf-panel, .tf-funcbar, .tf-statusbar,
+.tf-table, .tf-kv, .tf-tape, .tf-sector,
+.tf-pane__title, .tf-pane__subtitle, .tf-pane__meta, .tf-pane__content,
+.tf-panel__tab-label, .tf-panel__tab, .tf-panel__meta,
+.tf-funcbar__brand, .tf-funcbar__nav-item, .tf-funcbar__preset,
+.tf-funcbar__echo, .tf-funcbar__go, .tf-funcbar__kbutton,
+.tf-funcbar__input, .tf-funcbar__ticker, .tf-funcbar__dropdown-code,
+.tf-funcbar__dropdown-hint, .tf-funcbar__sep, .tf-funcbar__prompt,
+.tf-statusbar__led, .tf-statusbar__clock, .tf-statusbar__ticker, .tf-statusbar__muted,
+.tf-table__col, .tf-table__col--sym, .tf-table__col--num, .tf-table__col--name,
+.tf-table__head, .tf-table__head .tf-table__col,
+.tf-kv__label, .tf-kv__value, .tf-kv__cta,
+.tf-delta, .tf-src, .tf-src__src, .tf-src__ts,
+.tf-sector__name, .tf-sector__sym, .tf-sector__pct,
+.tf-tape__label, .tf-tape__last, .tf-tape__pct,
+.tf-insight-card__title, .tf-insight-card__subtitle,
+.fc-col-header-cell-cushion {
+  font-family: var(--tf-sans) !important;
+}
+
+/* Numerics get tabular figures + slashed zero — same family, aligned columns. */
+.tf-table__col--sym,
+.tf-table__col--num,
+.tf-delta,
+.tf-src__ts,
+.tf-funcbar__ticker,
+.tf-statusbar__clock,
+.tf-statusbar__ticker,
+.tf-kv__value,
+.tf-tape__last,
+.tf-tape__pct,
+.tf-sector__sym,
+.tf-sector__pct {
+  font-variant-numeric: tabular-nums slashed-zero;
+  font-feature-settings: 'tnum' 1, 'ss01' 1;
+}
+
+/* Tape pane — 46px iframe, zero anywhere else. No header, no padding. */
+.tf-pane--tape {
+  --tf-pane-min-height: 46px;
+  min-height: 46px !important;
+  height: 46px !important;
+  border: 0 !important;
+}
+.tf-pane--tape .tf-pane__content {
+  padding: 0 !important;
+  min-height: 46px !important;
+  height: 46px !important;
+}
+.tf-pane--tape .tf-tradingview-embed,
+.tf-pane--tape .tf-tradingview-embed__inner {
+  min-height: 46px !important;
+  height: 46px !important;
+}
+.tf-pane--tape .tradingview-widget-container,
+.tf-pane--tape .tradingview-widget-container__widget,
+.tf-pane--tape .tradingview-widget-container iframe {
+  height: 46px !important;
+  min-height: 46px !important;
+}
+.tf-panel[data-panel-number='1'] {
+  min-height: 46px !important;
+  height: 46px !important;
+}
+.tf-panel[data-panel-number='1'] .tf-panel__body {
+  height: 46px !important;
+  min-height: 46px !important;
+  overflow: hidden;
+}
+
+/* Funcbar search wrapper — fills available room between nav and right-side buttons */
+.tf-funcbar__search {
+  flex: 1 1 auto;
+  min-width: 160px;
+  max-width: 420px;
+  position: relative;
+}
+
+/* Brand row container — brand + theme + ⌘K inline on same row */
+.tf-funcbar__brand-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.tf-funcbar__brand-spacer {
+  flex: 1 1 auto;
+}
+
+/* Tape pane — kill header chrome entirely (no title) */
+.tf-pane--tape .tf-pane__header { display: none !important; }
+
+/* ============================================================
+   MOBILE OVERRIDES — appended last to win source-order tiebreak.
+   TradingView ticker-tape changes layout (1-line → 2/3-line) at narrow widths,
+   so we DON'T lock iframe height. Let the widget size itself; the pane hugs.
+   ============================================================ */
+@media (max-width: 900px) {
+  /* Force TradingView ticker-tape to render at its wide single-line layout
+     even on narrow viewports — inner content min-width 720px, parent scrolls
+     horizontally. Same shape as desktop, no 3-line stacking. */
+  .tf-pane--tape {
+    height: 46px !important;
+    min-height: 46px !important;
+  }
+  .tf-pane--tape .tf-pane__content {
+    height: 46px !important;
+    min-height: 46px !important;
+    padding: 0 !important;
+  }
+  .tf-pane--tape .tf-tradingview-embed,
+  .tf-pane--tape .tf-tradingview-embed__inner,
+  .tf-pane--tape .tradingview-widget-container,
+  .tf-pane--tape .tradingview-widget-container__widget {
+    height: 46px !important;
+    min-height: 46px !important;
+  }
+  .tf-pane--tape .tradingview-widget-container iframe {
+    height: 46px !important;
+    min-height: 46px !important;
+  }
+  .tf-panel[data-panel-number='1'],
+  .tf-panel[data-panel-number='1'] .tf-panel__body {
+    height: 46px !important;
+    min-height: 46px !important;
+  }
+}
+
+/* Mobile nav — keep labels at readable body size (13px). They no longer all
+   fit on a 375px row, so the nav scrolls horizontally (overflow-x + edge-fade
+   set in the max-width:1023 block above). The old approach shrank to 10px
+   micro to cram all 5 in; that read as broken next to the 16px search. */
+@media (max-width: 480px) {
+  .tf-funcbar__nav-item {
+    padding: 0 8px;
+    font-size: var(--tf-fs-base);
+    letter-spacing: 0;
+    flex: 0 0 auto;
+  }
+}
+
+/* Mobile: release the global no-scroll lock so stacked panels are reachable. */
+@media (max-width: 900px) {
+  html, body, #root {
+    overflow-y: auto !important;
+    height: auto !important;
+    min-height: 100% !important;
+  }
+  .tf-terminal-shell,
+  .tf-terminal-shell__workspace {
+    height: auto !important;
+    min-height: 0 !important;
+    /* Vertical scroll flows to the page on mobile, but never horizontal —
+       keep the x-axis clamped so nothing shifts the page sideways. */
+    overflow-x: hidden !important;
+    overflow-y: visible !important;
+  }
+}
+
+/* ============================================================
+   Weekly Reports drawer — token-driven (themes with dark/light;
+   replaced a fully inline-styled, hardcoded-white component).
+   ============================================================ */
+/* Dropdown anchored under the bell (ReportBell is position:relative), LEFT
+   edge aligned to the button — the bell sits on the left of the funcbar, so the
+   panel opens downward + rightward from it, not slammed to the far edge. */
+.tf-wreport {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  width: min(560px, 92vw);
+  max-height: min(72vh, 640px);
+  background: var(--tf-bg-elevated);
+  border: 1px solid var(--tf-border-strong);
+  border-radius: var(--tf-radius-modal);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.32);
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  color: var(--tf-text);
+}
+.tf-wreport--mobile {
+  /* Mobile: fixed sheet below the (taller, stacked) header — anchored to the
+     viewport, top set inline from the measured header bottom. */
+  position: fixed;
+  top: 56px;
+  left: var(--tf-space-2);
+  right: var(--tf-space-2);
+  bottom: auto;
+  width: auto;
+  max-height: 72vh;
+  border: 1px solid var(--tf-border-strong);
+  border-radius: var(--tf-radius-modal);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.28);
+}
+
+.tf-wreport__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--tf-space-2) var(--tf-space-3);
+  border-bottom: 1px solid var(--tf-border);
+  background: var(--tf-bg-pane);
+}
+.tf-wreport__title {
+  font-size: var(--tf-fs-base);
+  font-weight: 700;
+  color: var(--tf-text-strong);
+}
+.tf-wreport__close {
+  border: none;
+  background: transparent;
+  font-size: var(--tf-fs-lg);
+  color: var(--tf-muted);
+  cursor: pointer;
+  padding: 0 var(--tf-space-1);
+  line-height: 1;
+}
+.tf-wreport__close:hover {
+  color: var(--tf-text-strong);
+}
+
+.tf-wreport__body {
+  display: grid;
+  grid-template-columns: 160px 1fr;
+  flex: 1;
+  min-height: 0;
+}
+.tf-wreport__body--mobile {
+  display: flex;
+  flex-direction: column;
+}
+
+.tf-wreport__list {
+  list-style: none;
+  margin: 0;
+  padding: var(--tf-space-1);
+  border-right: 1px solid var(--tf-border);
+  overflow-y: auto;
+  background: var(--tf-bg-pane);
+}
+.tf-wreport__list--mobile {
+  display: flex;
+  gap: var(--tf-space-1);
+  border-right: 0;
+  border-bottom: 1px solid var(--tf-border);
+  overflow-x: auto;
+  flex-shrink: 0;
+  -webkit-mask-image: linear-gradient(to right, #000 0, #000 calc(100% - 24px), transparent 100%);
+  mask-image: linear-gradient(to right, #000 0, #000 calc(100% - 24px), transparent 100%);
+}
+
+.tf-wreport__item {
+  width: 100%;
+  text-align: left;
+  padding: var(--tf-space-1) var(--tf-space-2);
+  border: none;
+  border-radius: var(--tf-radius);
+  background: transparent;
+  font-size: var(--tf-fs-xs);
+  color: var(--tf-text);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: var(--tf-space-1);
+  white-space: nowrap;
+}
+.tf-wreport__item--active {
+  background: var(--tf-bg-hover);
+  box-shadow: inset 2px 0 0 var(--tf-amber);
+}
+.tf-wreport__item--mobile {
+  width: auto;
+  flex-shrink: 0;
+  border: 1px solid var(--tf-border);
+  background: var(--tf-bg-elevated);
+}
+.tf-wreport__item-date {
+  font-weight: 600;
+}
+.tf-wreport__count {
+  font-size: var(--tf-fs-micro);
+  color: var(--tf-muted);
+}
+.tf-wreport__sample {
+  margin-left: auto;
+  font-size: var(--tf-fs-micro);
+  font-weight: 700;
+  color: var(--tf-amber);
+  border: 1px solid var(--tf-amber);
+  padding: 1px var(--tf-space-1);
+  border-radius: var(--tf-radius);
+  letter-spacing: 0.04em;
+}
+
+.tf-wreport__content {
+  overflow-y: auto;
+  padding: var(--tf-space-3);
+}
+.tf-wreport__status {
+  padding: var(--tf-space-3);
+  font-size: var(--tf-fs-xs);
+  color: var(--tf-muted);
+}
+
+.tf-wreport__md {
+  font-size: var(--tf-fs-base);
+  line-height: 1.55;
+  color: var(--tf-text);
+}
+.tf-wreport__md h1 {
+  margin: 0 0 var(--tf-space-1);
+  font-size: var(--tf-fs-md);
+  font-weight: 700;
+  color: var(--tf-text-strong);
+}
+.tf-wreport__md h2 {
+  margin: var(--tf-space-3) 0 var(--tf-space-1);
+  font-size: var(--tf-fs-base);
+  font-weight: 700;
+  color: var(--tf-text-strong);
+  border-bottom: 1px solid var(--tf-border);
+  padding-bottom: var(--tf-space-1);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.tf-wreport__md blockquote {
+  margin: var(--tf-space-2) 0;
+  padding: var(--tf-space-2) var(--tf-space-3);
+  background: var(--tf-bg-hover);
+  border: 1px solid var(--tf-amber);
+  border-radius: var(--tf-radius-panel);
+  font-size: var(--tf-fs-xs);
+  color: var(--tf-text);
+}
+.tf-wreport__md ul {
+  margin: 0 0 var(--tf-space-1);
+  padding-left: var(--tf-space-4);
+  list-style: disc;
+}
+.tf-wreport__md li {
+  margin: 2px 0;
+  font-size: var(--tf-fs-xs);
+}
+.tf-wreport__md strong {
+  font-weight: 700;
+  color: var(--tf-text-strong);
+}
+.tf-wreport__md em {
+  color: var(--tf-muted);
+  font-style: italic;
+  font-size: var(--tf-fs-xs);
+}
+.tf-wreport__md code {
+  font-family: var(--tf-mono);
+  font-size: var(--tf-fs-xs);
+  background: var(--tf-bg-hover);
+  padding: 1px var(--tf-space-1);
+  border-radius: var(--tf-radius);
+}
+.tf-wreport__md p {
+  margin: var(--tf-space-1) 0;
+  font-size: var(--tf-fs-xs);
+}

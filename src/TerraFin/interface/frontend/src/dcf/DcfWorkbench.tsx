@@ -223,7 +223,7 @@ const DcfWorkbench: React.FC<{
   }, [mode]);
 
   if (!enabled) {
-    return <div style={{ fontSize: 13, color: '#475569' }}>{blockedMessage}</div>;
+    return <div style={{ fontSize: "var(--tf-fs-base)", color: 'var(--tf-muted)' }}>{blockedMessage}</div>;
   }
 
   const handleIndexSubmit = (event: React.FormEvent) => {
@@ -948,10 +948,10 @@ function buildBetaHelper(
 const workbenchStyle: React.CSSProperties = {
   display: 'grid',
   gap: 14,
-  border: '1px solid #dbe4ef',
-  borderRadius: 16,
+  border: '1px solid var(--tf-border)',
+  borderRadius: 'var(--tf-radius)',
   padding: 14,
-  background: 'linear-gradient(180deg, #ffffff 0%, #f8fafc 100%)',
+  background: 'var(--tf-bg-elevated)',
 };
 
 const workbenchRootStyle: React.CSSProperties = {
@@ -975,24 +975,24 @@ const headerRowStyle: React.CSSProperties = {
 };
 
 const eyebrowStyle: React.CSSProperties = {
-  fontSize: 11,
+  fontSize: "var(--tf-fs-xs)",
   fontWeight: 700,
-  color: '#64748b',
+  color: 'var(--tf-muted)',
   letterSpacing: '0.06em',
   textTransform: 'uppercase',
 };
 
 const headlineStyle: React.CSSProperties = {
   marginTop: 4,
-  fontSize: 24,
-  fontWeight: 800,
-  color: '#0f172a',
+  fontSize: "var(--tf-fs-md)",
+  fontWeight: 700,
+  color: 'var(--tf-text-strong)',
 };
 
 const indexHeadlineStyle: React.CSSProperties = {
   ...headlineStyle,
   marginTop: 2,
-  fontSize: 18,
+  fontSize: "var(--tf-fs-md)",
   fontWeight: 700,
   lineHeight: 1.2,
 };
@@ -1000,18 +1000,18 @@ const indexHeadlineStyle: React.CSSProperties = {
 const stockHeadlineStyle: React.CSSProperties = {
   ...headlineStyle,
   marginTop: 2,
-  fontSize: 20,
-  fontWeight: 800,
+  fontSize: "var(--tf-fs-md)",
+  fontWeight: 700,
   lineHeight: 1.2,
 };
 
 const badgeStyle: React.CSSProperties = {
-  borderRadius: 999,
+  borderRadius: 'var(--tf-radius)',
   padding: '8px 12px',
-  background: '#e0f2fe',
-  color: '#075985',
-  fontSize: 11,
-  fontWeight: 800,
+  background: 'var(--tf-bg-pane)',
+  color: 'var(--tf-amber)',
+  fontSize: "var(--tf-fs-xs)",
+  fontWeight: 700,
   letterSpacing: '0.04em',
   textTransform: 'uppercase',
 };
@@ -1031,23 +1031,23 @@ const revertChipStyle: React.CSSProperties = {
   alignItems: 'center',
   gap: 4,
   padding: '3px 9px',
-  borderRadius: 999,
-  border: '1px solid #cbd5e1',
-  background: '#f1f5f9',
-  color: '#475569',
-  fontSize: 10,
+  borderRadius: 'var(--tf-radius)',
+  border: '1px solid var(--tf-border)',
+  background: 'var(--tf-bg-pane)',
+  color: 'var(--tf-muted)',
+  fontSize: "var(--tf-fs-micro)",
   fontWeight: 600,
   cursor: 'pointer',
   whiteSpace: 'nowrap',
 };
 
 const explainTogglePillStyle = (active: boolean): React.CSSProperties => ({
-  border: `1px solid ${active ? '#1d4ed8' : '#cbd5e1'}`,
-  background: active ? '#dbeafe' : '#ffffff',
-  color: active ? '#1d4ed8' : '#475569',
-  borderRadius: 999,
+  border: `1px solid ${active ? 'var(--tf-amber)' : 'var(--tf-border)'}`,
+  background: active ? 'var(--tf-bg-pane)' : 'var(--tf-bg-elevated)',
+  color: active ? 'var(--tf-amber)' : 'var(--tf-muted)',
+  borderRadius: 'var(--tf-radius)',
   padding: '5px 11px',
-  fontSize: 11,
+  fontSize: "var(--tf-fs-xs)",
   fontWeight: 700,
   cursor: 'pointer',
   letterSpacing: '0.02em',
@@ -1059,9 +1059,9 @@ const sectionStyle: React.CSSProperties = {
 };
 
 const sectionTitleStyle: React.CSSProperties = {
-  fontSize: 12,
-  fontWeight: 800,
-  color: '#334155',
+  fontSize: "var(--tf-fs-xs)",
+  fontWeight: 700,
+  color: 'var(--tf-muted-strong)',
   letterSpacing: '0.02em',
 };
 
@@ -1081,16 +1081,16 @@ const fieldCardStyle: React.CSSProperties = {
   display: 'grid',
   gap: 6,
   minWidth: 0,
-  border: '1px solid #dbe4ef',
-  borderRadius: 12,
+  border: '1px solid var(--tf-border)',
+  borderRadius: 'var(--tf-radius)',
   padding: '10px 12px',
-  background: '#ffffff',
+  background: 'var(--tf-bg-pane)',
 };
 
 const fieldLabelStyle: React.CSSProperties = {
-  fontSize: 11,
+  fontSize: "var(--tf-fs-xs)",
   fontWeight: 700,
-  color: '#64748b',
+  color: 'var(--tf-muted)',
   minWidth: 0,
   lineHeight: 1.25,
 };
@@ -1134,31 +1134,33 @@ const inputStyle: React.CSSProperties = {
   width: '100%',
   minWidth: 0,
   height: 36,
-  border: '1px solid #cbd5e1',
-  borderRadius: 10,
+  border: '1px solid var(--tf-border-strong)',
+  borderRadius: 'var(--tf-radius)',
   padding: '0 10px',
-  fontSize: 14,
-  color: '#0f172a',
-  background: '#f8fafc',
+  fontSize: "var(--tf-fs-base)",
+  color: 'var(--tf-text)',
+  background: 'var(--tf-bg)',
   boxSizing: 'border-box',
+  fontFamily: 'var(--tf-mono)',
 };
 
 const fieldFooterStyle: React.CSSProperties = {
-  fontSize: 11,
-  color: '#475569',
+  fontSize: "var(--tf-fs-xs)",
+  color: 'var(--tf-muted)',
   lineHeight: 1.45,
 };
 
 const compactInputStyle: React.CSSProperties = {
   width: '100%',
   height: 34,
-  border: '1px solid #cbd5e1',
-  borderRadius: 10,
+  border: '1px solid var(--tf-border-strong)',
+  borderRadius: 'var(--tf-radius)',
   padding: '0 8px',
-  fontSize: 13,
-  color: '#0f172a',
-  background: '#f8fafc',
+  fontSize: "var(--tf-fs-base)",
+  color: 'var(--tf-text)',
+  background: 'var(--tf-bg)',
   boxSizing: 'border-box',
+  fontFamily: 'var(--tf-mono)',
 };
 
 const scheduleTableStyle: React.CSSProperties = {
@@ -1170,10 +1172,10 @@ const scheduleTableStyle: React.CSSProperties = {
 const scheduleHeaderStyle: React.CSSProperties = {
   padding: '8px 10px',
   textAlign: 'left',
-  fontSize: 11,
+  fontSize: "var(--tf-fs-xs)",
   fontWeight: 700,
-  color: '#64748b',
-  borderBottom: '1px solid #e2e8f0',
+  color: 'var(--tf-muted)',
+  borderBottom: '1px solid var(--tf-border)',
   verticalAlign: 'top',
 };
 
@@ -1186,16 +1188,17 @@ const headerLabelRowStyle: React.CSSProperties = {
 
 const scheduleCellLabelStyle: React.CSSProperties = {
   padding: '10px',
-  fontSize: 12,
+  fontSize: "var(--tf-fs-xs)",
   fontWeight: 700,
-  color: '#0f172a',
-  borderBottom: '1px solid #f1f5f9',
+  color: 'var(--tf-text)',
+  borderBottom: '1px solid var(--tf-border)',
   whiteSpace: 'nowrap',
+  fontFamily: 'var(--tf-mono)',
 };
 
 const scheduleCellStyle: React.CSSProperties = {
   padding: '8px 10px',
-  borderBottom: '1px solid #f1f5f9',
+  borderBottom: '1px solid var(--tf-border)',
 };
 
 const actionRowStyle: React.CSSProperties = {
@@ -1208,11 +1211,11 @@ const actionRowStyle: React.CSSProperties = {
 const secondaryButtonStyle: React.CSSProperties = {
   height: 40,
   padding: '0 14px',
-  borderRadius: 12,
-  border: '1px solid #cbd5e1',
-  background: '#ffffff',
-  color: '#334155',
-  fontSize: 13,
+  borderRadius: 'var(--tf-radius)',
+  border: '1px solid var(--tf-border-strong)',
+  background: 'var(--tf-bg-pane)',
+  color: 'var(--tf-text)',
+  fontSize: "var(--tf-fs-base)",
   fontWeight: 700,
   cursor: 'pointer',
   flex: '1 1 140px',
@@ -1226,12 +1229,12 @@ const secondaryButtonStyle: React.CSSProperties = {
 const fieldActionButtonStyle = (disabled: boolean): React.CSSProperties => ({
   height: 24,
   padding: '0 8px',
-  borderRadius: 999,
-  border: '1px solid #bfdbfe',
-  background: disabled ? '#eff6ff' : '#dbeafe',
-  color: '#1d4ed8',
-  fontSize: 11,
-  fontWeight: 800,
+  borderRadius: 'var(--tf-radius)',
+  border: '1px solid var(--tf-amber)',
+  background: disabled ? 'var(--tf-bg-pane)' : 'var(--tf-bg-elevated)',
+  color: 'var(--tf-amber)',
+  fontSize: "var(--tf-fs-xs)",
+  fontWeight: 700,
   cursor: disabled ? 'default' : 'pointer',
   whiteSpace: 'nowrap',
   maxWidth: '100%',
@@ -1240,12 +1243,12 @@ const fieldActionButtonStyle = (disabled: boolean): React.CSSProperties => ({
 const primaryButtonStyle = (disabled: boolean): React.CSSProperties => ({
   height: 40,
   padding: '0 16px',
-  borderRadius: 12,
-  border: '1px solid #1d4ed8',
-  background: disabled ? '#bfdbfe' : '#1d4ed8',
-  color: '#ffffff',
-  fontSize: 13,
-  fontWeight: 800,
+  borderRadius: 'var(--tf-radius)',
+  border: '1px solid var(--tf-amber)',
+  background: disabled ? 'var(--tf-bg-elevated)' : 'var(--tf-amber)',
+  color: disabled ? 'var(--tf-muted)' : 'var(--tf-bg)',
+  fontSize: "var(--tf-fs-base)",
+  fontWeight: 700,
   cursor: disabled ? 'default' : 'pointer',
   flex: '1 1 180px',
   display: 'inline-flex',
@@ -1256,12 +1259,12 @@ const primaryButtonStyle = (disabled: boolean): React.CSSProperties => ({
 });
 
 const formErrorStyle: React.CSSProperties = {
-  border: '1px solid #fecaca',
-  background: '#fef2f2',
-  color: '#b91c1c',
-  borderRadius: 12,
+  border: '1px solid var(--tf-down)',
+  background: 'var(--tf-bg-elevated)',
+  color: 'var(--tf-down)',
+  borderRadius: 'var(--tf-radius)',
   padding: '10px 12px',
-  fontSize: 12,
+  fontSize: "var(--tf-fs-base)",
   fontWeight: 600,
 };
 
@@ -1271,10 +1274,10 @@ const horizonRowStyle: React.CSSProperties = {
   justifyContent: 'space-between',
   gap: 12,
   flexWrap: 'wrap',
-  border: '1px solid #dbe4ef',
-  borderRadius: 12,
+  border: '1px solid var(--tf-border)',
+  borderRadius: 'var(--tf-radius)',
   padding: '10px 12px',
-  background: '#ffffff',
+  background: 'var(--tf-bg-pane)',
 };
 
 const horizonLabelStyle: React.CSSProperties = {
@@ -1288,27 +1291,27 @@ const horizonLabelTextStyle: React.CSSProperties = {
   display: 'inline-flex',
   alignItems: 'center',
   gap: 6,
-  fontSize: 12,
+  fontSize: "var(--tf-fs-xs)",
   fontWeight: 700,
-  color: '#334155',
+  color: 'var(--tf-muted-strong)',
 };
 
 const segmentedControlStyle: React.CSSProperties = {
   display: 'inline-flex',
-  border: '1px solid #cbd5e1',
-  borderRadius: 10,
+  border: '1px solid var(--tf-border-strong)',
+  borderRadius: 'var(--tf-radius)',
   overflow: 'hidden',
-  background: '#f8fafc',
+  background: 'var(--tf-bg)',
 };
 
 const segmentedButtonStyle = (selected: boolean): React.CSSProperties => ({
   border: 'none',
   padding: '6px 14px',
-  fontSize: 12,
+  fontSize: "var(--tf-fs-xs)",
   fontWeight: 700,
   cursor: 'pointer',
-  background: selected ? '#1d4ed8' : 'transparent',
-  color: selected ? '#ffffff' : '#334155',
+  background: selected ? 'var(--tf-amber)' : 'transparent',
+  color: selected ? 'var(--tf-bg)' : 'var(--tf-muted)',
   transition: 'background 0.15s',
 });
 
@@ -1332,9 +1335,9 @@ const turnaroundToggleTextStyle: React.CSSProperties = {
 };
 
 const turnaroundToggleTitleStyle: React.CSSProperties = {
-  fontSize: 12,
+  fontSize: "var(--tf-fs-xs)",
   fontWeight: 700,
-  color: '#334155',
+  color: 'var(--tf-muted-strong)',
 };
 
 function valuationShellStyle(mode: 'index' | 'stock'): React.CSSProperties {
@@ -1346,9 +1349,9 @@ function valuationShellStyle(mode: 'index' | 'stock'): React.CSSProperties {
     overflowY: mode === 'stock' ? 'auto' : undefined,
     padding: mode === 'stock' ? 12 : undefined,
     paddingRight: mode === 'stock' ? 10 : undefined,
-    border: mode === 'stock' ? '1px solid #dbe4ef' : undefined,
-    borderRadius: mode === 'stock' ? 16 : undefined,
-    background: mode === 'stock' ? '#ffffff' : undefined,
+    border: mode === 'stock' ? '1px solid var(--tf-border)' : undefined,
+    borderRadius: mode === 'stock' ? 'var(--tf-radius)' : undefined,
+    background: mode === 'stock' ? 'var(--tf-bg-pane)' : undefined,
   };
 }
 

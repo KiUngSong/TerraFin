@@ -285,7 +285,7 @@ def build_default_capability_registry(
                 name="fear_greed",
                 description=(
                     "Fetch the CNN Fear & Greed index — same data as the "
-                    "`/dashboard/api/fear-greed` widget. Returns score, rating, "
+                    "`/terminal/api/fear-greed` widget. Returns score, rating, "
                     "previous close, and 1W/1M history."
                 ),
                 handler=resolved_service.fear_greed,
@@ -381,7 +381,7 @@ def build_default_capability_registry(
                 name="trailing_forward_pe",
                 description=(
                     "Fetch the trailing vs. forward P/E spread — same data as "
-                    "`/dashboard/api/trailing-forward-pe-spread`."
+                    "`/terminal/api/trailing-forward-pe-spread`."
                 ),
                 handler=resolved_service.trailing_forward_pe,
                 backgroundable=True,

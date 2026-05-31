@@ -1,6 +1,7 @@
 import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AgentShellDrawer } from './layout';
 import { getAgentViewContextId } from './viewContext';
+import { useTerminalStore } from '../terminal/store';
 
 interface HostedToolDefinition {
   name: string;
@@ -272,14 +273,16 @@ const formatSessionTimestamp = (value: string | null | undefined) => {
     return '';
   }
   try {
-    return new Intl.DateTimeFormat(undefined, {
+    // en-US, not device locale — undefined rendered timestamps in Korean on
+    // Korean-locale devices. The UI is English.
+    return new Intl.DateTimeFormat('en-US', {
       month: 'short',
       day: 'numeric',
       hour: 'numeric',
       minute: '2-digit',
     }).format(date);
   } catch {
-    return date.toLocaleString();
+    return date.toLocaleString('en-US');
   }
 };
 
@@ -491,6 +494,7 @@ const delay = (ms: number) =>
 
 const GlobalAgentWidget: React.FC = () => {
   const [isOpen, setIsOpen] = useState(false);
+
   const [agents, setAgents] = useState<HostedAgentDefinition[]>([]);
   const [session, setSession] = useState<HostedAgentSession | null>(null);
   const [sessionHistory, setSessionHistory] = useState<HostedSessionSummary[]>([]);
@@ -1071,6 +1075,7 @@ const GlobalAgentWidget: React.FC = () => {
     }
     const optimisticCreatedAt = new Date().toISOString();
     setSending(true);
+    useTerminalStore.getState().setAgentActivity('streaming');
     setError(null);
     setDraft('');
     setPendingMessages([buildEphemeralMessage('user', trimmedContent, optimisticCreatedAt)]);
@@ -1228,6 +1233,7 @@ const GlobalAgentWidget: React.FC = () => {
     } finally {
       stopToolPolling();
       setSending(false);
+      useTerminalStore.getState().setAgentActivity('idle');
     }
   };
 
@@ -1384,7 +1390,7 @@ const GlobalAgentWidget: React.FC = () => {
           onClick={() => setIsOpen(true)}
           aria-label={`Open ${AGENT_UI_NAME}`}
         >
-          {AGENT_UI_NAME}
+          AI
         </button>
       </div>
     );

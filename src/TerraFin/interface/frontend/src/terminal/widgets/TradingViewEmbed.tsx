@@ -9,15 +9,17 @@ interface TradingViewEmbedProps {
   theme?: TradingViewTheme;
   contentMinWidth?: number;
   allowOverflowX?: boolean;
+  fadeEdges?: boolean;
 }
 
 const TradingViewEmbed: React.FC<TradingViewEmbedProps> = ({
   scriptSrc,
   config,
   minHeight = 56,
-  theme = 'light',
+  theme = 'dark',
   contentMinWidth,
   allowOverflowX = false,
+  fadeEdges = false,
 }) => {
   const hostRef = useRef<HTMLDivElement | null>(null);
 
@@ -60,7 +62,7 @@ const TradingViewEmbed: React.FC<TradingViewEmbedProps> = ({
 
   return (
     <div
-      className={`tf-tradingview-embed${allowOverflowX ? ' tf-tradingview-embed--scrollable' : ''}`}
+      className={`tf-tradingview-embed${allowOverflowX ? ' tf-tradingview-embed--scrollable' : ''}${fadeEdges ? ' tf-tradingview-embed--fade' : ''}`}
       style={{ minHeight }}
     >
       <div className="tf-tradingview-embed__inner" style={{ minHeight, minWidth: contentMinWidth }}>

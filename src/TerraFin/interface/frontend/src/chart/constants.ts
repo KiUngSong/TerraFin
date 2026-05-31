@@ -12,7 +12,7 @@ export const DEFAULT_CHART_COMPACT_BREAKPOINT = BREAKPOINTS.CHART_COMPACT_MAX;
 export const DEFAULT_PRICE_SCALE_MARGINS = { top: 0.05, bottom: 0.02 } as const;
 
 export const FONT_FAMILY =
-  '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif';
+  'Inter, "Pretendard Variable", Pretendard, "Apple SD Gothic Neo", "Malgun Gothic", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif';
 
 export interface ChartScaleMargins {
   top: number;

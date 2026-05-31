@@ -29,17 +29,16 @@ const AdditionalFeatureToggle: React.FC<Props> = ({ title, subtitle, open, onTog
 );
 
 const cardStyle: React.CSSProperties = {
-  background: '#ffffff',
-  borderRadius: 14,
-  border: '1px solid #e2e8f0',
-  boxShadow: '0 8px 20px rgba(15, 23, 42, 0.04)',
+  background: 'var(--tf-bg-pane)',
+  borderRadius: 'var(--tf-radius)',
+  border: '1px solid var(--tf-border)',
   overflow: 'hidden',
 };
 
 const buttonStyle: React.CSSProperties = {
   width: '100%',
   border: 'none',
-  background: 'linear-gradient(180deg, #ffffff 0%, #f8fafc 100%)',
+  background: 'var(--tf-bg-elevated)',
   padding: 16,
   display: 'flex',
   alignItems: 'flex-start',
@@ -57,9 +56,9 @@ const textBlockStyle: React.CSSProperties = {
 };
 
 const eyebrowStyle: React.CSSProperties = {
-  fontSize: 11,
+  fontSize: "var(--tf-fs-xs)",
   fontWeight: 700,
-  color: '#64748b',
+  color: 'var(--tf-muted)',
   letterSpacing: '0.06em',
   textTransform: 'uppercase',
 };
@@ -73,24 +72,24 @@ const titleRowStyle: React.CSSProperties = {
 
 const titleStyle: React.CSSProperties = {
   margin: 0,
-  fontSize: 15,
+  fontSize: "var(--tf-fs-md)",
   fontWeight: 700,
-  color: '#0f172a',
+  color: 'var(--tf-text-strong)',
 };
 
 const stateBadgeStyle = (open: boolean): React.CSSProperties => ({
   borderRadius: 999,
   padding: '5px 9px',
-  background: open ? '#dcfce7' : '#f1f5f9',
-  color: open ? '#166534' : '#475569',
-  fontSize: 11,
+  background: 'var(--tf-bg-pane)',
+  color: open ? 'var(--tf-up)' : 'var(--tf-muted)',
+  fontSize: "var(--tf-fs-xs)",
   fontWeight: 700,
 });
 
 const subtitleStyle: React.CSSProperties = {
   margin: 0,
-  fontSize: 12,
-  color: '#64748b',
+  fontSize: "var(--tf-fs-xs)",
+  color: 'var(--tf-muted)',
   lineHeight: 1.5,
 };
 
@@ -99,11 +98,11 @@ const chipStyle = (open: boolean): React.CSSProperties => ({
   minWidth: 72,
   height: 36,
   borderRadius: 999,
-  border: `1px solid ${open ? '#86efac' : '#cbd5e1'}`,
-  background: open ? '#ecfdf5' : '#ffffff',
-  color: open ? '#166534' : '#334155',
-  fontSize: 12,
-  fontWeight: 800,
+  border: `1px solid ${open ? 'var(--tf-up)' : 'var(--tf-border)'}`,
+  background: open ? 'var(--tf-bg-pane)' : 'var(--tf-bg-elevated)',
+  color: open ? 'var(--tf-up)' : 'var(--tf-text)',
+  fontSize: "var(--tf-fs-xs)",
+  fontWeight: 700,
   display: 'inline-flex',
   alignItems: 'center',
   justifyContent: 'center',

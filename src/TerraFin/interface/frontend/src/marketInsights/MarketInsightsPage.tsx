@@ -1,11 +1,9 @@
 import React, { useEffect, useState } from 'react';
-import DashboardHeader from '../dashboard/components/DashboardHeader';
-import InsightCard from '../dashboard/components/InsightCard';
+import InsightCard from '../terminal/components/InsightCard';
 import DcfWorkbench from '../dcf/DcfWorkbench';
 import { clearAgentViewContextSource, publishAgentViewContext } from '../agent/viewContext';
 import { BREAKPOINTS } from '../shared/responsive';
-import AdditionalFeatureToggle from '../stock/components/AdditionalFeatureToggle';
-import SpxGexSnapshotCard from '../dashboard/widgets/SpxGexSnapshotCard';
+import SpxGexSnapshotCard from '../terminal/widgets/SpxGexSnapshotCard';
 import { useGex } from '../stock/useStockData';
 import MacroFocusPanel from './components/MacroFocusPanel';
 
@@ -44,7 +42,6 @@ interface FilingSummary {
 const INVESTOR_POSITIONING_PANEL_HEIGHT = 520;
 
 const MarketInsightsPage: React.FC = () => {
-  const [searchValue, setSearchValue] = useState('');
   const [macroChartReady, setMacroChartReady] = useState(false);
   const [gurus, setGurus] = useState<string[]>([]);
   const [selectedGuru, setSelectedGuru] = useState('');
@@ -55,8 +52,6 @@ const MarketInsightsPage: React.FC = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [topCompanies, setTopCompanies] = useState<Array<{ rank: number; ticker: string; name: string; marketCap: string; country: string }>>([]);
   const [isNarrowLayout, setIsNarrowLayout] = useState(false);
-  const [sp500DcfOpen, setSp500DcfOpen] = useState(false);
-  const [isGexOpen, setIsGexOpen] = useState(false);
   const { data: gexData, loading: gexLoading, error: gexError } = useGex('SPX');
   const [filingHistory, setFilingHistory] = useState<FilingSummary[]>([]);
   const [selectedAccession, setSelectedAccession] = useState<string | null>(null);
@@ -237,14 +232,13 @@ const MarketInsightsPage: React.FC = () => {
         flexDirection: 'column',
         width: '100%',
         height: '100%',
-        overflow: 'auto',
-        background: 'linear-gradient(180deg, #f8fafc 0%, #eef2ff 100%)',
-        fontFamily:
-          'Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif',
+        overflowY: 'auto',
+        overflowX: 'hidden',
+        background: 'var(--tf-bg)',
+        fontFamily: 'var(--tf-sans)',
+        color: 'var(--tf-text)',
       }}
     >
-      <DashboardHeader searchValue={searchValue} onSearchChange={setSearchValue} />
-
       <main style={{ display: 'grid', gap: 16, padding: 16 }}>
         <div
           style={{
@@ -266,37 +260,10 @@ const MarketInsightsPage: React.FC = () => {
           </div>
         </div>
 
-        <AdditionalFeatureToggle
-          title="S&P 500 DCF"
-          subtitle="Year-end target valuation range for the S&P 500."
-          open={sp500DcfOpen}
-          onToggle={() => setSp500DcfOpen((prev) => !prev)}
-        />
-        {sp500DcfOpen && (
-          <DcfWorkbench
-            mode="index"
-            endpoint="/market-insights/api/dcf/sp500"
-          />
-        )}
-
-        {!gexLoading && !gexError && gexData?.available === true && (
-          <>
-            <AdditionalFeatureToggle
-              title="SPX Gamma Exposure"
-              subtitle="Dealer net gamma positioning history (SqueezeMetrics, 2011–present). Long gamma suppresses volatility; short gamma amplifies it."
-              open={isGexOpen}
-              onToggle={() => setIsGexOpen((prev) => !prev)}
-            />
-            {isGexOpen && (
-              <SpxGexSnapshotCard data={gexData} loading={gexLoading} error={gexError} />
-            )}
-          </>
-        )}
-
         <InsightCard title="Investor Positioning" subtitle="Guru portfolio concentration and top holdings.">
           <div style={{ display: 'grid', gap: 12 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-              <label htmlFor="guru-selector" style={{ fontSize: 13, color: '#334155', fontWeight: 600 }}>
+              <label htmlFor="guru-selector" style={{ fontSize: 'var(--tf-fs-base)', color: 'var(--tf-text)', fontWeight: 600 }}>
                 Guru
               </label>
               <select
@@ -305,13 +272,15 @@ const MarketInsightsPage: React.FC = () => {
                 onChange={(event) => setSelectedGuru(event.target.value)}
                 disabled={!investorPositioningEnabled || gurus.length === 0 || isLoading}
                 style={{
-                  border: '1px solid #cbd5e1',
-                  borderRadius: 8,
+                  border: '1px solid var(--tf-border)',
+                  borderRadius: 'var(--tf-radius)',
                   padding: '8px 10px',
                   minWidth: 260,
-                  background: !investorPositioningEnabled ? '#f8fafc' : '#fff',
-                  color: !investorPositioningEnabled ? '#94a3b8' : '#0f172a',
+                  background: 'var(--tf-bg-elevated)',
+                  color: !investorPositioningEnabled ? 'var(--tf-muted)' : 'var(--tf-text)',
                   cursor: !investorPositioningEnabled ? 'not-allowed' : 'pointer',
+                  fontFamily: 'var(--tf-sans)',
+                  fontSize: 'var(--tf-fs-base)',
                 }}
               >
                 {gurus.map((guru) => (
@@ -322,7 +291,7 @@ const MarketInsightsPage: React.FC = () => {
               </select>
               {investorPositioningEnabled && (
                 <>
-                  <label htmlFor="period-selector" style={{ fontSize: 13, color: '#334155', fontWeight: 600 }}>
+                  <label htmlFor="period-selector" style={{ fontSize: 'var(--tf-fs-base)', color: 'var(--tf-text)', fontWeight: 600 }}>
                     Period
                   </label>
                   <select
@@ -331,14 +300,15 @@ const MarketInsightsPage: React.FC = () => {
                     onChange={(e) => setSelectedAccession(e.target.value || null)}
                     disabled={isLoading || filingHistory.length === 0}
                     style={{
-                      border: '1px solid #cbd5e1',
-                      borderRadius: 8,
+                      border: '1px solid var(--tf-border)',
+                      borderRadius: 'var(--tf-radius)',
                       padding: '8px 10px',
-                      background: filingHistory.length === 0 ? '#f8fafc' : '#fff',
-                      color: filingHistory.length === 0 ? '#94a3b8' : '#0f172a',
+                      background: 'var(--tf-bg-elevated)',
+                      color: filingHistory.length === 0 ? 'var(--tf-muted)' : 'var(--tf-text)',
                       cursor: filingHistory.length === 0 || isLoading ? 'not-allowed' : 'pointer',
-                      fontSize: 13,
+                      fontSize: 'var(--tf-fs-base)',
                       minWidth: 110,
+                      fontFamily: 'var(--tf-sans)',
                     }}
                   >
                     {filingHistory.length === 0 ? (
@@ -361,12 +331,12 @@ const MarketInsightsPage: React.FC = () => {
             {!investorPositioningEnabled && investorPositioningMessage ? (
               <div
                 style={{
-                  border: '1px solid #cbd5e1',
-                  borderRadius: 12,
+                  border: '1px solid var(--tf-border)',
+                  borderRadius: 'var(--tf-radius)',
                   padding: '12px 14px',
-                  background: '#f8fafc',
-                  color: '#475569',
-                  fontSize: 13,
+                  background: 'var(--tf-bg-elevated)',
+                  color: 'var(--tf-text)',
+                  fontSize: "var(--tf-fs-base)",
                   lineHeight: 1.6,
                 }}
               >
@@ -375,7 +345,7 @@ const MarketInsightsPage: React.FC = () => {
             ) : null}
 
             {isLoading ? (
-              <div style={{ fontSize: 13, color: '#475569' }}>Loading investor positioning...</div>
+              <div style={{ fontSize: "var(--tf-fs-base)", color: 'var(--tf-muted)' }}>Loading investor positioning...</div>
             ) : null}
 
             <div
@@ -388,10 +358,10 @@ const MarketInsightsPage: React.FC = () => {
             >
               <div
                 style={{
-                  border: '1px solid #e2e8f0',
-                  borderRadius: 14,
+                  border: '1px solid var(--tf-border)',
+                  borderRadius: 'var(--tf-radius)',
                   padding: 12,
-                  background: '#ffffff',
+                  background: 'var(--tf-bg-elevated)',
                   display: 'flex',
                   flexDirection: 'column',
                   gap: 8,
@@ -400,7 +370,7 @@ const MarketInsightsPage: React.FC = () => {
                   boxSizing: 'border-box',
                 }}
               >
-                <div style={{ fontSize: 12, color: '#64748b', marginBottom: 8 }}>Portfolio Treemap</div>
+                <div style={{ fontSize: "var(--tf-fs-xs)", color: 'var(--tf-muted)', marginBottom: 8 }}>Portfolio Treemap</div>
                 <div style={{ flex: 1, minHeight: 0 }}>
                   <PortfolioTreemap
                     rows={positioning?.rows || []}
@@ -412,10 +382,10 @@ const MarketInsightsPage: React.FC = () => {
               </div>
               <div
                 style={{
-                  border: '1px solid #e2e8f0',
-                  borderRadius: 14,
+                  border: '1px solid var(--tf-border)',
+                  borderRadius: 'var(--tf-radius)',
                   padding: 12,
-                  background: '#ffffff',
+                  background: 'var(--tf-bg-elevated)',
                   display: 'flex',
                   flexDirection: 'column',
                   gap: 8,
@@ -424,7 +394,7 @@ const MarketInsightsPage: React.FC = () => {
                   boxSizing: 'border-box',
                 }}
               >
-                <div style={{ fontSize: 12, color: '#64748b' }}>
+                <div style={{ fontSize: "var(--tf-fs-xs)", color: 'var(--tf-muted)' }}>
                   {activeHolding ? 'Holding Details' : 'Portfolio Snapshot'}
                 </div>
                 <div style={{ flex: 1, minHeight: 0 }}>
@@ -442,6 +412,28 @@ const MarketInsightsPage: React.FC = () => {
             </div>
           </div>
         </InsightCard>
+
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: isNarrowLayout ? '1fr' : '1fr 1fr',
+            gap: 16,
+            alignItems: 'stretch',
+          }}
+        >
+          {!gexLoading && !gexError && gexData?.available === true ? (
+            <SpxGexSnapshotCard data={gexData} loading={gexLoading} error={gexError} />
+          ) : null}
+
+          <InsightCard
+            title="S&P 500 DCF"
+            subtitle="Year-end target valuation range for the S&P 500."
+            fillContent
+            allowOverflow
+          >
+            <DcfWorkbench mode="index" endpoint="/market-insights/api/dcf/sp500" />
+          </InsightCard>
+        </div>
       </main>
     </div>
   );

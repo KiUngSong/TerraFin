@@ -12,7 +12,7 @@ function formatMagnitude(value: number): string {
   if (abs >= 1_000_000_000) return (value / 1_000_000_000).toFixed(2) + 'B';
   if (abs >= 1_000_000) return (value / 1_000_000).toFixed(2) + 'M';
   if (abs >= 1_000) return (value / 1_000).toFixed(2) + 'K';
-  return value.toLocaleString(undefined, { maximumFractionDigits: 0 });
+  return value.toLocaleString('en-US', { maximumFractionDigits: 0 });
 }
 
 interface TooltipContext {
@@ -34,13 +34,12 @@ export function createTooltip(ctx: TooltipContext): {
     'position: absolute',
     'display: none',
     'padding: 6px 10px',
-    'font-size: 12px',
+    'font-size: var(--tf-fs-xs)',
     'font-family: ' + FONT_FAMILY,
-    'background: white',
-    'color: #333',
-    'border: 1px solid #e0e0e0',
-    'border-radius: 4px',
-    'box-shadow: 0 1px 4px rgba(0,0,0,0.1)',
+    'background: var(--tf-bg-elevated)',
+    'color: var(--tf-text)',
+    'border: 1px solid var(--tf-border)',
+    'border-radius: var(--tf-radius)',
     'pointer-events: none',
     'z-index: 1000',
     'white-space: nowrap',
@@ -83,7 +82,7 @@ export function createTooltip(ctx: TooltipContext): {
         typeof value === 'number' && Number.isFinite(value)
           ? isReturn
             ? value.toFixed(2) + '%'
-            : value.toLocaleString(undefined, { maximumFractionDigits: 4 })
+            : value.toLocaleString('en-US', { maximumFractionDigits: 4 })
           : String(value);
       rows.push({ id, formatted, color });
     });
@@ -96,7 +95,7 @@ export function createTooltip(ctx: TooltipContext): {
     const timeStr = typeof param.time === 'string' ? param.time.slice(0, 10) : String(param.time).slice(0, 10);
     const swatchStyle =
       'display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:8px;vertical-align:middle';
-    toolTip.innerHTML = `<div style="font-weight:600;margin-bottom:4px;color:#111">${timeStr}</div>${rows
+    toolTip.innerHTML = `<div style="font-weight:600;margin-bottom:4px;color:var(--tf-text-strong)">${timeStr}</div>${rows
       .map(
         (r) =>
           `<div style="margin:3px 0;display:flex;align-items:center"><span style="${swatchStyle};background:${r.color}"></span><span>${r.id}: ${r.formatted}</span></div>`

@@ -18,13 +18,13 @@ from TerraFin.data.providers.corporate.investor_positioning import (
     get_investor_positioning_capability,
     get_portfolio_history_data,
 )
-from TerraFin.interface.errors import AppRuntimeError
-from TerraFin.interface.market_insights.payloads import (
+from TerraFin.interface.core.errors import AppRuntimeError
+from TerraFin.interface.pages.market_insights.payloads import (
     build_macro_info_payload,
     canonical_macro_name,
     load_macro_dataframe,
 )
-from TerraFin.interface.valuation_models import DCFValuationResponse, SP500DCFRequest
+from TerraFin.data.contracts.valuation_models import DCFValuationResponse, SP500DCFRequest
 
 
 _logger = logging.getLogger(__name__)

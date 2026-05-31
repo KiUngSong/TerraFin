@@ -1,112 +1,36 @@
-import React, { useMemo, useState } from 'react';
-import DashboardHeader from './components/DashboardHeader';
-import DashboardLayout, { DashboardWidgetPlacement } from './components/DashboardLayout';
-import InsightCard from './components/InsightCard';
-import FearGreedGauge from './widgets/FearGreedGauge';
+import React, { useMemo } from 'react';
+import TerminalWorkspace from './components/TerminalWorkspace';
 import LiveTickerTape from './widgets/LiveTickerTape';
-import MarketBreadthCard from './widgets/MarketBreadthCard';
+import MacroStack from './widgets/MacroStack';
+import SectorGrid from './widgets/SectorGrid';
 import StockHeatmap from './widgets/StockHeatmap';
-import TrailingForwardPeCard from './widgets/TrailingForwardPeCard';
-import UpcomingCatalysts from './widgets/UpcomingCatalysts';
+import SentimentCalendarStack from './widgets/SentimentCalendarStack';
 import WatchlistSnapshotCard from './widgets/WatchlistSnapshotCard';
+import { LAYOUT_PRESETS, WidgetId } from './layout';
+import { useTerminalStore } from '../terminal/store';
+
+// Widgets render bare — the PanelFrame already provides title/source chrome.
+// Wrapping in TerminalPane added a second hidden header layer (DA audit).
+const WIDGET_CATALOG: Record<WidgetId, React.ReactNode> = {
+  ticker: <LiveTickerTape />,
+  sector: <SectorGrid />,
+  heatmap: <StockHeatmap height={500} />,
+  fear: <SentimentCalendarStack />,
+  watchlist: <WatchlistSnapshotCard />,
+  macro: <MacroStack />,
+};
 
 const DashboardPage: React.FC = () => {
-  const [searchValue, setSearchValue] = useState('');
-
-  const headline = 'Market dashboard overview';
-
-  const widgets = useMemo<DashboardWidgetPlacement[]>(
-    () => [
-      {
-        id: 'ticker',
-        slot: 'hero',
-        order: 1,
-        mobileOrder: 1,
-        minHeight: 96,
-        element: (
-          <InsightCard
-            title="Live Market Tape"
-            subtitle="Streaming major U.S. market benchmarks via TradingView."
-            minHeight={96}
-          >
-            <LiveTickerTape />
-          </InsightCard>
-        ),
-      },
-      {
-        id: 'heatmap',
-        slot: 'primary',
-        order: 1,
-        mobileOrder: 2,
-        minHeight: 0,
-        element: (
-          <InsightCard title="S&P 500 Sector Heatmap" subtitle={headline} minHeight={0}>
-            <StockHeatmap height={500} />
-          </InsightCard>
-        ),
-      },
-      {
-        id: 'calendar',
-        slot: 'primary',
-        order: 2,
-        mobileOrder: 5,
-        minHeight: 0,
-        element: (
-          <InsightCard title="Event Calendar" subtitle="Upcoming earnings and key market events." minHeight={0}>
-            <UpcomingCatalysts />
-          </InsightCard>
-        ),
-      },
-      {
-        id: 'fear',
-        slot: 'rail',
-        order: 1,
-        mobileOrder: 3,
-        minHeight: 0,
-        element: (
-          <InsightCard
-            title="Fear & Greed Index"
-            subtitle="CNN market sentiment gauge (0-100)."
-            minHeight={0}
-            href="/market-insights?ticker=Fear%20%26%20Greed"
-          >
-            <FearGreedGauge />
-          </InsightCard>
-        ),
-      },
-      {
-        id: 'watchlist',
-        slot: 'rail',
-        order: 2,
-        mobileOrder: 4,
-        element: <WatchlistSnapshotCard />,
-      },
-      {
-        id: 'breadth',
-        slot: 'rail',
-        order: 3,
-        mobileOrder: 6,
-        minHeight: 0,
-        element: <MarketBreadthCard />,
-      },
-      {
-        id: 'pe',
-        slot: 'rail',
-        order: 4,
-        mobileOrder: 7,
-        minHeight: 0,
-        element: <TrailingForwardPeCard />,
-      },
-    ],
-    [headline]
+  const layoutPreset = useTerminalStore((s) => s.layoutPreset);
+  const preset = useMemo(
+    () => LAYOUT_PRESETS[layoutPreset] ?? LAYOUT_PRESETS.trader,
+    [layoutPreset],
   );
 
   return (
-    <div className="tf-dashboard-page">
-      <DashboardHeader searchValue={searchValue} onSearchChange={setSearchValue} />
-
-      <main className="tf-dashboard-main">
-        <DashboardLayout widgets={widgets} />
+    <div className="tf-terminal-shell">
+      <main className="tf-terminal-shell__workspace">
+        <TerminalWorkspace preset={preset} catalog={WIDGET_CATALOG} />
       </main>
     </div>
   );

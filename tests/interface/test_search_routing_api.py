@@ -27,7 +27,7 @@ def test_resolve_ticker_routes_indicator_to_market_insights() -> None:
     assert payload == {
         "type": "macro",
         "name": "Fear & Greed",
-        "path": "/market-insights?ticker=Fear & Greed",
+        "path": "/market-insights?ticker=Fear%20%26%20Greed",
     }
 
 
@@ -41,5 +41,5 @@ def test_resolve_ticker_routes_net_breadth_to_market_insights() -> None:
     assert payload == {
         "type": "macro",
         "name": "Net Breadth",
-        "path": "/market-insights?ticker=Net Breadth",
+        "path": "/market-insights?ticker=Net%20Breadth",
     }

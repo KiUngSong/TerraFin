@@ -1,6 +1,6 @@
 """Interface layer."""
 
-from .chart import display_chart, display_chart_notebook, get_chart_selection, update_chart
+from .pages.chart import display_chart, display_chart_notebook, get_chart_selection, update_chart
 from .server import create_app, restart_server, run_server, server_status, start_server, stop_server
 
 

@@ -172,7 +172,7 @@ const ReverseDcfWorkbench: React.FC<{
   }, []);
 
   if (!enabled) {
-    return <div style={{ fontSize: 13, color: '#475569' }}>{blockedMessage}</div>;
+    return <div style={{ fontSize: "var(--tf-fs-base)", color: 'var(--tf-muted)' }}>{blockedMessage}</div>;
   }
 
   const handleSubmit = (event: React.FormEvent) => {
@@ -483,10 +483,10 @@ const rootStyle: React.CSSProperties = {
 const workbenchStyle: React.CSSProperties = {
   display: 'grid',
   gap: 14,
-  border: '1px solid #dbe4ef',
-  borderRadius: 16,
+  border: '1px solid var(--tf-border)',
+  borderRadius: 'var(--tf-radius)',
   padding: 14,
-  background: 'linear-gradient(180deg, #ffffff 0%, #f8fafc 100%)',
+  background: 'var(--tf-bg-elevated)',
 };
 
 const headerStyle: React.CSSProperties = {
@@ -498,28 +498,28 @@ const headerStyle: React.CSSProperties = {
 };
 
 const eyebrowStyle: React.CSSProperties = {
-  fontSize: 11,
+  fontSize: "var(--tf-fs-xs)",
   fontWeight: 700,
-  color: '#64748b',
+  color: 'var(--tf-muted)',
   letterSpacing: '0.06em',
   textTransform: 'uppercase',
 };
 
 const headlineStyle: React.CSSProperties = {
   marginTop: 2,
-  fontSize: 20,
-  fontWeight: 800,
-  color: '#0f172a',
+  fontSize: "var(--tf-fs-md)",
+  fontWeight: 700,
+  color: 'var(--tf-text-strong)',
   lineHeight: 1.2,
 };
 
 const badgeStyle: React.CSSProperties = {
-  borderRadius: 999,
+  borderRadius: 'var(--tf-radius)',
   padding: '8px 12px',
-  background: '#dcfce7',
-  color: '#166534',
-  fontSize: 11,
-  fontWeight: 800,
+  background: 'var(--tf-bg-pane)',
+  color: 'var(--tf-up)',
+  fontSize: "var(--tf-fs-xs)",
+  fontWeight: 700,
   letterSpacing: '0.04em',
   textTransform: 'uppercase',
 };
@@ -534,12 +534,12 @@ const stepPillStyle = (active: boolean): React.CSSProperties => ({
   display: 'inline-flex',
   alignItems: 'center',
   gap: 8,
-  borderRadius: 999,
+  borderRadius: 'var(--tf-radius)',
   padding: '6px 10px',
-  background: active ? '#ecfdf5' : '#f8fafc',
-  color: active ? '#166534' : '#64748b',
-  border: `1px solid ${active ? '#86efac' : '#e2e8f0'}`,
-  fontSize: 12,
+  background: active ? 'var(--tf-bg-pane)' : 'var(--tf-bg-elevated)',
+  color: active ? 'var(--tf-up)' : 'var(--tf-muted)',
+  border: `1px solid ${active ? 'var(--tf-up)' : 'var(--tf-border)'}`,
+  fontSize: "var(--tf-fs-xs)",
   fontWeight: 700,
 });
 
@@ -550,10 +550,10 @@ const stepNumberStyle = (active: boolean): React.CSSProperties => ({
   display: 'inline-flex',
   alignItems: 'center',
   justifyContent: 'center',
-  background: active ? '#22c55e' : '#ffffff',
-  color: active ? '#ffffff' : '#64748b',
-  fontSize: 11,
-  fontWeight: 800,
+  background: active ? 'var(--tf-up)' : 'var(--tf-bg-pane)',
+  color: active ? 'var(--tf-bg)' : 'var(--tf-muted)',
+  fontSize: "var(--tf-fs-xs)",
+  fontWeight: 700,
 });
 
 const sectionStyle: React.CSSProperties = {
@@ -562,9 +562,9 @@ const sectionStyle: React.CSSProperties = {
 };
 
 const sectionTitleStyle: React.CSSProperties = {
-  fontSize: 12,
-  fontWeight: 800,
-  color: '#334155',
+  fontSize: "var(--tf-fs-xs)",
+  fontWeight: 700,
+  color: 'var(--tf-muted-strong)',
   letterSpacing: '0.02em',
 };
 
@@ -578,16 +578,16 @@ const fieldStyle: React.CSSProperties = {
   display: 'grid',
   gap: 6,
   minWidth: 0,
-  border: '1px solid #dbe4ef',
-  borderRadius: 12,
+  border: '1px solid var(--tf-border)',
+  borderRadius: 'var(--tf-radius)',
   padding: '10px 12px',
-  background: '#ffffff',
+  background: 'var(--tf-bg-pane)',
 };
 
 const fieldLabelStyle: React.CSSProperties = {
-  fontSize: 11,
+  fontSize: "var(--tf-fs-xs)",
   fontWeight: 700,
-  color: '#64748b',
+  color: 'var(--tf-muted)',
 };
 
 const fieldLabelRowStyle: React.CSSProperties = {
@@ -620,24 +620,25 @@ const inputStyle: React.CSSProperties = {
   width: '100%',
   minWidth: 0,
   height: 36,
-  border: '1px solid #cbd5e1',
-  borderRadius: 10,
+  border: '1px solid var(--tf-border-strong)',
+  borderRadius: 'var(--tf-radius)',
   padding: '0 10px',
-  fontSize: 14,
-  color: '#0f172a',
-  background: '#f8fafc',
+  fontSize: "var(--tf-fs-base)",
+  color: 'var(--tf-text)',
+  background: 'var(--tf-bg)',
   boxSizing: 'border-box',
+  fontFamily: 'var(--tf-mono)',
 };
 
 const helperTextStyle: React.CSSProperties = {
-  fontSize: 12,
-  color: '#475569',
+  fontSize: "var(--tf-fs-xs)",
+  color: 'var(--tf-muted)',
   lineHeight: 1.5,
 };
 
 const fieldHelperTextStyle: React.CSSProperties = {
-  fontSize: 11,
-  color: '#475569',
+  fontSize: "var(--tf-fs-xs)",
+  color: 'var(--tf-muted)',
   lineHeight: 1.45,
 };
 
@@ -647,9 +648,9 @@ const controlGroupStyle: React.CSSProperties = {
 };
 
 const controlLabelStyle: React.CSSProperties = {
-  fontSize: 11,
+  fontSize: "var(--tf-fs-xs)",
   fontWeight: 700,
-  color: '#64748b',
+  color: 'var(--tf-muted)',
   letterSpacing: '0.03em',
   textTransform: 'uppercase',
 };
@@ -658,19 +659,19 @@ const segmentWrapStyle: React.CSSProperties = {
   display: 'grid',
   gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
   gap: 0,
-  border: '1px solid #cbd5e1',
-  borderRadius: 12,
+  border: '1px solid var(--tf-border-strong)',
+  borderRadius: 'var(--tf-radius)',
   overflow: 'hidden',
-  background: '#ffffff',
+  background: 'var(--tf-bg-pane)',
 };
 
 const segmentButtonStyle = (active: boolean): React.CSSProperties => ({
   height: 42,
   border: 'none',
-  borderRight: active ? 'none' : '1px solid #e2e8f0',
-  background: active ? '#334155' : '#ffffff',
-  color: active ? '#ffffff' : '#334155',
-  fontSize: 13,
+  borderRight: active ? 'none' : '1px solid var(--tf-border)',
+  background: active ? 'var(--tf-amber)' : 'var(--tf-bg-pane)',
+  color: active ? 'var(--tf-bg)' : 'var(--tf-muted-strong)',
+  fontSize: "var(--tf-fs-base)",
   fontWeight: 700,
   cursor: 'pointer',
 });
@@ -681,11 +682,11 @@ const profileGridStyle: React.CSSProperties = {
 };
 
 const profileButtonStyle = (active: boolean): React.CSSProperties => ({
-  border: `1px solid ${active ? '#93c5fd' : '#dbe4ef'}`,
-  borderRadius: 12,
+  border: `1px solid ${active ? 'var(--tf-amber)' : 'var(--tf-border)'}`,
+  borderRadius: 'var(--tf-radius)',
   padding: '10px 12px',
-  background: active ? '#eff6ff' : '#ffffff',
-  color: '#0f172a',
+  background: active ? 'var(--tf-bg-elevated)' : 'var(--tf-bg-pane)',
+  color: 'var(--tf-text)',
   textAlign: 'left',
   cursor: 'pointer',
   display: 'grid',
@@ -693,13 +694,13 @@ const profileButtonStyle = (active: boolean): React.CSSProperties => ({
 });
 
 const profileLabelStyle: React.CSSProperties = {
-  fontSize: 13,
+  fontSize: "var(--tf-fs-base)",
   fontWeight: 700,
 };
 
 const profileDescriptionStyle: React.CSSProperties = {
-  fontSize: 12,
-  color: '#475569',
+  fontSize: "var(--tf-fs-base)",
+  color: 'var(--tf-muted)',
   lineHeight: 1.45,
 };
 
@@ -713,11 +714,11 @@ const actionRowStyle: React.CSSProperties = {
 const secondaryButtonStyle: React.CSSProperties = {
   height: 40,
   padding: '0 14px',
-  borderRadius: 12,
-  border: '1px solid #cbd5e1',
-  background: '#ffffff',
-  color: '#334155',
-  fontSize: 13,
+  borderRadius: 'var(--tf-radius)',
+  border: '1px solid var(--tf-border-strong)',
+  background: 'var(--tf-bg-pane)',
+  color: 'var(--tf-text)',
+  fontSize: "var(--tf-fs-base)",
   fontWeight: 700,
   cursor: 'pointer',
   flex: '1 1 140px',
@@ -731,12 +732,12 @@ const secondaryButtonStyle: React.CSSProperties = {
 const fieldActionButtonStyle = (disabled: boolean): React.CSSProperties => ({
   height: 24,
   padding: '0 8px',
-  borderRadius: 999,
-  border: '1px solid #bfdbfe',
-  background: disabled ? '#eff6ff' : '#dbeafe',
-  color: '#1d4ed8',
-  fontSize: 11,
-  fontWeight: 800,
+  borderRadius: 'var(--tf-radius)',
+  border: '1px solid var(--tf-amber)',
+  background: disabled ? 'var(--tf-bg-pane)' : 'var(--tf-bg-elevated)',
+  color: 'var(--tf-amber)',
+  fontSize: "var(--tf-fs-xs)",
+  fontWeight: 700,
   cursor: disabled ? 'default' : 'pointer',
   whiteSpace: 'nowrap',
   maxWidth: '100%',
@@ -745,12 +746,12 @@ const fieldActionButtonStyle = (disabled: boolean): React.CSSProperties => ({
 const primaryButtonStyle = (disabled: boolean): React.CSSProperties => ({
   height: 40,
   padding: '0 16px',
-  borderRadius: 12,
-  border: '1px solid #1d4ed8',
-  background: disabled ? '#bfdbfe' : '#1d4ed8',
-  color: '#ffffff',
-  fontSize: 13,
-  fontWeight: 800,
+  borderRadius: 'var(--tf-radius)',
+  border: '1px solid var(--tf-amber)',
+  background: disabled ? 'var(--tf-bg-elevated)' : 'var(--tf-amber)',
+  color: disabled ? 'var(--tf-muted)' : 'var(--tf-bg)',
+  fontSize: "var(--tf-fs-base)",
+  fontWeight: 700,
   cursor: disabled ? 'default' : 'pointer',
   flex: '1 1 180px',
   display: 'inline-flex',
@@ -761,12 +762,12 @@ const primaryButtonStyle = (disabled: boolean): React.CSSProperties => ({
 });
 
 const errorStyle: React.CSSProperties = {
-  border: '1px solid #fecaca',
-  background: '#fef2f2',
-  color: '#b91c1c',
-  borderRadius: 12,
+  border: '1px solid var(--tf-down)',
+  background: 'var(--tf-bg-elevated)',
+  color: 'var(--tf-down)',
+  borderRadius: 'var(--tf-radius)',
   padding: '10px 12px',
-  fontSize: 12,
+  fontSize: "var(--tf-fs-base)",
   fontWeight: 600,
 };
 

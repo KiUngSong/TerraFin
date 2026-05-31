@@ -149,7 +149,7 @@ def get_pool(universe: str) -> SimilarityPool:
     Event so only one download runs; the rest wait and share the result.
     """
     if universe == "watchlist":
-        from TerraFin.interface.watchlist_service import get_watchlist_service
+        from TerraFin.data.watchlist_service import get_watchlist_service
         pool = SimilarityPool.from_watchlist(get_watchlist_service())
         pool.fetch_prices()
         return pool

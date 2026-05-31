@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef } from 'react';
+import { useTerminalStore } from '../terminal/store';
 import { createChart, ColorType, PriceScaleMode, type UTCTimestamp } from 'lightweight-charts';
 import { DEFAULT_PRICE_SCALE_MARGINS, FONT_FAMILY, type ChartScaleMargins } from './constants';
 import type { RangeId } from './constants';
@@ -197,30 +198,41 @@ const ChartCanvas: React.FC<ChartCanvasProps> = ({
     const el = chartContainerRef.current;
     if (!el || chartRef.current) return;
 
+    const initialTheme = useTerminalStore.getState().theme;
+    const isDark = initialTheme === 'dark';
+    const themeBg = isDark ? '#0e1115' : '#ffffff';
+    const themeText = isDark ? '#e4e6ea' : '#14181d';
+    const themeBorder = isDark ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.22)';
+    const themeGrid = isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.09)';
+
     const chart = createChart(el, {
       layout: {
-        textColor: 'black',
-        background: { type: ColorType.Solid, color: 'white' },
+        textColor: themeText,
+        background: { type: ColorType.Solid, color: themeBg },
         fontFamily: FONT_FAMILY,
       },
-      localization: {
-        locale: 'en-US',
-      },
+      localization: { locale: 'en-US' },
       width: getContainerDimension(el.clientWidth, 400),
       height: getContainerDimension(el.clientHeight, 200),
       crosshair: { mode: 1 },
+      grid: {
+        vertLines: { color: themeGrid },
+        horzLines: { color: themeGrid },
+      },
       leftPriceScale: {
         visible: false,
         borderVisible: true,
+        borderColor: themeBorder,
         mode: priceScaleMode as PriceScaleMode,
         scaleMargins: priceScaleMargins,
       },
       rightPriceScale: {
         borderVisible: true,
+        borderColor: themeBorder,
         mode: (returnMode ? 0 : priceScaleMode) as PriceScaleMode,
         scaleMargins: priceScaleMargins,
       },
-      timeScale: { borderVisible: true, timeVisible: true, secondsVisible: false, barSpacing: 10 },
+      timeScale: { borderVisible: true, borderColor: themeBorder, timeVisible: true, secondsVisible: false, barSpacing: 10 },
     });
     chartRef.current = chart;
 
@@ -331,6 +343,32 @@ const ChartCanvas: React.FC<ChartCanvasProps> = ({
       },
     });
   }, [activeSeries, priceScaleMargins, priceScaleMode, returnMode]);
+
+  // Theme-sync — derived directly from store, bypassing CSS var read (which
+  // races the [data-theme] attribute write).
+  const theme = useTerminalStore((s) => s.theme);
+  useEffect(() => {
+    if (!chartRef.current) return;
+    const isDark = theme === 'dark';
+    const themeBg = isDark ? '#0e1115' : '#ffffff';
+    const themeText = isDark ? '#e4e6ea' : '#14181d';
+    const themeBorder = isDark ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.22)';
+    const themeGrid = isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.09)';
+    chartRef.current.applyOptions({
+      layout: {
+        textColor: themeText,
+        background: { type: ColorType.Solid, color: themeBg },
+        fontFamily: FONT_FAMILY,
+      },
+      grid: {
+        vertLines: { color: themeGrid },
+        horzLines: { color: themeGrid },
+      },
+      leftPriceScale: { borderColor: themeBorder },
+      rightPriceScale: { borderColor: themeBorder },
+      timeScale: { borderColor: themeBorder },
+    });
+  }, [theme]);
 
   useEffect(() => {
     if (!chartRef.current) return;

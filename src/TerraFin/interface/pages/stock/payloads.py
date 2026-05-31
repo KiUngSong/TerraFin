@@ -2,6 +2,7 @@ import functools
 import math
 from datetime import datetime
 from typing import Any
+from urllib.parse import quote
 
 from fastapi import HTTPException
 
@@ -24,7 +25,7 @@ from TerraFin.data import (
     get_ticker_info,
     get_ticker_to_cik_dict_cached,
 )
-from TerraFin.interface.market_insights.payloads import canonical_macro_name, resolve_macro_type
+from TerraFin.interface.pages.market_insights.payloads import canonical_macro_name, resolve_macro_type
 
 
 def _resolve_macro_name(name: str) -> str | None:
@@ -270,10 +271,12 @@ def resolve_ticker_query(query: str) -> dict[str, str]:
     name = query.strip()
     macro_name = _resolve_macro_name(name)
     if macro_name:
-        return {"type": "macro", "name": macro_name, "path": f"/market-insights?ticker={macro_name}"}
+        # Percent-encode: macro names like "S&P 500" contain `&`/spaces that
+        # otherwise split the URL (browser reads `?ticker=S` and drops the rest).
+        return {"type": "macro", "name": macro_name, "path": f"/market-insights?ticker={quote(macro_name, safe='')}"}
 
     upper = name.upper()
-    return {"type": "stock", "name": upper, "path": f"/stock/{upper}"}
+    return {"type": "stock", "name": upper, "path": f"/stock/{quote(upper, safe='')}"}
 
 
 # ---------------------------------------------------------------------------

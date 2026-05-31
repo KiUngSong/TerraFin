@@ -1,14 +1,29 @@
 import React from 'react';
 import type { FcfHistoryResponse } from '../useStockData';
+import { useTerminalStore } from '../../terminal/store';
 
-const POSITIVE_COLOR = '#059669';
-const NEGATIVE_COLOR = '#dc2626';
-const TTM_COLOR = '#1d4ed8';
-const AXIS_COLOR = '#94a3b8';
-const GRID_COLOR = '#e2e8f0';
-const LABEL_COLOR = '#475569';
-
-const THREE_YEAR_CHIP_COLOR = '#0f766e';
+// SVG fill/stroke values must be literal hex — CSS var() does not resolve in
+// SVG presentation attributes. Resolve at render time from the active theme.
+const PALETTE = {
+  dark: {
+    POSITIVE: '#2ecc71',
+    NEGATIVE: '#ff5267',
+    TTM: '#f0b400',
+    AXIS: '#3a4150',
+    GRID: '#23272e',
+    LABEL: '#9aa3b0',
+    THREE_YEAR_CHIP: '#2ecc71',
+  },
+  light: {
+    POSITIVE: '#15803d',
+    NEGATIVE: '#b91c1c',
+    TTM: '#d97706',
+    AXIS: '#9aa3b0',
+    GRID: '#e1e4e8',
+    LABEL: '#5b6470',
+    THREE_YEAR_CHIP: '#15803d',
+  },
+} as const;
 
 const MIN_VIEWBOX_HEIGHT = 180;
 const PADDING_TOP = 18;
@@ -52,6 +67,15 @@ const FcfHistoryChart: React.FC<{
   const [hover, setHover] = React.useState<{ x: number; y: number; label: string; value: string; accent: string } | null>(null);
   const svgWrapperRef = React.useRef<HTMLDivElement | null>(null);
   const containerRef = React.useRef<HTMLDivElement | null>(null);
+  const theme = useTerminalStore((s) => s.theme);
+  const PAL = PALETTE[theme];
+  const POSITIVE_COLOR = PAL.POSITIVE;
+  const NEGATIVE_COLOR = PAL.NEGATIVE;
+  const TTM_COLOR = PAL.TTM;
+  const AXIS_COLOR = PAL.AXIS;
+  const GRID_COLOR = PAL.GRID;
+  const LABEL_COLOR = PAL.LABEL;
+  const THREE_YEAR_CHIP_COLOR = PAL.THREE_YEAR_CHIP;
 
   // Tooltip sits right next to the cursor (diagonal offset). Flips left/up
   // only when it would clip the wrapper edge. Set on enter, not move, to
@@ -95,7 +119,7 @@ const FcfHistoryChart: React.FC<{
     return <div style={placeholderStyle}>Loading FCF history...</div>;
   }
   if (error) {
-    return <div style={{ ...placeholderStyle, color: '#b91c1c' }}>Failed to load FCF: {error}</div>;
+    return <div style={{ ...placeholderStyle, color: 'var(--tf-down)' }}>Failed to load FCF: {error}</div>;
   }
   if (!payload) {
     return <div style={placeholderStyle}>No FCF data available.</div>;
@@ -195,7 +219,7 @@ const FcfHistoryChart: React.FC<{
             <text
               x={chartLeft - 8}
               y={yToPx(tick) + 4}
-              fontSize="11"
+              style={{ fontSize: 'var(--tf-fs-xs)' }}
               fill={LABEL_COLOR}
               textAnchor="end"
             >
@@ -233,7 +257,7 @@ const FcfHistoryChart: React.FC<{
                 <text
                   x={cx}
                   y={valueLabelY}
-                  fontSize="11"
+                  style={{ fontSize: 'var(--tf-fs-xs)' }}
                   fill={color}
                   fontWeight={700}
                   textAnchor="middle"
@@ -244,7 +268,7 @@ const FcfHistoryChart: React.FC<{
               <text
                 x={cx}
                 y={viewHeight - 14}
-                fontSize="11"
+                style={{ fontSize: 'var(--tf-fs-xs)' }}
                 fill={LABEL_COLOR}
                 textAnchor="middle"
               >
@@ -287,14 +311,12 @@ const FcfHistoryChart: React.FC<{
                 <text
                   x={chartLeft + 8}
                   y={y - 4}
-                  fontSize="10"
                   fill={THREE_YEAR_CHIP_COLOR}
                   fontWeight={700}
                   textAnchor="start"
-                  stroke="#ffffff"
                   strokeWidth={3}
                   paintOrder="stroke"
-                  style={{ pointerEvents: 'none' }}
+                  style={{ fontSize: 'var(--tf-fs-micro)', pointerEvents: 'none', stroke: 'var(--tf-bg)' }}
                 >
                   {labelText}
                 </text>
@@ -338,14 +360,14 @@ const FcfHistoryChart: React.FC<{
                   width={pillW}
                   height={pillH}
                   rx={pillH / 2}
-                  fill="#eff6ff"
                   stroke={TTM_COLOR}
                   strokeWidth={1.2}
+                  style={{ fill: 'var(--tf-bg-elevated)' }}
                 />
                 <text
                   x={pillCenterX}
                   y={cy}
-                  fontSize="10"
+                  style={{ fontSize: 'var(--tf-fs-micro)' }}
                   fill={TTM_COLOR}
                   fontWeight={700}
                   textAnchor="middle"
@@ -474,10 +496,10 @@ const ttmLegendPillStyle: React.CSSProperties = {
   alignItems: 'center',
   padding: '2px 9px',
   borderRadius: 999,
-  background: '#eff6ff',
-  color: TTM_COLOR,
-  border: `1px solid ${TTM_COLOR}`,
-  fontSize: 10,
+  background: 'var(--tf-bg-elevated)',
+  color: 'var(--tf-amber)',
+  border: '1px solid var(--tf-amber)',
+  fontSize: "var(--tf-fs-micro)",
   fontWeight: 700,
   lineHeight: 1.4,
 };
@@ -487,16 +509,15 @@ const tooltipStyle = (x: number, y: number, _accent: string): React.CSSPropertie
   left: x,
   top: y,
   padding: '4px 9px',
-  background: '#ffffff',
-  color: '#0f172a',
-  fontSize: 11,
+  background: 'var(--tf-bg-elevated)',
+  color: 'var(--tf-text)',
+  fontSize: "var(--tf-fs-xs)",
   fontWeight: 700,
-  borderRadius: 6,
-  border: '1px solid #cbd5e1',
+  borderRadius: 'var(--tf-radius)',
+  border: '1px solid var(--tf-border)',
   pointerEvents: 'none',
   whiteSpace: 'nowrap',
   zIndex: 10,
-  boxShadow: '0 2px 6px rgba(15, 23, 42, 0.12)',
   lineHeight: 1.3,
   display: 'inline-flex',
   alignItems: 'center',
@@ -512,9 +533,9 @@ const tooltipDotStyle = (accent: string): React.CSSProperties => ({
 });
 
 const tooltipLabelStyle: React.CSSProperties = {
-  fontSize: 10,
+  fontSize: "var(--tf-fs-micro)",
   fontWeight: 600,
-  color: '#64748b',
+  color: 'var(--tf-muted)',
 };
 
 const svgStyle: React.CSSProperties = {
@@ -524,8 +545,8 @@ const svgStyle: React.CSSProperties = {
 };
 
 const placeholderStyle: React.CSSProperties = {
-  fontSize: 13,
-  color: '#64748b',
+  fontSize: "var(--tf-fs-base)",
+  color: 'var(--tf-muted)',
   padding: '20px 4px',
 };
 
@@ -534,8 +555,8 @@ const legendRowStyle: React.CSSProperties = {
   flexWrap: 'wrap',
   gap: 14,
   alignItems: 'center',
-  fontSize: 11,
-  color: '#475569',
+  fontSize: "var(--tf-fs-xs)",
+  color: 'var(--tf-muted)',
 };
 
 const legendItemStyle: React.CSSProperties = {
