@@ -60,7 +60,7 @@ Run these commands from `src/TerraFin/interface/`.
 | `status` | Show whether the background process is running |
 | `restart` | Stop and start again |
 
-Runtime config comes from `src/TerraFin/interface/config.py`.
+Runtime config comes from `src/TerraFin/interface/core/config.py`.
 
 | Field | Default | Env var | Notes |
 |-------|---------|---------|-------|
@@ -73,7 +73,7 @@ Runtime config comes from `src/TerraFin/interface/config.py`.
 
 | Method | Path | Behaviour |
 |--------|------|-----------|
-| `GET` | `/` | Redirect to the dashboard page, respecting `base_path` |
+| `GET` | `/` | Redirect to the terminal page, respecting `base_path` |
 | `GET` | `/resolve-ticker?q=...` | Resolve a query string to a ticker symbol and company name |
 | `GET` | `/health` | Multi-component status page (HTML) |
 | `GET` | `/health.json` | Same data as JSON for scripting |
@@ -113,10 +113,15 @@ touching their internal storage directly.
 
 ## Page routes
 
+> Frontend UI conventions (the "TerraFin Terminal" design language — type spine,
+> color tokens, casing, layout primitives, accessibility) live in
+> [UI / UX Design System](./ui-design-system.md). Read it before changing any
+> frontend component.
+
 | Route | Purpose |
 |-------|---------|
 | `/chart` | Interactive chart page |
-| `/dashboard` | Watchlist, breadth, valuation, and cache status |
+| `/terminal` | Watchlist, breadth, valuation, and cache status |
 | `/market-insights` | Regime summary, guru portfolios, top companies |
 | `/calendar` | Earnings and macro event calendar |
 | `/stock` and `/stock/{ticker}` | Stock Analysis page with chart-first loading |
@@ -128,7 +133,7 @@ Each page route respects `TERRAFIN_BASE_PATH`.
 
 ## Chart
 
-Source: `src/TerraFin/interface/chart/`
+Source: `src/TerraFin/interface/pages/chart/`
 
 The chart is TerraFin's main visualization surface. It stores a session-scoped
 source payload, display payload, named series, pin state, and per-series
@@ -170,11 +175,11 @@ When the payload contains exactly one candlestick series, TerraFin appends:
 | Range Volatility | window 20 (Parkinson) | `range-vol` |
 | Mandelbrot Fractal Dimension | windows 65, 130, 260 | `mfd` |
 
-Indicator adapter source: `src/TerraFin/interface/chart/indicators/adapter.py`.
+Indicator adapter source: `src/TerraFin/interface/pages/chart/indicators/adapter.py`.
 
 ### Chart client (Python)
 
-Source: `src/TerraFin/interface/chart/client.py`
+Source: `src/TerraFin/interface/pages/chart/client.py`
 
 | Function | Description |
 |----------|-------------|
@@ -207,9 +212,9 @@ configure()
 
 ---
 
-## Dashboard
+## Terminal
 
-Source: `src/TerraFin/interface/dashboard/`
+Source: `src/TerraFin/interface/pages/terminal/`
 
 The dashboard is the main consumer of `PrivateDataService`. It mixes private
 source data, cache status, and a few valuation-style summary endpoints. If the
@@ -227,15 +232,15 @@ Important boundary:
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `GET` | `/dashboard/api/watchlist` | Watchlist snapshot (symbols, names, moves) |
-| `GET` | `/dashboard/api/market-breadth` | Market breadth metrics (label, value, tone) |
-| `GET` | `/dashboard/api/trailing-forward-pe-spread` | Trailing minus forward P/E spread summary and history |
-| `GET` | `/dashboard/api/cape` | Current CAPE snapshot |
-| `GET` | `/dashboard/api/fear-greed` | Fear and Greed summary if available |
-| `GET` | `/dashboard/api/cache-status` | Status of all registered cache sources |
-| `POST` | `/dashboard/api/cache-refresh` | Refresh cache sources (`?force=bool`) |
-| `GET` | `/dashboard/api/gex/spx` | SPX GEX live snapshot from CBOE options (regime, spot, zero-gamma, call/put walls, per-strike and per-expiration buckets) |
-| `GET` | `/dashboard/api/gex/spx/history` | SPX GEX daily history from SqueezeMetrics (2011–present) |
+| `GET` | `/terminal/api/watchlist` | Watchlist snapshot (symbols, names, moves) |
+| `GET` | `/terminal/api/market-breadth` | Market breadth metrics (label, value, tone) |
+| `GET` | `/terminal/api/trailing-forward-pe-spread` | Trailing minus forward P/E spread summary and history |
+| `GET` | `/terminal/api/cape` | Current CAPE snapshot |
+| `GET` | `/terminal/api/fear-greed` | Fear and Greed summary if available |
+| `GET` | `/terminal/api/cache-status` | Status of all registered cache sources |
+| `POST` | `/terminal/api/cache-refresh` | Refresh cache sources (`?force=bool`) |
+| `GET` | `/terminal/api/gex/spx` | SPX GEX live snapshot from CBOE options (regime, spot, zero-gamma, call/put walls, per-strike and per-expiration buckets) |
+| `GET` | `/terminal/api/gex/spx/history` | SPX GEX daily history from SqueezeMetrics (2011–present) |
 
 The practical rule for future private-source additions is:
 
@@ -247,7 +252,7 @@ The practical rule for future private-source additions is:
 
 ## Calendar
 
-Source: `src/TerraFin/interface/calendar/`
+Source: `src/TerraFin/interface/pages/calendar/`
 
 The calendar merges private calendar data and TerraFin-fetched macro events into
 one session-aware view. Events are categorized as `earning`, `macro`, or
@@ -270,7 +275,7 @@ source.
 
 ## Market Insights
 
-Source: `src/TerraFin/interface/market_insights/`
+Source: `src/TerraFin/interface/pages/market_insights/`
 
 Market insights provides higher-level market context and institutional
 positioning. The regime endpoint is currently a static placeholder response;
@@ -293,8 +298,8 @@ configured.
 
 The Market Insights page includes an SPX GEX accordion panel. GEX data is
 fetched eagerly at page mount (not on accordion open) via
-`GET /dashboard/api/gex/spx`, so the panel renders immediately when the user
-expands it. Historical data comes from `GET /dashboard/api/gex/spx/history`.
+`GET /terminal/api/gex/spx`, so the panel renders immediately when the user
+expands it. Historical data comes from `GET /terminal/api/gex/spx/history`.
 The snapshot card hides while loading or when CBOE data is unavailable
 (`available: false`).
 
@@ -336,7 +341,7 @@ routes.
 
 ## Stock Analysis
 
-Source: `src/TerraFin/interface/stock/`
+Source: `src/TerraFin/interface/pages/stock/`
 
 Stock Analysis combines a chart-first page route with a small API family for
 company profile, earnings history, financials, SEC filings, and search routing.
@@ -476,7 +481,7 @@ and [agent/hosted-runtime.md](./agent/hosted-runtime.md).
 
 ## Watchlist
 
-Source: `src/TerraFin/interface/watchlist/`
+Source: `src/TerraFin/interface/pages/watchlist/`
 
 The watchlist page is a dedicated personal-management surface. It reuses the
 dashboard watchlist API family rather than exposing a separate `/watchlist/api`
@@ -490,21 +495,21 @@ namespace.
 
 ### API endpoints
 
-The watchlist page uses the `/dashboard/api/watchlist` API family.
+The watchlist page uses the `/terminal/api/watchlist` API family.
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `GET` | `/dashboard/api/watchlist` | Full watchlist snapshot (items with symbol, name, move %, tags) |
-| `POST` | `/dashboard/api/watchlist` | Add a symbol (`body: {symbol, tags?: []}`) |
-| `DELETE` | `/dashboard/api/watchlist/{symbol}` | Remove a symbol. Pass `?group=<tag>` to remove only from that group. |
-| `PATCH` | `/dashboard/api/watchlist/{symbol}/tags` | Update tags (`body: {tags, mode: "set"|"add"|"remove"}`) |
-| `GET` | `/dashboard/api/watchlist/groups` | List groups with item counts |
-| `POST` | `/dashboard/api/watchlist/groups` | Create an empty named group (`body: {name}`) |
-| `DELETE` | `/dashboard/api/watchlist/groups/{tag}` | Delete a group and remove its tag from all items |
-| `POST` | `/dashboard/api/watchlist/groups/rename` | Rename a group (`body: {old, new}`) |
-| `PUT` | `/dashboard/api/watchlist/groups/order` | Persist group display order (`body: {groups: [name, ...]}`) |
-| `PUT` | `/dashboard/api/watchlist/groups/{group}/item-order` | Persist item order within a group (`body: {symbols: [...]}`) |
-| `PUT` | `/dashboard/api/watchlist` | Bulk-update all symbols and tags (`body: {symbols: [{symbol, tags}]}`) |
+| `GET` | `/terminal/api/watchlist` | Full watchlist snapshot (items with symbol, name, move %, tags) |
+| `POST` | `/terminal/api/watchlist` | Add a symbol (`body: {symbol, tags?: []}`) |
+| `DELETE` | `/terminal/api/watchlist/{symbol}` | Remove a symbol. Pass `?group=<tag>` to remove only from that group. |
+| `PATCH` | `/terminal/api/watchlist/{symbol}/tags` | Update tags (`body: {tags, mode: "set"|"add"|"remove"}`) |
+| `GET` | `/terminal/api/watchlist/groups` | List groups with item counts |
+| `POST` | `/terminal/api/watchlist/groups` | Create an empty named group (`body: {name}`) |
+| `DELETE` | `/terminal/api/watchlist/groups/{tag}` | Delete a group and remove its tag from all items |
+| `POST` | `/terminal/api/watchlist/groups/rename` | Rename a group (`body: {old, new}`) |
+| `PUT` | `/terminal/api/watchlist/groups/order` | Persist group display order (`body: {groups: [name, ...]}`) |
+| `PUT` | `/terminal/api/watchlist/groups/{group}/item-order` | Persist item order within a group (`body: {symbols: [...]}`) |
+| `PUT` | `/terminal/api/watchlist` | Bulk-update all symbols and tags (`body: {symbols: [{symbol, tags}]}`) |
 
 ### Drag reorder
 
@@ -742,13 +747,13 @@ The dashboard auto-generates a weekly markdown report every Friday at 16:30 ET (
 3. Action wording driven by `(anomaly_flag, has_headline, vol_ratio)` decision tree.
 4. Optional **agent enrichment** (when TerraFin agent runtime is configured): index context paragraph (vs ^GSPC/^SOX/^RUT), SEC 8-K drill on unattributed events, macro calendar context. Each section independently optional; failures don't block the deterministic core.
 
-#### Dashboard surface
+#### Terminal surface
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `GET` | `/dashboard/api/reports/weekly` | List most recent reports (max 12) |
-| `GET` | `/dashboard/api/reports/weekly/{as_of}` | Fetch markdown for a specific report |
-| `POST` | `/dashboard/api/reports/weekly/run` | Manually trigger generation (CLI/cron) |
+| `GET` | `/terminal/api/reports/weekly` | List most recent reports (max 12) |
+| `GET` | `/terminal/api/reports/weekly/{as_of}` | Fetch markdown for a specific report |
+| `POST` | `/terminal/api/reports/weekly/run` | Manually trigger generation (CLI/cron) |
 
 The dashboard top bar shows a 🔔 bell that opens a panel rendering report markdown. A red dot on the bell indicates an unread report (compared against `localStorage["tf-weekly-report-seen"]`).
 

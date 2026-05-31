@@ -50,7 +50,7 @@ opening the page in a browser.
 Example:
 
 - `TERRAFIN_BASE_PATH=/terrafin`
-- page routes become `/terrafin/chart`, `/terrafin/dashboard`, and so on
+- page routes become `/terrafin/chart`, `/terrafin/terminal`, and so on
 - `/health` and `/ready` remain unchanged
 
 ## Public / Demo Mode

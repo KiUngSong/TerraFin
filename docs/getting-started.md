@@ -116,7 +116,7 @@ Default pages:
 | URL | Purpose |
 |-----|---------|
 | `http://127.0.0.1:8001/chart` | Interactive chart surface |
-| `http://127.0.0.1:8001/dashboard` | Dashboard and cache status |
+| `http://127.0.0.1:8001/terminal` | Terminal and cache status |
 | `http://127.0.0.1:8001/market-insights` | Macro and portfolio views |
 | `http://127.0.0.1:8001/stock/AAPL` | Stock analysis page |
 | `http://127.0.0.1:8001/calendar` | Earnings and macro calendar |

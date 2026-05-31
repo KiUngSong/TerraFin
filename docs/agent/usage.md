@@ -139,7 +139,7 @@ There are two agent-facing HTTP families:
   Stateful hosted runtime access, best when TerraFin should own the conversation and tool loop
 
 In the browser, the hosted runtime is exposed through the floating **TerraFin Agent**
-widget available on main interface pages such as `/dashboard`, `/chart`, and `/stock/<ticker>`.
+widget available on main interface pages such as `/terminal`, `/chart`, and `/stock/<ticker>`.
 
 That panel is always the public surface. There is no guru picker in the default
 product flow.
@@ -336,7 +336,7 @@ curl -X POST "http://127.0.0.1:8001/agent/api/runtime/sessions" \
 ### Browser UI
 
 ```text
-http://127.0.0.1:8001/dashboard
+http://127.0.0.1:8001/terminal
 Use the TerraFin Agent button in the lower-right corner.
 ```
 

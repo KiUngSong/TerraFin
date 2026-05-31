@@ -24,7 +24,7 @@ symlink-based, so `git pull` upgrades every host at once.
 |------|---------|
 | Data layer | Unified access to market, economic, corporate, and private-access data |
 | Analytics | Technical indicators, DCF tooling, risk helpers, and standalone analysis modules |
-| Interface | FastAPI app with chart, dashboard, stock, market-insights, calendar, and watchlist surfaces |
+| Interface | FastAPI app with chart, terminal, stock, market-insights, calendar, and watchlist surfaces |
 | Agent harness | Shared capability kernel, hosted runtime, model-provider registry, and browser widget |
 | Cache system | In-memory and on-disk warming, fallback behavior, and refresh coordination |
 
@@ -33,7 +33,7 @@ symlink-based, so `git pull` upgrades every host at once.
 === "Mode A — Hosted TerraFin Agent"
 
     The TerraFin Agent runtime ships with a floating chat panel on every
-    dashboard page, hidden guru routing (Buffett, Marks, Druckenmiller),
+    terminal page, hidden guru routing (Buffett, Marks, Druckenmiller),
     and view-context awareness. Run it locally or as a public deployment.
 
     - [Getting Started](getting-started.md) — install, configure, run the

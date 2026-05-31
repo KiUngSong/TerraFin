@@ -357,8 +357,8 @@ The internal `_register_default_sources(manager)` now does two things:
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `GET` | `/dashboard/api/cache-status` | Return status of all registered sources |
-| `POST` | `/dashboard/api/cache-refresh?force=true` | Trigger refresh of due sources (or all if `force=true`) |
+| `GET` | `/terminal/api/cache-status` | Return status of all registered sources |
+| `POST` | `/terminal/api/cache-refresh?force=true` | Trigger refresh of due sources (or all if `force=true`) |
 
 ## Extending the cache system
 

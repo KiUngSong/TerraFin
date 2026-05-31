@@ -15,7 +15,7 @@ OpenAPI is available at `/openapi.json`.
 
 | Method | Path | Purpose |
 |--------|------|---------|
-| `GET` | `/` | Redirect to the dashboard page |
+| `GET` | `/` | Redirect to the terminal page |
 | `GET` | `/health` | Multi-component status page (HTML, 30 s in-process cache, `?refresh=1` to force) |
 | `GET` | `/health.json` | Same data as JSON |
 | `GET` | `/ready` | Readiness endpoint |
@@ -40,35 +40,35 @@ Key routes:
 - `GET /chart/api/chart-series/names`
 - `GET /chart/api/chart-series/search`
 
-## Dashboard
+## Terminal
 
-Prefix: `/dashboard/api/*`
+Prefix: `/terminal/api/*`
 
 Representative routes include breadth, valuation, and cache-backed widget
 payloads. See [Interface Overview](interface.md) for the current widget
 contract and private-access fallback behavior. Watchlist routes are listed in
 the [Watchlist](#watchlist) section below.
 
-- SPX GEX snapshot: `GET /dashboard/api/gex/spx`
-- SPX GEX history: `GET /dashboard/api/gex/spx/history`
+- SPX GEX snapshot: `GET /terminal/api/gex/spx`
+- SPX GEX history: `GET /terminal/api/gex/spx/history`
 
 ## Watchlist
 
-Prefix: `/dashboard/api/watchlist*`
+Prefix: `/terminal/api/watchlist*`
 
 | Method | Path | Body | Description |
 |--------|------|------|-------------|
-| `GET` | `/dashboard/api/watchlist` | — | Full snapshot |
-| `POST` | `/dashboard/api/watchlist` | `{symbol, tags?}` | Add symbol |
-| `DELETE` | `/dashboard/api/watchlist/{symbol}` | — | Remove symbol (optional `?group=` to scope) |
-| `PATCH` | `/dashboard/api/watchlist/{symbol}/tags` | `{tags, mode}` | Set/add/remove tags (`mode`: `set`\|`add`\|`remove`, default `set`) |
-| `GET` | `/dashboard/api/watchlist/groups` | — | List groups with counts |
-| `POST` | `/dashboard/api/watchlist/groups` | `{name}` | Create group |
-| `DELETE` | `/dashboard/api/watchlist/groups/{tag}` | — | Delete group |
-| `POST` | `/dashboard/api/watchlist/groups/rename` | `{old, new}` | Rename group |
-| `PUT` | `/dashboard/api/watchlist/groups/order` | `{groups: [name, ...]}` | Persist group order |
-| `PUT` | `/dashboard/api/watchlist/groups/{group}/item-order` | `{symbols: [ticker, ...]}` | Persist item order within group |
-| `PUT` | `/dashboard/api/watchlist` | `{symbols: [{symbol, tags}]}` | Bulk update all symbols and tags |
+| `GET` | `/terminal/api/watchlist` | — | Full snapshot |
+| `POST` | `/terminal/api/watchlist` | `{symbol, tags?}` | Add symbol |
+| `DELETE` | `/terminal/api/watchlist/{symbol}` | — | Remove symbol (optional `?group=` to scope) |
+| `PATCH` | `/terminal/api/watchlist/{symbol}/tags` | `{tags, mode}` | Set/add/remove tags (`mode`: `set`\|`add`\|`remove`, default `set`) |
+| `GET` | `/terminal/api/watchlist/groups` | — | List groups with counts |
+| `POST` | `/terminal/api/watchlist/groups` | `{name}` | Create group |
+| `DELETE` | `/terminal/api/watchlist/groups/{tag}` | — | Delete group |
+| `POST` | `/terminal/api/watchlist/groups/rename` | `{old, new}` | Rename group |
+| `PUT` | `/terminal/api/watchlist/groups/order` | `{groups: [name, ...]}` | Persist group order |
+| `PUT` | `/terminal/api/watchlist/groups/{group}/item-order` | `{symbols: [ticker, ...]}` | Persist item order within group |
+| `PUT` | `/terminal/api/watchlist` | `{symbols: [{symbol, tags}]}` | Bulk update all symbols and tags |
 
 ## Market Insights
 

@@ -70,7 +70,7 @@ config = load_terrafin_config()
 Then call the notebook helpers:
 
 ```python
-from TerraFin.interface.chart.client import display_chart_notebook
+from TerraFin.interface.pages.chart.client import display_chart_notebook
 
 display_chart_notebook(spy)
 ```

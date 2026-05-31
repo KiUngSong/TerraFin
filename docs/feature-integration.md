@@ -57,7 +57,7 @@ Put the feature here when it is about:
 Typical files:
 
 - `src/TerraFin/analytics/analysis/...`
-- `src/TerraFin/interface/chart/indicators/adapter.py` for product-facing overlay output
+- `src/TerraFin/interface/pages/chart/indicators/adapter.py` for product-facing overlay output
 
 ### 3. Interface routes own presentation-specific composition
 
@@ -70,11 +70,11 @@ Put the feature here when it is about:
 
 Typical files:
 
-- `src/TerraFin/interface/chart/...`
-- `src/TerraFin/interface/market_insights/...`
-- `src/TerraFin/interface/stock/...`
-- `src/TerraFin/interface/dashboard/...`
-- `src/TerraFin/interface/calendar/...`
+- `src/TerraFin/interface/pages/chart/...`
+- `src/TerraFin/interface/pages/market_insights/...`
+- `src/TerraFin/interface/pages/stock/...`
+- `src/TerraFin/interface/pages/terminal/...`
+- `src/TerraFin/interface/pages/calendar/...`
 
 Important rule:
 
@@ -386,8 +386,8 @@ Layer-by-layer landing zone:
 | Analytics | Added `_build_turnaround_schedule` (linear interp pre-breakeven; compounded post-breakeven fading to terminal). Added `_select_stock_fcf_base` selector (auto / 3yr_avg / ttm / latest_annual cascade). Added `_three_year_avg_fcf`, `_latest_annual_fcf`, `_quarterly_ttm_fcf` helpers. | `src/TerraFin/analytics/analysis/fundamental/dcf/inputs.py` |
 | Analytics | New override fields (`fcf_base_source`, `breakeven_year`, `breakeven_cash_flow_per_share`, `post_breakeven_growth_pct`) on the model. | `src/TerraFin/analytics/analysis/fundamental/dcf/models.py` |
 | Analytics | Presenter switches to the explicit-schedule path when turnaround fields are set; bear/base/bull scenarios apply YoY shifts to the schedule. | `src/TerraFin/analytics/analysis/fundamental/dcf/presenters.py` |
-| Interface | `POST /stock/api/dcf` accepts the new fields via `StockDCFRequest`. | `src/TerraFin/interface/valuation_models.py`, `src/TerraFin/interface/stock/data_routes.py` |
-| Interface | New `/stock/api/fcf-history` endpoint for the FCF Base Source picker (returns 3yr-avg / latest-annual / TTM candidates + which one `auto` picks). | `src/TerraFin/interface/stock/data_routes.py`, `src/TerraFin/interface/stock/payloads.py` |
+| Interface | `POST /stock/api/dcf` accepts the new fields via `StockDCFRequest`. | `src/TerraFin/data/contracts/valuation_models.py`, `src/TerraFin/interface/pages/stock/data_routes.py` |
+| Interface | New `/stock/api/fcf-history` endpoint for the FCF Base Source picker (returns 3yr-avg / latest-annual / TTM candidates + which one `auto` picks). | `src/TerraFin/interface/pages/stock/data_routes.py`, `src/TerraFin/interface/pages/stock/payloads.py` |
 | Frontend | DCF Workbench: Forecast Horizon segmented control, Turnaround Mode toggle, FCF Base Source segmented control with auto-fill + revert chip, Explain inputs toggle. | `src/TerraFin/interface/frontend/src/dcf/DcfWorkbench.tsx` |
 | Frontend | New `FcfHistoryChart` (right-gutter TTM callout, 3yr Avg dashed line) and `ProjectedFcfChart` (bar / line+band based on horizon, bear/bull whiskers, hover tooltips). | `src/TerraFin/interface/frontend/src/stock/components/{FcfHistoryChart,ProjectedFcfChart}.tsx` |
 | Agent service | `valuation()` accepts `projection_years`, `fcf_base_source`, and the three turnaround fields as keyword args. | `src/TerraFin/agent/service/service.py` |

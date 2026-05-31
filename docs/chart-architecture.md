@@ -29,7 +29,7 @@ That gives TerraFin one chart engine with different entry points:
 
 ### 1. Session-scoped state is the source of truth
 
-Chart state lives in `src/TerraFin/interface/chart/state.py`.
+Chart state lives in `src/TerraFin/interface/pages/chart/state.py`.
 
 Each session stores:
 
@@ -102,7 +102,7 @@ that source in session so later view changes can be rebuilt deterministically.
 
 ### D. View transform
 
-`apply_view(...)` in `src/TerraFin/interface/chart/chart_view.py` transforms the
+`apply_view(...)` in `src/TerraFin/interface/pages/chart/chart_view.py` transforms the
 source payload for the selected timeframe. The transformed payload becomes the
 display payload for the current session.
 
@@ -184,7 +184,7 @@ embedded or notebook flows that must open a specific pre-seeded backend session.
 
 ### Notebook behavior
 
-`display_chart_notebook(...)` in `src/TerraFin/interface/chart/client.py` now:
+`display_chart_notebook(...)` in `src/TerraFin/interface/pages/chart/client.py` now:
 
 1. waits for `/ready`
 2. starts the server if needed

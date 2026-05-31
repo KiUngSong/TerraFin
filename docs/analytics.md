@@ -140,7 +140,7 @@ Options analysis lives under `src/TerraFin/analytics/analysis/options/`.
 | `gamma_exposure.py` | Parse CBOE options chain, compute per-strike GEX in $B, zero-gamma strike, long/short gamma regime, call/put walls |
 | `get_current_gex(ticker)` | High-level wrapper — returns a `GexPayload` dict with `available`, `spot_price`, `zero_gamma_strike`, `regime`, `total_gex_b`, `by_strike`, `by_expiration`, `largest_call_wall`, `largest_put_wall` |
 
-GEX is now a first-class API feature. Per-ticker GEX is served by `/stock/api/gex?ticker=` and rendered in a panel on the Stock Analysis page. SPX-specific GEX is served by `/dashboard/api/gex/spx` and `/dashboard/api/gex/spx/history` and rendered as an accordion panel on the Market Insights page.
+GEX is now a first-class API feature. Per-ticker GEX is served by `/stock/api/gex?ticker=` and rendered in a panel on the Stock Analysis page. SPX-specific GEX is served by `/terminal/api/gex/spx` and `/terminal/api/gex/spx/history` and rendered as an accordion panel on the Market Insights page.
 
 ## Market data modules
 
@@ -213,7 +213,7 @@ COVID 2020, and the 2022 bear.
 
 `patterns/` is the **pull-driven** side: the agent flow, weekly reports,
 or an ad-hoc backtest asks "evaluate every pattern on this frame now."
-The **push-driven** flavor lives at `interface/monitor/`: an external
+The **push-driven** flavor lives at `interface/infra/monitor/`: an external
 realtime monitor service holds a broker WebSocket open, runs its own
 intraday detectors, and POSTs each fired event to TerraFin. Both sides
 emit the same `Signal` dataclass — only the trigger differs. See
@@ -283,7 +283,7 @@ This is the quickest way to understand what is already connected to the product:
 | Chart auto-overlays | Stable |
 | Agent API indicators | Stable |
 | DCF | Stable on-demand UI/API feature in Market Insights and Stock Analysis |
-| GEX (options) | Stable — `/stock/api/gex` per-ticker panel on Stock Analysis; `/dashboard/api/gex/spx` SPX accordion panel on Market Insights |
+| GEX (options) | Stable — `/stock/api/gex` per-ticker panel on Stock Analysis; `/terminal/api/gex/spx` SPX accordion panel on Market Insights |
 | Portfolio optimization / GBM | Standalone, not yet first-class UI/API features |
 | Risk beta toolkit | Partially integrated — used as the stock DCF fallback and exposed through the stock beta-estimate API |
 | Trend signal (Delta-Straddle) | Stable — chart overlay and agent API |
