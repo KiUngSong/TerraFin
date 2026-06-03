@@ -9,20 +9,56 @@ export interface IndicatorEntry {
 export interface TickerRegistry {
   krAliases: Record<string, string>;
   indicators: IndicatorEntry[];
+  // Pre-normalized once on load — never serialized to sessionStorage.
+  normAliases: Array<{ norm: string; ticker: string; display: string }>;
+  normIndicators: Array<{ hay: string; symbol: string; name: string; group: string }>;
 }
 
 const CACHE_KEY = 'tf-ticker-registry';
-// memo is set only after a verified network fetch; readCache() is for initial render only.
 let verifiedMemo: TickerRegistry | null = null;
 let inflight: Promise<TickerRegistry> | null = null;
+let fetchFailCount = 0;
+const MAX_FETCH_ATTEMPTS = 3;
+
+function normalize(s: string): string {
+  return s.trim().toLowerCase().replace(/\s+/g, '');
+}
+
+function buildRegistry(data: { kr_aliases?: Record<string, string>; indicators?: IndicatorEntry[] }): TickerRegistry {
+  const krAliases = data.kr_aliases || {};
+  const indicators = data.indicators || [];
+  return {
+    krAliases,
+    indicators,
+    normAliases: Object.entries(krAliases).map(([display, ticker]) => ({
+      norm: normalize(display),
+      ticker,
+      display,
+    })),
+    normIndicators: indicators.map((ind) => ({
+      hay: `${ind.symbol} ${ind.name}`.toLowerCase(),
+      symbol: ind.symbol,
+      name: ind.name,
+      group: ind.group,
+    })),
+  };
+}
+
+function _isValidRegistryPayload(parsed: unknown): parsed is { kr_aliases: Record<string, string>; indicators: IndicatorEntry[] } {
+  if (!parsed || typeof parsed !== 'object') return false;
+  const p = parsed as Record<string, unknown>;
+  return typeof p.kr_aliases === 'object' && p.kr_aliases !== null &&
+    Object.keys(p.kr_aliases as object).length > 0 &&
+    Array.isArray(p.indicators);
+}
 
 function readCache(): TickerRegistry | null {
   try {
     const raw = sessionStorage.getItem(CACHE_KEY);
     if (!raw) return null;
     const parsed = JSON.parse(raw);
-    if (parsed && typeof parsed === 'object' && parsed.kr_aliases && Array.isArray(parsed.indicators)) {
-      return { krAliases: parsed.kr_aliases, indicators: parsed.indicators };
+    if (_isValidRegistryPayload(parsed)) {
+      return buildRegistry(parsed);
     }
   } catch {
     // ignore
@@ -33,19 +69,21 @@ function readCache(): TickerRegistry | null {
 async function fetchRegistry(): Promise<TickerRegistry> {
   if (verifiedMemo) return verifiedMemo;
   if (inflight) return inflight;
+  if (fetchFailCount >= MAX_FETCH_ATTEMPTS) throw new Error('registry fetch failed after max attempts');
   inflight = (async () => {
     const resp = await fetch('/api/ticker-search/registry');
     if (!resp.ok) throw new Error(`registry ${resp.status}`);
     const data = await resp.json();
-    const reg: TickerRegistry = {
-      krAliases: data.kr_aliases || {},
-      indicators: data.indicators || [],
-    };
+    if (!_isValidRegistryPayload(data)) throw new Error('registry payload empty or invalid');
+    const reg = buildRegistry(data);
     verifiedMemo = reg;
-    // Store with server version so next page load can detect staleness.
+    fetchFailCount = 0;
     try { sessionStorage.setItem(CACHE_KEY, JSON.stringify(data)); } catch { /* ignore */ }
     return reg;
-  })().finally(() => { inflight = null; });
+  })().catch((err) => {
+    fetchFailCount++;
+    throw err;
+  }).finally(() => { inflight = null; });
   return inflight;
 }
 
@@ -69,10 +107,6 @@ export function isKoreanQuery(q: string): boolean {
   return HANGUL_RE.test(q);
 }
 
-function normalize(s: string): string {
-  return s.trim().toLowerCase().replace(/\s+/g, '');
-}
-
 export interface LocalHit {
   symbol: string;
   name: string;
@@ -91,9 +125,8 @@ export function localPrefixMatch(
 
   const indicators: LocalHit[] = [];
   const qLower = trimmed.toLowerCase();
-  for (const ind of reg.indicators) {
-    const hay = `${ind.symbol} ${ind.name}`.toLowerCase();
-    if (hay.includes(qLower)) {
+  for (const ind of reg.normIndicators) {
+    if (ind.hay.includes(qLower)) {
       indicators.push({ symbol: ind.symbol, name: ind.name, group: ind.group, category: 'indicator' });
     }
   }
@@ -105,27 +138,26 @@ export function localPrefixMatch(
     const exact: LocalHit[] = [];
     const prefix: LocalHit[] = [];
     const substring: LocalHit[] = [];
-    // Single-char queries would substring-match a huge slice of the alias map
-    // and drown the prefix tier in noise. Gate the substring tier so the
-    // typical 2-3 char Korean shortname hits without 1-char false-positives.
     const allowSubstring = n.length >= 2;
-    for (const [alias, ticker] of Object.entries(reg.krAliases)) {
-      const aliasNorm = normalize(alias);
+    for (const { norm: aliasNorm, ticker, display: alias } of reg.normAliases) {
       if (aliasNorm === n) {
         translated = ticker;
         exact.push({ symbol: ticker, name: alias, category: 'stock' });
       } else if (aliasNorm.startsWith(n)) {
         prefix.push({ symbol: ticker, name: alias, category: 'stock' });
       } else if (allowSubstring && aliasNorm.includes(n)) {
-        // Substring tier catches the common case where the user types only
-        // the distinctive part of the company name and drops the corp prefix
-        // (SK / LG / Hyundai / etc.).
         substring.push({ symbol: ticker, name: alias, category: 'stock' });
       }
     }
     prefix.sort((a, b) => a.name.localeCompare(b.name));
     substring.sort((a, b) => a.name.localeCompare(b.name));
-    stocks.push(...exact, ...prefix, ...substring);
+    const seenSymbols = new Set<string>();
+    for (const hit of [...exact, ...prefix, ...substring]) {
+      if (!seenSymbols.has(hit.symbol)) {
+        seenSymbols.add(hit.symbol);
+        stocks.push(hit);
+      }
+    }
   }
 
   return {

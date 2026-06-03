@@ -12,11 +12,11 @@ const StockHeader: React.FC<{ info: CompanyInfo }> = ({ info }) => {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 6, minWidth: 0 }}>
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, minWidth: 0 }}>
-        <span style={{ fontFamily: 'var(--tf-sans)', fontSize: 'var(--tf-fs-md)', fontWeight: 700, color: 'var(--tf-text-strong)', letterSpacing: '0.04em' }}>
+        <span style={{ fontFamily: 'var(--tf-sans)', fontSize: 'var(--tf-fs-md)', fontWeight: 700, color: 'var(--tf-text-strong)', letterSpacing: '0.04em', flexShrink: 0 }}>
           {info.ticker}
         </span>
         {info.shortName && (
-          <span style={{ fontFamily: 'var(--tf-sans)', fontSize: 'var(--tf-fs-md)', color: 'var(--tf-muted)', fontWeight: 500, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={info.shortName}>
+          <span style={{ fontFamily: 'var(--tf-sans)', fontSize: 'var(--tf-fs-md)', color: 'var(--tf-muted)', fontWeight: 500, minWidth: 0, overflow: 'hidden', display: 'inline-block' }} title={info.shortName}>
             · {info.shortName}
           </span>
         )}
