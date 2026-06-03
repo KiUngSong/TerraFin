@@ -10,11 +10,11 @@ import re
 from typing import Any, Mapping
 
 from .memo import (
-    GuruResearchMemo,
-    GuruRoutePlan,
     HOWARD_MARKS,
     STANLEY_DRUCKENMILLER,
     WARREN_BUFFETT,
+    GuruResearchMemo,
+    GuruRoutePlan,
 )
 from .personas import GuruPersona
 
@@ -134,9 +134,7 @@ def _persona_fit_feedback(
     # user_message when supplied; fall back to the route-plan fields for
     # transcript-replay of legacy plans.
     broad_market_text = _normalize_text(
-        user_message
-        if user_message is not None
-        else " ".join(route_plan.matched_terms) + " " + route_plan.reason
+        user_message if user_message is not None else " ".join(route_plan.matched_terms) + " " + route_plan.reason
     )
     broad_market = _is_broad_market_request(
         broad_market_text,
@@ -144,9 +142,7 @@ def _persona_fit_feedback(
     ) or route_plan.route_type in {"explicit", "macro"}
 
     if broad_market and technical_hits >= 2 and signature_hits == 0:
-        return (
-            "The memo relies on shared technical-analysis language but does not surface this investor's signature concepts."
-        )
+        return "The memo relies on shared technical-analysis language but does not surface this investor's signature concepts."
     narrative_feedback = _narrative_quality_feedback([memo.thesis, *memo.key_evidence, *memo.risks])
     if narrative_feedback:
         return narrative_feedback
@@ -266,7 +262,25 @@ def _narrative_quality_feedback(texts: list[str]) -> str | None:
 def _displayable_open_questions(open_questions: list[str]) -> list[str]:
     if _open_question_quality_feedback(open_questions):
         return []
-    allowed_caps = {"SPY", "QQQ", "DIA", "VT", "IWM", "M2", "CPI", "VIX", "DXY", "Fed", "Federal", "Reserve", "Treasury", "Apple", "Buffett", "Marks", "Druckenmiller"}
+    allowed_caps = {
+        "SPY",
+        "QQQ",
+        "DIA",
+        "VT",
+        "IWM",
+        "M2",
+        "CPI",
+        "VIX",
+        "DXY",
+        "Fed",
+        "Federal",
+        "Reserve",
+        "Treasury",
+        "Apple",
+        "Buffett",
+        "Marks",
+        "Druckenmiller",
+    }
     displayable: list[str] = []
     for question in open_questions:
         stripped = question.strip()

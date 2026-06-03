@@ -14,13 +14,13 @@ Public entry point: :func:`run_guru_consult`.
 from .consult import run_guru_consult
 from .feedback import _persona_fit_feedback
 from .memo import (
+    HOWARD_MARKS,
+    STANLEY_DRUCKENMILLER,
+    WARREN_BUFFETT,
     GuruResearchMemo,
     GuruRoutePlan,
     GuruRouteType,
     GuruStance,
-    HOWARD_MARKS,
-    STANLEY_DRUCKENMILLER,
-    WARREN_BUFFETT,
     _build_guru_memo_tool,
     _validate_guru_memo_arguments,
 )

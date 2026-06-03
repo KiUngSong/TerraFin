@@ -8,12 +8,7 @@ that the orchestrator surfaces as the tool result.
 
 from typing import TYPE_CHECKING, Any
 
-from .memo import (
-    GuruRoutePlan,
-    HOWARD_MARKS,
-    STANLEY_DRUCKENMILLER,
-    WARREN_BUFFETT,
-)
+from .memo import HOWARD_MARKS, STANLEY_DRUCKENMILLER, WARREN_BUFFETT, GuruRoutePlan
 from .personas import PersonaRegistry, build_default_persona_registry
 from .worker import _run_guru_research_memo
 
@@ -76,8 +71,7 @@ def run_guru_consult(
         return {
             "status": "failed",
             "guru": guru_name,
-            "reason": failure_reason
-            or "The consulted persona could not produce a structured memo.",
+            "reason": failure_reason or "The consulted persona could not produce a structured memo.",
             "steps": steps,
         }
 
