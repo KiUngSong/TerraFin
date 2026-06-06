@@ -20,27 +20,39 @@ const SCORE_BANDS = [
   { label: 'Extreme Greed', min: 75, max: 100, arcColor: '#22c55e' },
 ] as const;
 
+const REFRESH_MS = 5 * 60 * 1000;
+
 const FearGreedGauge: React.FC = () => {
   const [data, setData] = useState<FearGreedData | null>(null);
   const [failed, setFailed] = useState(false);
-  const [unavailable, setUnavailable] = useState(false);
 
   useEffect(() => {
-    fetch('/terminal/api/fear-greed')
-      .then((r) => (r.ok ? r.json() : Promise.reject()))
-      .then((d: FearGreedData) => {
-        if (d && d.score != null) setData(d);
-        else setUnavailable(true);
-      })
-      .catch(() => setFailed(true));
+    let cancelled = false;
+    // Errors on periodic refreshes keep the last good value; only the initial
+    // load surfaces the degraded state. A null score and a request failure
+    // collapse into one state — the endpoint 200s with score:null whenever
+    // the private backend is unreachable, so they are the same condition.
+    const load = (initial: boolean) => {
+      fetch('/terminal/api/fear-greed')
+        .then((r) => (r.ok ? r.json() : Promise.reject()))
+        .then((d: FearGreedData) => {
+          if (cancelled) return;
+          if (d && d.score != null) {
+            setData(d);
+            setFailed(false);
+          } else if (initial) {
+            setFailed(true);
+          }
+        })
+        .catch(() => { if (!cancelled && initial) setFailed(true); });
+    };
+    load(true);
+    const timer = setInterval(() => load(false), REFRESH_MS);
+    return () => { cancelled = true; clearInterval(timer); };
   }, []);
 
   if (failed) {
     return <div style={{ fontFamily: 'var(--tf-mono)', fontSize: 'var(--tf-fs-xs)', color: 'var(--tf-muted)' }}>Data source not connected</div>;
-  }
-
-  if (unavailable) {
-    return <div style={{ fontFamily: 'var(--tf-mono)', fontSize: 'var(--tf-fs-xs)', color: 'var(--tf-muted)' }}>Unavailable</div>;
   }
 
   if (!data || data.score == null) {

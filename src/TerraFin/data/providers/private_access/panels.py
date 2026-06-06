@@ -83,35 +83,55 @@ def _fetch_cape() -> dict:
 
 
 def _fear_greed_rating(score: float | int | None) -> str:
+    # Band edges match the frontend gauge (SCORE_BANDS in FearGreedGauge.tsx):
+    # Extreme Fear 0–25 · Fear 25–45 · Neutral 45–55 · Greed 55–75 · Extreme Greed 75–100.
     if score is None:
         return "Unavailable"
     s = float(score)
-    if s <= 24:
+    if s <= 25:
         return "Extreme Fear"
-    if s <= 44:
+    if s <= 45:
         return "Fear"
-    if s <= 54:
+    if s <= 55:
         return "Neutral"
-    if s <= 74:
+    if s <= 75:
         return "Greed"
     return "Extreme Greed"
+
+
+def _as_int_score(value: object) -> int | None:
+    # FearGreedResponse fields are int-typed; CNN scores are integral, but a
+    # fractional wire value must not 500 the endpoint. Numeric strings are
+    # contract-permitted (IndicatorSnapshot.value: float | int | str).
+    if isinstance(value, (int, float)):
+        return round(float(value))
+    if isinstance(value, str):
+        try:
+            return round(float(value))
+        except ValueError:
+            return None
+    return None
 
 
 def _fetch_fear_greed() -> dict:
     snapshot = get_private_series_current(PRIVATE_SERIES["fear_greed"], force_refresh=True)
     md = dict(snapshot.metadata) if snapshot.metadata else {}
-    score = md.get("score")
-    previous_close = md.get("previous_close")
+    # Canonical wire: live score is `value` on the snapshot; metadata only
+    # carries previous_close / previous_1_week / previous_1_month.
+    score = _as_int_score(snapshot.value)
+    previous_close = _as_int_score(md.get("previous_close"))
     effective_score = score if score is not None else previous_close
-    raw_rating = md.get("rating")
-    rating = raw_rating if raw_rating and raw_rating != "Unavailable" else _fear_greed_rating(effective_score)
+    # Always derive the rating from the rounded score: upstream's rating is
+    # computed on the unrounded value and can disagree with the gauge band
+    # drawn by the frontend at exact band edges.
+    rating = _fear_greed_rating(effective_score)
     return {
         "score": effective_score,
         "rating": rating,
-        "timestamp": str(md.get("timestamp") or ""),
+        "timestamp": str(snapshot.as_of or ""),
         "previous_close": previous_close,
-        "previous_1_week": md.get("previous_1_week"),
-        "previous_1_month": md.get("previous_1_month"),
+        "previous_1_week": _as_int_score(md.get("previous_1_week")),
+        "previous_1_month": _as_int_score(md.get("previous_1_month")),
     }
 
 

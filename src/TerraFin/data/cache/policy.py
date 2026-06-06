@@ -30,7 +30,8 @@ CACHE_TTL_REGISTRY: dict[str, int] = {
     "private.cape": 7 * 86_400,
     "private.calendar": 7 * 86_400,
     "private.macro": 7 * 86_400,
-    "private.fear_greed": 86_400,
+    # CNN updates intraday; keep the gauge near-live (single-flight caps upstream calls).
+    "private.fear_greed": 300,
     "private.top_companies": 7 * 86_400,
     # Private-source per-series
     "private.series.history": 86_400,
