@@ -14,7 +14,18 @@ const INDICATOR_META: Record<string, { label: string; order: number; helpText?: 
   'ma-120': { label: 'MA 120', order: 2 },
   'ma-200': { label: 'MA 200', order: 3 },
   bb: { label: 'Bollinger', order: 4 },
-  rsi: { label: 'RSI', order: 5 },
+  rsi: {
+    label: 'RSI',
+    order: 5,
+    helpText:
+      "Relative Strength Index (14), Cutler's variant: a simple moving average of gains vs losses. Path-independent — the value depends only on the last 14 bars, so it stays stable across chart zoom and matches the RSI shown by most Korean brokerage apps.",
+  },
+  'rsi-wilder': {
+    label: 'RSI (Wilder)',
+    order: 5.5,
+    helpText:
+      "Relative Strength Index (14), Wilder's original 1978 variant with recursive smoothing — the default on TradingView and most pro platforms. Reacts faster to recent bars and is path-dependent, so it needs a long history for stable values. Can differ from the Cutler RSI by several points on the same data.",
+  },
   macd: { label: 'MACD', order: 6 },
   'realized-vol': { label: 'Realized Vol', order: 7 },
   'range-vol': { label: 'Range Vol', order: 8 },
@@ -391,7 +402,7 @@ const IndicatorSelector: React.FC<IndicatorSelectorProps> = ({ options, selected
                           [infoTooltipPos.placement === 'right' ? 'borderRightColor' : 'borderLeftColor']: 'var(--tf-bg-elevated)',
                         }}
                       />
-                      <div style={{ fontWeight: 600, marginBottom: 4 }}>Mandelbrot Fractal Dimension</div>
+                      <div style={{ fontWeight: 600, marginBottom: 4 }}>{label}</div>
                       <div>{helpText}</div>
                     </div>,
                     document.body,

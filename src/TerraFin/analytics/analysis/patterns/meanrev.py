@@ -13,7 +13,7 @@ def evaluate(ticker: str, ohlc) -> list[Signal]:
     return out
 
 
-# ─── Wilder RSI overbought / oversold ────────────────────────────────────────
+# ─── RSI overbought / oversold (Cutler's RSI, the app-wide convention) ────────
 
 
 def _rsi_extremes(ticker: str, ohlc) -> list[Signal]:

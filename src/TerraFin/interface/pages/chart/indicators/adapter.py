@@ -15,6 +15,7 @@ from TerraFin.analytics.analysis.technical import (
     range_vol,
     realized_vol,
     rsi,
+    rsi_wilder,
     trend_signal_composite,
 )
 
@@ -52,33 +53,48 @@ def compute_moving_averages(candle_data: list[dict]) -> list[dict]:
 # ── RSI ─────────────────────────────────────────────────────────────────
 
 _RSI_COLOR = "#e91e63"
+_RSI_WILDER_COLOR = "#5c6bc0"
 _RSI_OB_COLOR = "#ef5350"
 _RSI_OS_COLOR = "#26a69a"
 
 
+def _rsi_overlay(times: list, offset: int, values: list[float], *, id_: str, group: str, color: str) -> dict:
+    data = [{"time": times[offset + i], "value": round(v, 2)} for i, v in enumerate(values)]
+    return {
+        "id": id_,
+        "seriesType": "line",
+        "color": color,
+        "data": data,
+        "priceScaleId": "rsi",
+        "indicator": True,
+        "indicatorGroup": group,
+        "priceLevels": [
+            {"price": 70, "color": _RSI_OB_COLOR, "title": "Overbought"},
+            {"price": 30, "color": _RSI_OS_COLOR, "title": "Oversold"},
+        ],
+    }
+
+
 def compute_rsi(candle_data: list[dict], window: int = 14) -> list[dict]:
+    """Emit two selectable RSI overlays: Cutler's (default) and Wilder's.
+
+    They share the "rsi" price scale so the user can show either, or both at
+    once to compare the two conventions. Cutler matches most Korean brokerage
+    apps; Wilder matches TradingView and other pro platforms.
+    """
     times, closes = _extract_close(candle_data)
     if not closes:
         return []
-    offset, values = rsi(closes, window)
-    if not values:
-        return []
-    data = [{"time": times[offset + i], "value": round(v, 2)} for i, v in enumerate(values)]
-    return [
-        {
-            "id": f"RSI {window}",
-            "seriesType": "line",
-            "color": _RSI_COLOR,
-            "data": data,
-            "priceScaleId": "rsi",
-            "indicator": True,
-            "indicatorGroup": "rsi",
-            "priceLevels": [
-                {"price": 70, "color": _RSI_OB_COLOR, "title": "Overbought"},
-                {"price": 30, "color": _RSI_OS_COLOR, "title": "Oversold"},
-            ],
-        }
-    ]
+    out: list[dict] = []
+    c_off, c_vals = rsi(closes, window)
+    if c_vals:
+        out.append(_rsi_overlay(times, c_off, c_vals, id_=f"RSI {window}", group="rsi", color=_RSI_COLOR))
+    w_off, w_vals = rsi_wilder(closes, window)
+    if w_vals:
+        out.append(
+            _rsi_overlay(times, w_off, w_vals, id_=f"RSI {window} Wilder", group="rsi-wilder", color=_RSI_WILDER_COLOR)
+        )
+    return out
 
 
 # ── Bollinger Bands ─────────────────────────────────────────────────────
