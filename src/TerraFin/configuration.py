@@ -14,7 +14,9 @@ DEFAULT_CACHE_INTERVALS = {
     "cape": 86400,
     "calendar": 86400,
     "macro": 86400,
-    "fear_greed": 43200,
+    # Background refresh cadence for the live F&G gauge — 5 min keeps it tracking
+    # CNN's intraday moves without a client open. Override via TERRAFIN_CACHE_FEAR_GREED.
+    "fear_greed": 300,
     "top_companies": 86400,
     "fred": 259200,
     "yfinance": 43200,

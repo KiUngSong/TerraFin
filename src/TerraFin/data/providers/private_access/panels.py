@@ -194,7 +194,10 @@ _PANEL_SPECS: tuple[CachePayloadSpec, ...] = (
     ),
     CachePayloadSpec(
         source=SRC_FEAR_GREED,
-        namespace="private_fear_greed_current",
+        # Distinct from the inner series-current namespace (private_fear_greed_current),
+        # which stores the raw IndicatorSnapshot wire payload — sharing the file
+        # let one writer clobber the other's schema.
+        namespace="private_fear_greed_panel",
         key="current",
         ttl_seconds=ttl_for(SRC_FEAR_GREED),
         fetch_fn=_fetch_fear_greed,

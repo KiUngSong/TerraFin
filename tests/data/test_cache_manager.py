@@ -301,9 +301,9 @@ def test_default_cache_policies_include_fear_greed_private_source() -> None:
 
     assert "private.fear_greed" in policies
     assert policies["private.fear_greed"].mode == "refresh"
-    assert policies["private.fear_greed"].interval_seconds == 43200
-    assert policies["private.fear_greed"].schedule == "boundary"
-    assert policies["private.fear_greed"].slots_per_day == 2
+    # Interval-scheduled at 5 min so the gauge stays live without a client open.
+    assert policies["private.fear_greed"].interval_seconds == 300
+    assert policies["private.fear_greed"].schedule == "interval"
 
 
 def test_default_cache_policies_use_12h_for_hot_private_refresh_sources() -> None:

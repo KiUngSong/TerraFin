@@ -30,8 +30,10 @@ CACHE_TTL_REGISTRY: dict[str, int] = {
     "private.cape": 7 * 86_400,
     "private.calendar": 7 * 86_400,
     "private.macro": 7 * 86_400,
-    # CNN updates intraday; keep the gauge near-live (single-flight caps upstream calls).
-    "private.fear_greed": 300,
+    # CNN updates intraday; keep the gauge near-live. TTL sits above the 300s
+    # background refresh interval (configuration.py) so the cache is always
+    # served warm and a user request never blocks on the upstream call.
+    "private.fear_greed": 600,
     "private.top_companies": 7 * 86_400,
     # Private-source per-series
     "private.series.history": 86_400,
@@ -100,9 +102,11 @@ def get_default_cache_policies() -> list[CachePolicy]:
         CachePolicy(
             source="private.fear_greed",
             mode="refresh",
+            # Interval (not boundary) so the background thread keeps the gauge
+            # live on its own — the value refreshes every interval_seconds even
+            # with no client polling. CNN updates intraday; 5 min tracks it.
             interval_seconds=cache_config.interval_seconds_for("fear_greed"),
-            schedule="boundary",
-            slots_per_day=2,
+            schedule="interval",
         ),
         CachePolicy(
             source="private.top_companies",
