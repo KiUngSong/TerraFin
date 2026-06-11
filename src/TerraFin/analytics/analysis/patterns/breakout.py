@@ -39,6 +39,7 @@ def evaluate(ticker: str, ohlc) -> list[Signal]:
     out.extend(_nr7_inside_bar(ticker, ohlc))
     out.extend(_keltner_breakout(ticker, ohlc))
     out.extend(_fifty_two_week_high_proximity(ticker, ohlc))
+    out.extend(_weekly_volume_dryup_signal(ticker, ohlc))
     out.extend(_wyckoff_spring_upthrust(ticker, ohlc))
     return out
 
@@ -425,6 +426,48 @@ def _keltner_breakout(
 # ─── 52-week high proximity (anchor effect; George/Hwang 2004) ───────────────
 
 
+def fifty_two_week_high_status(ohlc, *, proximity: float = 0.98) -> dict | None:
+    """Pure 52-week-high facts — NO regime gate, NO Signal wrapping.
+
+    Shared math core (single source of truth) behind both the gated
+    `_fifty_two_week_high_proximity` monitoring signal and callers that want raw
+    facts for any region/instrument (KR names, ETFs). The gated signal keys on
+    SPY's trend, which would wrongly suppress non-US names.
+
+    Returns None when fewer than 252 daily bars exist, so a "52-week" stat is
+    never computed off a short window (e.g. a recently-listed ETF). Otherwise:
+      high_252           trailing-252 max close
+      ratio              close / high_252  (1.0 at the high)
+      pct_from_high      ratio - 1.0       (0.0 at the high, negative below)
+      new_high           close >= high_252 and the prior bar was below it
+      above_50dma        close > 50-day SMA
+      entered_proximity  first bar to cross into the >= `proximity` zone
+    """
+    cs = _closes(ohlc)
+    if len(cs) < 252:
+        return None
+    high_252 = max(cs[-252:])
+    if high_252 <= 0:
+        return None
+    sma50 = sum(cs[-50:]) / 50
+    ratio = cs[-1] / high_252
+    new_high = cs[-1] >= high_252 and cs[-2] < high_252
+    prev_high = max(cs[-253:-1]) if len(cs) >= 253 else high_252
+    prev_ratio = (cs[-2] / prev_high) if prev_high > 0 else None
+    entered_proximity = (
+        ratio >= proximity and prev_ratio is not None and prev_ratio < proximity
+    )
+    return {
+        "high_252": high_252,
+        "ratio": ratio,
+        "pct_from_high": ratio - 1.0,
+        "new_high": bool(new_high),
+        "above_50dma": cs[-1] > sma50,
+        "sma50": sma50,
+        "entered_proximity": bool(entered_proximity),
+    }
+
+
 def _fifty_two_week_high_proximity(
     ticker: str,
     ohlc,
@@ -434,15 +477,14 @@ def _fifty_two_week_high_proximity(
     cs = _closes(ohlc)
     if len(cs) < 252 + 51:
         return []
-    high_252 = max(cs[-252:])
-    if high_252 <= 0:
+    st = fifty_two_week_high_status(ohlc, proximity=proximity)
+    if st is None:
         return []
-    ratio = cs[-1] / high_252
-    prev_ratio = cs[-2] / max(cs[-253:-1]) if len(cs) >= 253 else None
-    sma50 = sum(cs[-50:]) / 50
-    above_50dma = cs[-1] > sma50
-    new_high = cs[-1] >= high_252 and cs[-2] < high_252
-    if new_high and above_50dma:
+    high_252 = st["high_252"]
+    ratio = st["ratio"]
+    sma50 = st["sma50"]
+    above_50dma = st["above_50dma"]
+    if st["new_high"] and above_50dma:
         # SPY regime gate — bear-period backtest showed 52W_NEW_HIGH at
         # -7.27% (GFC) and -8.18% (COVID) edge; counter-trend pops chase
         # the high then die. Suppress when SPY itself isn't trending up.
@@ -461,7 +503,7 @@ def _fifty_two_week_high_proximity(
             )
         ]
     # First time entering proximity zone (≥ 0.98 of high).
-    if ratio >= proximity and prev_ratio is not None and prev_ratio < proximity and above_50dma:
+    if st["entered_proximity"] and above_50dma:
         return [
             Signal(
                 name="52W_HIGH_PROXIMITY",
@@ -607,3 +649,96 @@ def detect_vcp(
         "volume_drying": volume_drying,
         "breakout": breakout,
     }
+
+
+def detect_weekly_volume_dryup(
+    ohlc,
+    *,
+    recent_weeks: int = 4,
+    base_weeks: int = 12,
+    ratio: float = 0.6,
+) -> dict | None:
+    """Weekly-bar volume dry-up inside a constructive (uptrend) context.
+
+    Resamples to weekly (W-FRI) bars and flags supply drying up — the last
+    `recent_weeks` average volume <= `ratio` x the prior `base_weeks` average —
+    but ONLY when the name is in an uptrend and not breaking down. That trend
+    gate is what makes the tag meaningful: volume dry-up in a maturing base is
+    accumulation (Minervini), while the same dry-up in a downtrend is just a
+    name nobody wants to own. Without the gate the signal's SIGN is ambiguous,
+    so this never reports a bare "volume dried up".
+
+    Gate: latest weekly close above a RISING 30-week SMA, and the close sitting
+    in the upper part of its recent weekly range (>= 40th percentile) so a name
+    making fresh lows on light volume is excluded.
+
+    Returns the metrics dict when the constructive dry-up holds, else None.
+    """
+    try:
+        weekly = resample(ohlc, "W-FRI")
+    except Exception:
+        return None
+    # Drop a PARTIAL trailing week: if the daily data doesn't reach that week's
+    # ending Friday, the last weekly bar sums only the elapsed days and
+    # understates volume → a spurious dry-up that would fire on an early-week
+    # run but not on a Friday run. Make the signal independent of run weekday.
+    try:
+        from ._base import _ensure_dt_index
+        # Compare calendar DATES (.date()), which is tz-safe — a future switch to
+        # a tz-aware market-data index must not silently skip the drop via a
+        # tz-naive/aware comparison error.
+        last_daily = _ensure_dt_index(ohlc).index[-1].date()
+        if len(weekly) and weekly.index[-1].date() > last_daily:
+            weekly = weekly.iloc[:-1]
+    except (IndexError, AttributeError, KeyError):
+        pass
+    cs = _closes(weekly)
+    vs = _volumes(weekly)
+    need = recent_weeks + base_weeks
+    if vs is None or len(cs) < max(need, 31) or len(vs) < need:
+        return None
+    recent_avg = sum(vs[-recent_weeks:]) / recent_weeks
+    base_avg = sum(vs[-need:-recent_weeks]) / base_weeks
+    if base_avg <= 0:
+        return None
+    vol_ratio = recent_avg / base_avg
+    if vol_ratio > ratio:
+        return None
+    # Trend gate — above a rising 30-week SMA, not making fresh lows.
+    sma30 = sma(cs, 30)
+    if len(sma30) < 2:
+        return None
+    rising = sma30[-1] > sma30[-2]
+    above = cs[-1] > sma30[-1]
+    win = cs[-need:]
+    lo, hi = min(win), max(win)
+    pos = (cs[-1] - lo) / (hi - lo) if hi > lo else 1.0
+    if not (rising and above and pos >= 0.4):
+        return None
+    return {
+        "dryup": True,
+        "recent_avg": recent_avg,
+        "base_avg": base_avg,
+        "ratio": round(vol_ratio, 3),
+        "recent_weeks": recent_weeks,
+        "base_weeks": base_weeks,
+    }
+
+
+def _weekly_volume_dryup_signal(ticker: str, ohlc) -> list[Signal]:
+    d = detect_weekly_volume_dryup(ohlc)
+    if d is None:
+        return []
+    return [
+        Signal(
+            name="WEEKLY_VOLUME_DRYUP",
+            ticker=ticker,
+            severity="medium",
+            message=(
+                f"Weekly volume dried up to {d['ratio']:.0%} of the prior "
+                f"{d['base_weeks']}-week average while holding an uptrend — "
+                f"supply contraction in a maturing base."
+            ),
+            snapshot={"ratio": d["ratio"], "recent_avg": d["recent_avg"], "base_avg": d["base_avg"]},
+        )
+    ]
