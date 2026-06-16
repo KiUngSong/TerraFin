@@ -511,6 +511,21 @@ def build_stock_template(
                 warnings.extend(beta_estimate.warnings)
             warnings.append("Ticker beta unavailable; using 1.0.")
 
+    # Blume adjustment: shrink the raw/computed beta toward the market (1.0) via the
+    # standard 2/3-1/3 weighting. Raw betas overstate forward risk for high/low-beta
+    # names, and a multi-year cost of equity should not assume today's elevated beta
+    # persists for the whole horizon — an unshrunk ~1.9 beta drives a punishing
+    # discount rate that makes every high-beta leader look deeply overvalued. Skip
+    # when the user supplied an explicit beta override.
+    if beta is not None and beta > 0 and not (overrides and overrides.beta is not None):
+        _raw_beta = beta
+        beta = 0.67 * beta + 0.33 * 1.0
+        if abs(beta - _raw_beta) >= 0.05:
+            warnings.append(
+                f"Beta Blume-adjusted toward 1.0 for the discount rate: "
+                f"{_raw_beta:.2f} -> {beta:.2f}."
+            )
+
     cashflow_quarter = get_corporate_data(normalized, "cashflow", period="quarter")
     cashflow_annual = get_corporate_data(normalized, "cashflow", period="annual")
     income_annual = get_corporate_data(normalized, "income", period="annual")
