@@ -1,4 +1,5 @@
 import json
+import threading
 from datetime import UTC, datetime
 
 import pandas as pd
@@ -15,6 +16,14 @@ from TerraFin.data.providers.market.session_calendar import (
 
 _V2_NAMESPACE = "yfinance_v2"
 _RECENT_TOLERANCE_DAYS = 14
+
+# Serializes the single crossing into yfinance's module-global download state
+# (see _download_frame). yfinance 1.1.0 assembles every download() result through
+# shared globals (yfinance/shared.py: _DFS …) that it resets per call, so
+# concurrent downloads for DIFFERENT tickers clobber each other — one ticker's
+# series surfaces under another, or several collapse to one value. The cache's
+# per-ticker fetch lock does not serialize across tickers, so this must.
+_YF_DOWNLOAD_LOCK = threading.Lock()
 
 
 def _normalize_index(index: pd.Index) -> pd.DatetimeIndex:
@@ -131,7 +140,11 @@ def _history_chunk_from_frame(
 
 
 def _download_frame(ticker: str, *, period: str) -> pd.DataFrame:
-    frame = yf.download(ticker, period=period, auto_adjust=True, multi_level_index=False)
+    # _YF_DOWNLOAD_LOCK: yf.download assembles its result from yfinance's reset-
+    # per-call module globals, so concurrent calls for different tickers race.
+    # Serialize only the download (the returned frame is local afterward).
+    with _YF_DOWNLOAD_LOCK:
+        frame = yf.download(ticker, period=period, auto_adjust=True, multi_level_index=False)
     normalized = _normalize_market_frame(frame)
     if normalized.empty and not valid_ticker(ticker):
         raise ValueError(f"Invalid ticker: {ticker}")
@@ -482,6 +495,9 @@ def valid_ticker(ticker: str) -> bool:
     :return: bool, True if the ticker is valid, False otherwise
     """
     ticker_name = ticker.upper()
-    ticker_data = yf.Ticker(ticker_name)
-    hist = ticker_data.history(period="1d")
+    # Ticker.history() writes yfinance's shared globals on its error path, so it
+    # must hold the same lock as yf.download to avoid racing a concurrent fetch.
+    with _YF_DOWNLOAD_LOCK:
+        ticker_data = yf.Ticker(ticker_name)
+        hist = ticker_data.history(period="1d")
     return not hist.empty
