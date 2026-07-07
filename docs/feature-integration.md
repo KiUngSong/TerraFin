@@ -23,6 +23,17 @@ This guide exists to answer two questions:
 
 Use this order of responsibility.
 
+### 0. TerraFin is the canonical home for reusable logic
+
+First-class ("1군") reusable logic — indicator formulas, analysis functions,
+shared math — lives in **TerraFin** and is imported by the sibling repos
+(TerraFinPrivate recommendation/newsletter, DataFactory), never hand-reimplemented
+there. A sibling may keep a *secondary* ("2군") copy for its own pipeline, but
+anything used as a primary primitive belongs in TerraFin. Example: the shared
+oscillator fresh-entry test `entered_extreme` (`analytics/analysis/patterns/_base.py`)
+is called by the RSI radar, Connors, and MFI instead of each rolling its own
+crossing check.
+
 ### 1. Data layer owns acquisition and normalization
 
 Put the feature here when it is about:

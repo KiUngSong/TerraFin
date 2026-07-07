@@ -165,6 +165,35 @@ def wilder_rsi(values: list[float], n: int = 14) -> list[float]:
     return out
 
 
+# ─── Oscillator extreme entry (indicator-agnostic) ───────────────────────────
+
+
+def entered_extreme(series: list[float], *, threshold: float, low: bool, lookback: int) -> bool:
+    """FRESH entry into an extreme zone within the trailing ``lookback`` bars.
+
+    True when the latest value is in the extreme zone AND the series was outside it
+    at some point across the window (the latest value plus the ``lookback`` before
+    it) — i.e. it CROSSED IN during the window, not merely sitting in the zone.
+    The whole window is scanned (min/max), so a bounce-out-and-back still counts.
+
+    Indicator-agnostic: pass any oscillator series — RSI (Cutler's ``rsi`` or
+    ``wilder_rsi``), MFI, etc. ``low=True`` tests the lower extreme (in-zone =
+    ``<= threshold``, e.g. oversold); ``low=False`` the upper (``>= threshold``,
+    e.g. overbought). The zone boundary is INCLUSIVE (``<=`` / ``>=``), matching the
+    app's RSI/MFI extreme convention. Any NaN in the window returns ``False`` (NaN
+    makes ``min``/``max`` order-dependent, so it cannot be trusted).
+    """
+    if lookback < 1 or len(series) <= lookback:
+        return False
+    now = series[-1]
+    window = series[-(lookback + 1):]
+    if now != now or any(v != v for v in window):  # NaN-safe: NaN != NaN
+        return False
+    if low:
+        return now <= threshold and max(window) > threshold
+    return now >= threshold and min(window) < threshold
+
+
 # ─── Swing pivots (fractal ±half) ────────────────────────────────────────────
 
 

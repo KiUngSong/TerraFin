@@ -4,6 +4,7 @@ import numpy as np
 
 from ._base import (
     Signal,
+    entered_extreme,
 )
 from ._base import (
     closes as _closes,
@@ -293,8 +294,9 @@ def _money_flow_index(
     prev = _mfi_at(len(cs) - 2)
     if cur is None or prev is None:
         return []
-    # Edge-trigger entry into overbought/oversold zones.
-    if prev < overbought <= cur:
+    # Edge-trigger entry into overbought/oversold zones (shared primitive,
+    # lookback=1 = single-bar cross; exact match for the old prev/cur boundaries).
+    if entered_extreme([prev, cur], threshold=overbought, low=False, lookback=1):
         return [
             Signal(
                 name="MFI_OVERBOUGHT",
@@ -304,7 +306,7 @@ def _money_flow_index(
                 snapshot={"mfi": cur, "prev": prev},
             )
         ]
-    if prev > oversold >= cur:
+    if entered_extreme([prev, cur], threshold=oversold, low=True, lookback=1):
         return [
             Signal(
                 name="MFI_OVERSOLD",

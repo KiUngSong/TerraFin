@@ -3,6 +3,7 @@ dry-up detector (breakout.py)."""
 
 import pandas as pd
 
+from TerraFin.analytics.analysis.patterns._base import entered_extreme
 from TerraFin.analytics.analysis.patterns.breakout import (
     detect_weekly_volume_dryup,
     evaluate,
@@ -111,3 +112,35 @@ def test_weekly_dryup_emitted_as_monitoring_signal():
     assert sigs, "WEEKLY_VOLUME_DRYUP should fire"
     # Must be >= medium or DataFactory's eod_scan drops it before any alert.
     assert sigs[0].severity == "medium"
+
+
+# ─── entered_extreme (variant-agnostic fresh-entry primitive) ─────────────
+
+
+def test_entered_extreme_fresh_oversold_cross():
+    # in-zone now, out-of-zone within the window -> fresh entry
+    assert entered_extreme([40, 38, 36, 34, 32, 28], threshold=30, low=True, lookback=5) is True
+
+
+def test_entered_extreme_rejects_parked_in_zone():
+    # sat <=30 the whole window -> NOT a fresh entry
+    assert entered_extreme([28, 27, 26, 25, 24, 23], threshold=30, low=True, lookback=5) is False
+
+
+def test_entered_extreme_counts_bounce_out_and_back():
+    # popped >30 mid-window then re-entered -> still fresh (whole-window scan, not endpoints)
+    assert entered_extreme([28, 45, 29, 28, 27, 29], threshold=30, low=True, lookback=5) is True
+
+
+def test_entered_extreme_overbought_side():
+    assert entered_extreme([50, 60, 68, 72, 74, 77], threshold=70, low=False, lookback=5) is True
+    assert entered_extreme([72, 73, 74, 75, 76, 77], threshold=70, low=False, lookback=5) is False
+
+
+def test_entered_extreme_series_shorter_than_lookback():
+    assert entered_extreme([40, 50], threshold=30, low=True, lookback=5) is False
+
+
+def test_entered_extreme_nan_in_window_returns_false():
+    # NaN makes min/max order-dependent -> must fail closed, not silently flag/skip.
+    assert entered_extreme([28, float("nan"), 29, 28, 27, 29], threshold=30, low=True, lookback=5) is False

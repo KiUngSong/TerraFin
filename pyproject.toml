@@ -1,6 +1,6 @@
 [project]
 name = "TerraFin"
-version = "0.0.1"
+version = "0.0.2"
 description = "Agent-friendly financial-research toolkit and FastAPI dashboard with DCF (incl. turnaround mode), reverse DCF, FCF history, SEC filings, sentiment widgets, hosted TerraFin Agent runtime, and a drop-in skill for Claude Code / external LLM agents."
 requires-python = ">=3.11"
 authors = [

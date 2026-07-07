@@ -2,7 +2,7 @@
 
 from TerraFin.analytics.analysis.technical.rsi import rsi
 
-from ._base import Signal, sma, wilder_rsi
+from ._base import Signal, entered_extreme, sma, wilder_rsi
 from ._base import closes as _closes
 
 
@@ -64,13 +64,14 @@ def _connors_rsi2(
     rsi_series = wilder_rsi(cs, n=2)
     if len(rsi_series) < 2:
         return []
-    cur_rsi, prev_rsi = rsi_series[-1], rsi_series[-2]
+    cur_rsi = rsi_series[-1]
     sma_window = cs[-sma_period:]
     sma200 = sum(sma_window) / sma_period
     in_uptrend = cs[-1] > sma200
-    is_oversold = cur_rsi < rsi_threshold
-    was_oversold = prev_rsi < rsi_threshold
-    if not (in_uptrend and is_oversold and not was_oversold):
+    # Fresh dip into oversold via the shared primitive (lookback=1 = single-bar
+    # cross). entered_extreme's boundary is INCLUSIVE (<=), vs the old strict
+    # `< rsi_threshold` — differs only at RSI(2) == rsi_threshold exactly.
+    if not (in_uptrend and entered_extreme(rsi_series, threshold=rsi_threshold, low=True, lookback=1)):
         return []
     return [
         Signal(

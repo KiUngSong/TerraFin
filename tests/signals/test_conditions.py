@@ -107,3 +107,13 @@ def test_evaluate_signal_has_required_fields():
         assert s.severity in ("high", "medium", "low")
         assert s.message
         assert isinstance(s.snapshot, dict)
+
+
+def test_connors_rsi2_dip_fires_on_fresh_dip_in_uptrend():
+    # Safety net for the entered_extreme consolidation: a strong uptrend keeps
+    # RSI(2) high, then a sharp single-day drop (still well above the 200-MA) is a
+    # FRESH RSI(2) dip < 10 -> CONNORS_RSI2_DIP fires via the shared primitive.
+    closes = [100.0 + i for i in range(251)]
+    closes[-1] = closes[-2] - 20.0
+    names = {s.name for s in evaluate("TEST", _make_ohlc(closes))}
+    assert "CONNORS_RSI2_DIP" in names
