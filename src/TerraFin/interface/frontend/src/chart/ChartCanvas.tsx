@@ -235,6 +235,9 @@ const ChartCanvas: React.FC<ChartCanvasProps> = ({
       timeScale: { borderVisible: true, borderColor: themeBorder, timeVisible: true, secondsVisible: false, barSpacing: 10 },
     });
     chartRef.current = chart;
+    // Keep pane 0 alive when its only series is momentarily removed (candle→return-line
+    // recreate); else the emptied pane is spliced and the band pane renumbers into it.
+    chart.panes()[0]?.setPreserveEmptyPane?.(true);
 
     const handleResize = () => {
       if (!chartContainerRef.current || !chartRef.current) return;

@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { isKoreanQuery, localPrefixMatch, useTickerRegistry, type LocalHit } from './useTickerRegistry';
+import InfoHint from '../dcf/InfoHint';
 
 interface SearchHit extends LocalHit {
   type?: string;
@@ -191,12 +192,17 @@ function renderGrouped(
     indicators.forEach((h) => {
       const i = idx++;
       out.push(
-        <li key={`i-${h.symbol}`}>
-          <button type="button" onMouseDown={(e) => { e.preventDefault(); onSelect(h); }} style={itemStyle(i === activeIdx)}>
-            <span style={{ fontWeight: 600 }}>{h.symbol}</span>
+        <li key={`i-${h.symbol}`} style={indicatorRowStyle}>
+          <button
+            type="button"
+            onMouseDown={(e) => { e.preventDefault(); onSelect(h); }}
+            style={{ ...itemStyle(i === activeIdx), flex: 1, width: 'auto', minWidth: 0 }}
+          >
+            <span style={symbolStyle}>{h.symbol}</span>
             {h.name && h.name !== h.symbol && <span style={nameStyle}>{h.name}</span>}
             {h.group && <span style={badgeStyle}>{h.group}</span>}
           </button>
+          {h.name && h.name !== h.symbol && <InfoHint text={h.name} compact />}
         </li>,
       );
     });
@@ -208,7 +214,7 @@ function renderGrouped(
       out.push(
         <li key={`s-${h.symbol}`}>
           <button type="button" onMouseDown={(e) => { e.preventDefault(); onSelect(h); }} style={itemStyle(i === activeIdx)}>
-            <span style={{ fontWeight: 600 }}>{h.symbol}</span>
+            <span style={symbolStyle}>{h.symbol}</span>
             <span style={nameStyle}>{h.name}</span>
             {h.exchange && <span style={badgeStyle}>{h.exchange}</span>}
           </button>
@@ -231,9 +237,17 @@ const dropdownStyle: React.CSSProperties = {
   padding: 4,
   listStyle: 'none',
   boxShadow: '0 8px 20px rgba(15, 23, 42, 0.10)',
+  minWidth: 340,          // widen beyond the narrow input so names/badges don't clip
   maxHeight: 320,
   overflowY: 'auto',
   zIndex: 50,
+};
+
+const indicatorRowStyle: React.CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: 4,
+  paddingRight: 8,
 };
 
 const headerStyle: React.CSSProperties = {
@@ -262,10 +276,17 @@ const itemStyle = (active: boolean): React.CSSProperties => ({
   gap: 8,
 });
 
+const symbolStyle: React.CSSProperties = {
+  fontWeight: 600,
+  whiteSpace: 'nowrap',   // keep the indicator/ticker name on one line
+  flexShrink: 0,
+};
+
 const nameStyle: React.CSSProperties = {
   color: 'var(--tf-muted)',
   fontSize: 'var(--tf-fs-xs)',
   flex: 1,
+  minWidth: 0,            // let the flex item shrink so ellipsis actually kicks in
   overflow: 'hidden',
   textOverflow: 'ellipsis',
   whiteSpace: 'nowrap',
@@ -278,6 +299,9 @@ const badgeStyle: React.CSSProperties = {
   border: '1px solid var(--tf-border-strong)',
   padding: '2px 6px',
   borderRadius: 4,
+  flexShrink: 0,          // never clip the group/exchange chip
+  whiteSpace: 'nowrap',
+  marginLeft: 'auto',     // pin chip to the right, name fills the gap
 };
 
 const translatedRowStyle: React.CSSProperties = {

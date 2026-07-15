@@ -1,0 +1,31 @@
+[
+  {
+    "name": "Example Band",
+    "description": "Stacked pos/neu/neg shares in a dedicated pane (sums to 1).",
+    "group": "Example",
+    "series_type": "band",
+    "source": {
+      "kind": "mongo",
+      "database": "market_data",
+      "collection": "your_collection",
+      "time_field": "as_of_date",
+      "fields": { "pos": "pos_field", "neu": "neu_field", "neg": "neg_field" },
+      "filter": { "pos_field": { "$ne": null } }
+    },
+    "price_scale_id": "example-band"
+  },
+  {
+    "name": "Example Line",
+    "description": "One precomputed value plotted as a hidden overlay line.",
+    "group": "Example",
+    "series_type": "line",
+    "source": {
+      "kind": "mongo",
+      "database": "market_data",
+      "collection": "your_collection",
+      "time_field": "as_of_date",
+      "value_field": "your_value_field",
+      "filter": { "your_value_field": { "$ne": null } }
+    }
+  }
+]

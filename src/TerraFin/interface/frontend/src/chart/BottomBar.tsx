@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { BOTTOM_BAR_HEIGHT, FONT_FAMILY } from './constants';
 import IndicatorSelector, { type IndicatorOption } from './utils/IndicatorSelector';
 import { ResetButton } from './TopBar';
+import InfoHint from '../dcf/InfoHint';
 
 const PriceScaleMode = { Normal: 0, Logarithmic: 1, Percentage: 2 } as const;
 
@@ -9,6 +10,7 @@ export interface SeriesTag {
   name: string;
   color: string;
   pinned: boolean;
+  description?: string;
 }
 
 interface BottomBarProps {
@@ -53,6 +55,7 @@ const SeriesTags: React.FC<{ tags: SeriesTag[]; onRemove: (name: string) => void
       >
         <span style={{ width: 8, height: 8, borderRadius: '50%', background: tag.color, flexShrink: 0 }} />
         {tag.name}
+        {tag.description && <InfoHint text={tag.description} compact />}
         {!tag.pinned && (
           <button
             type="button"

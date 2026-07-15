@@ -700,15 +700,20 @@ const ChartComponentInner = React.forwardRef<ChartComponentHandle, ChartComponen
   const seriesTags: SeriesTag[] = useMemo(() => {
     if (!payload) return [];
     const colorMap = new Map<string, string>();
+    const descMap = new Map<string, string>();
     for (const s of payload.series ?? []) {
       if (!s.indicator && s.id && !colorMap.has(s.id)) {
         colorMap.set(s.id, s.color ?? '#2196f3');
+      }
+      if (s.id && s.description && !descMap.has(s.id)) {
+        descMap.set(s.id, s.description);
       }
     }
     return entries.map((e) => ({
       name: e.name,
       color: colorMap.get(e.name) ?? '#2196f3',
       pinned: e.pinned,
+      description: descMap.get(e.name),
     }));
   }, [entries, payload]);
 

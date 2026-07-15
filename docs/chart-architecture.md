@@ -362,6 +362,61 @@ controls when the loaded span actually supports them.
 Check whether the operation is returning a mutation patch or forcing a full
 snapshot rebuild. Also check indicator-cache reuse and provider cache hits.
 
+## Custom indicators (the extension point)
+
+TerraFin renders custom chart series **declaratively — you never write chart
+code to add one.** A custom indicator is a single JSON-serializable *spec* that
+`interface/pages/chart/custom_indicators.py` reads and turns into a formatted
+series with one generic executor.
+
+A spec says only "read collection X / field(s) Y and plot it" — it never carries
+data. **The spec is the dashboard USER's private customization; the data lives in
+Mongo, populated by whatever pipeline the user runs.** A data producer (e.g.
+DataFactory) only writes the *data collection* a spec reads — it never owns or
+defines specs. Concrete specs are **not** committed to this open-core repo.
+Specs merge from three layers (later wins by `name`):
+
+1. **`default_indicators.json`** in this package — JSON, *not* code. It is
+   git-ignored user-local config, **not a shipped default**: a clean clone has
+   none. Copy `default_indicators.example.json` (a band + a line template) to
+   `default_indicators.json` and edit it to preload your own indicators locally.
+2. **`market_data.indicator_specs`** (Mongo) — specs added dynamically (e.g. via
+   a UI). Note: this holds *specs*, not data; a data pipeline never writes here.
+3. A local JSON list (`TERRAFIN_INDICATORS_PATH`, else
+   `<state-dir>/indicators.json`) — where a user adds their own indicators.
+
+**To add a custom indicator, add a spec (JSON) — do NOT edit `custom_indicators.py`:**
+
+```json
+{
+  "name": "Sentiment Conviction",
+  "description": "…",
+  "group": "Sentiment",
+  "series_type": "line",
+  "source": {
+    "kind": "mongo", "database": "market_data", "collection": "news_sentiment",
+    "time_field": "as_of_date", "value_field": "conviction",
+    "filter": {"conviction": {"$ne": null}}
+  }
+}
+```
+
+- **`line`** specs need a `value_field` (one precomputed column) and render as a
+  hidden overlay-scale line in the price pane, like any other indicator.
+  **`band`** specs need `fields` mapping exactly `pos/neu/neg`; a band is the one
+  series type that gets its **own pane** (`ownScale`) with a `price_scale_id`.
+  All transforms (moving averages, ratios, entropy, …) are **precomputed by the
+  producer's ETL** — the executor only queries, maps fields, and formats. A
+  smoothed line = a precomputed `*_ma20` column, not chart-side math.
+- Editing `custom_indicators.py` (the engine) is warranted **only** to add a
+  brand-new `series_type` to the executor (as `band` once was). A new line/band
+  over an existing field is JSON-only.
+- **Ownership boundary:** the **user** owns the spec (the JSON above); a **data
+  producer** (DataFactory, etc.) only *populates the Mongo data collection* the
+  spec reads (`news_sentiment.conviction` here) and never defines or registers a
+  spec. Spec = TerraFin JSON; data = Mongo, pipeline-filled. Don't put specs in a
+  producer repo.
+
 ## See also
 
 - [interface.md](./interface.md) for route families and page modules

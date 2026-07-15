@@ -173,3 +173,7 @@ node_modules/
 # macOS
 .DS_Store
 .gstack/
+
+# User-local custom chart-indicator specs (private customization, not shipped).
+# Canonical backup lives with the data producer (DataFactory).
+default_indicators.json

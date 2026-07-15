@@ -75,6 +75,21 @@ def _resample_line(data: list[dict], view: str) -> list[dict]:
     return [buckets[k] for k in order]
 
 
+def _resample_band(data: list[dict], view: str) -> list[dict]:
+    """Resample band data (pos/neu/neg shares): last value per period."""
+    if not data or view == "daily":
+        return data
+    buckets: dict[str, dict] = {}
+    order: list[str] = []
+    for p in data:
+        t = p.get("time", "")
+        key = _period_key(t, view)
+        if key not in buckets:
+            order.append(key)
+        buckets[key] = {"time": t, "pos": p.get("pos"), "neu": p.get("neu"), "neg": p.get("neg")}
+    return [buckets[k] for k in order]
+
+
 def _payload_length(series: list[dict]) -> int:
     return sum(len(item.get("data", [])) for item in series)
 
@@ -101,6 +116,8 @@ def apply_view(source_payload: dict, view: str) -> dict:
             transformed_data = _resample_candlestick(item.get("data", []), view)
         elif series_type == "line":
             transformed_data = _resample_line(item.get("data", []), view)
+        elif series_type == "band":
+            transformed_data = _resample_band(item.get("data", []), view)
         else:
             continue
         out: dict = {
@@ -115,8 +132,12 @@ def apply_view(source_payload: dict, view: str) -> dict:
             out["returnSeries"] = True
         if item.get("indicator"):
             out["indicator"] = True
+        if item.get("ownScale"):
+            out["ownScale"] = True
         if item.get("indicatorGroup") is not None:
             out["indicatorGroup"] = item["indicatorGroup"]
+        if item.get("description") is not None:
+            out["description"] = item["description"]
         if item.get("lineStyle") is not None:
             out["lineStyle"] = item["lineStyle"]
         if item.get("priceLevels"):

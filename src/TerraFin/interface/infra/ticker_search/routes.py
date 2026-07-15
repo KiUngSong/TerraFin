@@ -51,12 +51,17 @@ def _build_indicator_entries() -> list[dict[str, Any]]:
     """
     from TerraFin.data.providers.economic import indicator_registry
     from TerraFin.data.providers.market import INDEX_DESCRIPTIONS, INDEX_MAP, MARKET_INDICATOR_REGISTRY
+    from TerraFin.interface.pages.chart.custom_indicators import load_custom_indicators
 
     out: list[dict[str, Any]] = []
     for name in INDEX_MAP:
         out.append({"symbol": name, "name": INDEX_DESCRIPTIONS.get(name, name), "group": "Index"})
     for name, ind in MARKET_INDICATOR_REGISTRY.items():
         out.append({"symbol": name, "name": ind.description or name, "group": "Market"})
+    # Custom declarative indicators (band/line specs) — same chart-UI surface,
+    # spec-driven registry; each spec carries its own catalog group.
+    for name, spec in load_custom_indicators().items():
+        out.append({"symbol": name, "name": spec.description or name, "group": spec.group})
     for name, ind in indicator_registry._indicators.items():
         out.append({"symbol": name, "name": ind.description or name, "group": "Economic"})
     return out

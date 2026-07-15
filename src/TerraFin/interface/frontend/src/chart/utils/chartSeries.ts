@@ -1,8 +1,8 @@
 /**
  * Series creation and incremental update helpers for the chart.
  */
-import { CandlestickSeries, HistogramSeries, LineSeries, LineStyle } from 'lightweight-charts';
-import type { CandlestickPoint, ChartSeries, ChartZone, LinePoint } from '../types';
+import { AreaSeries, CandlestickSeries, HistogramSeries, LineSeries, LineStyle } from 'lightweight-charts';
+import type { BandPoint, CandlestickPoint, ChartSeries, ChartZone, LinePoint } from '../types';
 import { attachPriceLevelsPrimitive, clearNativePriceLines, detachPriceLevelsPrimitive, syncNativePriceLines } from './chartPriceLevels';
 import { attachZonePrimitive, detachZonePrimitive } from './chartZones';
 
@@ -12,6 +12,12 @@ export type SeriesRef = any; // eslint-disable-line
 const COLOR_PALETTE = ['#2196f3', '#ef5350', '#26a69a', '#ab47bc', '#ffa726', '#5c6bc0', '#66bb6a'];
 const CANDLE_GREEN = '#26a69a';
 const CANDLE_RED = '#ef5350';
+// Band (stacked sentiment) colors — opaque so back-to-front fills hide each other.
+// Match the app's semantic up/down tokens (--tf-up / --tf-down) with a slate neutral.
+const BAND_POS = '#00d97e';
+const BAND_NEU = '#64748b';
+const BAND_NEG = '#ff5d5d';
+const BAND_PANE_INDEX = 1; // sentiment band lives in its own pane below price
 const CANDLE_COLOR_PAIRS: Array<{ up: string; down: string }> = [
   { up: CANDLE_GREEN, down: CANDLE_RED },
   { up: '#1976d2', down: '#f57c00' },
@@ -29,9 +35,10 @@ const RETURN_PRICE_FORMAT = {
 export interface SeriesSpec {
   key: string;
   id: string;
-  kind: 'line' | 'candlestick' | 'histogram';
+  kind: 'line' | 'candlestick' | 'histogram' | 'area';
   color: string;
   priceScaleId: string;
+  paneIndex?: number;
   data: Array<LinePoint | CandlestickPoint>;
   originalData?: LinePoint[];
   indicator: boolean;
@@ -84,6 +91,64 @@ function histogramOptions(spec: SeriesSpec): Record<string, unknown> {
   };
 }
 
+function areaOptions(spec: SeriesSpec): Record<string, unknown> {
+  // Solid fill (top=bottom, opaque) so cumulative areas stack into discrete bands.
+  // Lock the band's own scale to a fixed, independent [0,1] (shares always span
+  // 0..1) so it never autoscales/drifts with the data.
+  return {
+    priceScaleId: spec.priceScaleId,
+    topColor: spec.color,
+    bottomColor: spec.color,
+    lineColor: spec.color,
+    lineWidth: 1,
+    lastValueVisible: false,
+    priceLineVisible: false,
+    autoscaleInfoProvider: () => ({ priceRange: { minValue: 0, maxValue: 1 } }),
+  };
+}
+
+function bandAreaSpecs(item: ChartSeries, paneIndex: number): SeriesSpec[] {
+  // Expand one band item into 3 cumulative area series (each single-value).
+  // Drawn back-to-front: pos fills full height (1.0), neu to neg+neu, neg to
+  // neg — so visible bands are [0,neg]=neg, [neg,neg+neu]=neu, [neg+neu,1]=pos.
+  const pts = item.data as BandPoint[];
+  const scale = item.priceScaleId ?? 'news-sentiment';
+  const layer = (suffix: string, color: string, value: (p: BandPoint) => number): SeriesSpec => {
+    const data = pts.map((p) => ({ time: p.time, value: value(p) }));
+    return {
+      key: `${item.id}::${suffix}`,
+      id: `${item.id}::${suffix}`,
+      kind: 'area',
+      color,
+      priceScaleId: scale,
+      paneIndex,
+      data,
+      indicator: false,
+      appearanceSignature: JSON.stringify({ kind: 'area', priceScaleId: scale, color, pane: paneIndex }),
+      dataSignature: dataSignature(data),
+      recreateSignature: JSON.stringify({ kind: 'area', priceScaleId: scale, pane: paneIndex, suffix }),
+    };
+  };
+  return [
+    layer('pos', BAND_POS, (p) => p.pos + p.neu + p.neg),
+    layer('neu', BAND_NEU, (p) => p.neu + p.neg),
+    layer('neg', BAND_NEG, (p) => p.neg),
+  ];
+}
+
+function ownScalePaneAssignments(series: ChartSeries[]): Map<string, number> {
+  // Each band gets its own pane below the price pane (allocated in series order).
+  const panes = new Map<string, number>();
+  series.forEach((item) => {
+    if (item.seriesType !== 'band') return;
+    const scale = item.priceScaleId ?? 'news-sentiment';
+    if (!panes.has(scale)) {
+      panes.set(scale, BAND_PANE_INDEX + panes.size);
+    }
+  });
+  return panes;
+}
+
 function pointSignature(point: Record<string, unknown> | undefined): string {
   if (!point) return '';
   return [
@@ -109,8 +174,13 @@ export function buildSeriesSpecs(
   let lineColorIndex = 0;
   let candleIndex = 0;
   const seenZoneKeys = new Set<string>();
+  const ownScalePanes = ownScalePaneAssignments(series);
 
-  return series.map((item) => {
+  return series.flatMap((item): SeriesSpec | SeriesSpec[] => {
+    if (item.seriesType === 'band') {
+      return bandAreaSpecs(item, ownScalePanes.get(item.priceScaleId ?? 'news-sentiment') ?? BAND_PANE_INDEX);
+    }
+
     const priceScaleId = item.priceScaleId ?? 'right';
 
     if (opts.returnMode && item.returnSeries && item.seriesType === 'candlestick') {
@@ -193,6 +263,7 @@ export function buildSeriesSpecs(
     const color = item.color ?? palette[lineColorIndex % palette.length];
     lineColorIndex += 1;
     const isReturnSeries = opts.returnMode && item.returnSeries === true;
+    const linePriceScaleId = isReturnSeries ? 'right' : priceScaleId;
     const zones = item.zones;
     const zoneKey =
       zones && zones.length > 0 ? `${isReturnSeries ? 'right' : priceScaleId}|${JSON.stringify(zones)}` : null;
@@ -206,7 +277,7 @@ export function buildSeriesSpecs(
       id: item.id,
       kind: 'line',
       color,
-      priceScaleId: isReturnSeries ? 'right' : priceScaleId,
+      priceScaleId: linePriceScaleId,
       data: item.data as LinePoint[],
       originalData: isReturnSeries ? (item.data as LinePoint[]) : undefined,
       indicator: item.indicator === true,
@@ -216,7 +287,7 @@ export function buildSeriesSpecs(
       renderZones,
       appearanceSignature: JSON.stringify({
         kind: 'line',
-        priceScaleId: isReturnSeries ? 'right' : priceScaleId,
+        priceScaleId: linePriceScaleId,
         color,
         indicator: item.indicator === true,
         lineStyle: item.lineStyle ?? '',
@@ -227,7 +298,7 @@ export function buildSeriesSpecs(
       dataSignature: dataSignature((item.data as LinePoint[]) ?? []),
       recreateSignature: JSON.stringify({
         kind: 'line',
-        priceScaleId: isReturnSeries ? 'right' : priceScaleId,
+        priceScaleId: linePriceScaleId,
         returnSeries: isReturnSeries,
         indicator: item.indicator === true,
         lineStyle: item.lineStyle ?? '',
@@ -250,7 +321,19 @@ export function createSeriesFromSpec(chart: ChartApi, spec: SeriesSpec): SeriesR
     return series;
   }
 
-  const series = chart.addSeries(LineSeries, lineOptions(spec));
+  if (spec.kind === 'area') {
+    const series =
+      spec.paneIndex != null
+        ? chart.addSeries(AreaSeries, areaOptions(spec), spec.paneIndex)
+        : chart.addSeries(AreaSeries, areaOptions(spec));
+    series.setData(spec.data as LinePoint[]);
+    return series;
+  }
+
+  const series =
+    spec.paneIndex != null
+      ? chart.addSeries(LineSeries, lineOptions(spec), spec.paneIndex)
+      : chart.addSeries(LineSeries, lineOptions(spec));
   series.setData((spec.originalData ?? spec.data) as LinePoint[]);
   attachZonePrimitive(series, spec.renderZones ? spec.zones : undefined);
   attachPriceLevelsPrimitive(series, spec.priceLevels);
@@ -265,6 +348,10 @@ export function applySeriesAppearance(series: SeriesRef, spec: SeriesSpec): void
   }
   if (spec.kind === 'histogram') {
     series.applyOptions(histogramOptions(spec));
+    return;
+  }
+  if (spec.kind === 'area') {
+    series.applyOptions(areaOptions(spec));
     return;
   }
   series.applyOptions(lineOptions(spec));

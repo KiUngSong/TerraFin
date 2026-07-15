@@ -7,17 +7,23 @@ export type CandlestickPoint = {
   close: number;
   volume?: number;
 };
+// A band point carries the three shares that stack to 1.0 (e.g. news sentiment
+// pos/neu/neg). Rendered as 3 cumulative area series, not a single line.
+export type BandPoint = { time: string; pos: number; neu: number; neg: number };
 export type ChartZone = { from: number; to: number; color: string };
 
 export interface ChartSeries {
   id: string;
-  seriesType: 'line' | 'candlestick' | 'histogram';
+  seriesType: 'line' | 'candlestick' | 'histogram' | 'band';
   color?: string;
-  data: Array<LinePoint | CandlestickPoint>;
+  data: Array<LinePoint | CandlestickPoint | BandPoint>;
   priceScaleId?: string;
   returnSeries?: boolean;
   indicator?: boolean;
+  // Set by the backend on band series only: the band owns its scale and pane.
+  ownScale?: boolean;
   indicatorGroup?: string;
+  description?: string;
   lineStyle?: string;
   priceLevels?: Array<{ price: number; color: string; title: string }>;
   zones?: ChartZone[];

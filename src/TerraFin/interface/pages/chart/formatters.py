@@ -32,10 +32,13 @@ def _is_line_only(name: str) -> bool:
     """Indicators and non-stock instruments should render as line, not candlestick."""
     from TerraFin.data.providers.economic import indicator_registry
     from TerraFin.data.providers.market import MARKET_INDICATOR_REGISTRY
+    from TerraFin.interface.pages.chart.custom_indicators import load_custom_indicators
 
     if name in MARKET_INDICATOR_REGISTRY:
         return True
     if name in indicator_registry._indicators:
+        return True
+    if name in load_custom_indicators():
         return True
     return False
 
@@ -52,6 +55,7 @@ def format_series_item(df: TimeSeriesDataFrame | None, default_id: str = "Primar
 
     frame = df
     times = pd.to_datetime(frame["time"], errors="coerce").dt.strftime("%Y-%m-%d").tolist()
+
     has_ohlc = all(col in frame.columns for col in ("open", "high", "low", "close")) and not _is_line_only(
         str(getattr(df, "name", ""))
     )
@@ -139,10 +143,13 @@ def build_multi_payload_from_items(source_items: list[dict]) -> dict:
     for source_item in source_items:
         item = dict(source_item)
         st = item.get("seriesType")
-        if st == "candlestick":
-            n_candlestick += 1
-        elif st == "line":
-            n_line += 1
+        # ownScale items keep their own dedicated scale and must not skew
+        # the candlestick/line layout heuristics for the other series.
+        if not item.get("ownScale"):
+            if st == "candlestick":
+                n_candlestick += 1
+            elif st == "line":
+                n_line += 1
         items.append(item)
 
     if n_candlestick >= 3:
@@ -163,6 +170,10 @@ def build_multi_payload_from_items(source_items: list[dict]) -> dict:
     primary_assigned = False
     for item in items:
         st = item.get("seriesType")
+        if item.get("ownScale"):
+            # ownScale contract: the item carries its own dedicated price
+            # scale; never reassign it.
+            continue
         if force_percentage:
             if item.get("returnSeries"):
                 item["priceScaleId"] = "right"

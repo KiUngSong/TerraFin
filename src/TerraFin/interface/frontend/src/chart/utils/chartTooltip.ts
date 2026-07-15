@@ -60,6 +60,9 @@ export function createTooltip(ctx: TooltipContext): {
     }
 
     const rows: Array<{ id: string; formatted: string; color: string }> = [];
+    // Band series render as 3 cumulative area layers keyed `<base>::pos|neu|neg`.
+    // The crosshair sees cumulative values; difference them back to real shares.
+    const bands = new Map<string, Record<string, { v: number; color: string }>>();
     param.seriesData.forEach((data, series) => {
       const s = series as SeriesRef;
       const id = seriesToId.get(s);
@@ -68,6 +71,13 @@ export function createTooltip(ctx: TooltipContext): {
       const value = d.value !== undefined ? d.value : d.close;
       if (value === undefined) return;
       const color = seriesToColor.get(s) ?? '#888';
+      if (id.includes('::') && typeof value === 'number') {
+        const [base, layer] = id.split('::');
+        const entry = bands.get(base) ?? {};
+        entry[layer] = { v: value, color };
+        bands.set(base, entry);
+        return;
+      }
       // Auxiliary overlay series use ids prefixed with `__` (e.g. the volume
       // histogram). Show with a friendly label + magnitude suffix instead
       // of leaking the synthetic id as a symbol name.
@@ -85,6 +95,17 @@ export function createTooltip(ctx: TooltipContext): {
             : value.toLocaleString('en-US', { maximumFractionDigits: 4 })
           : String(value);
       rows.push({ id, formatted, color });
+    });
+
+    // Cumulative layers: pos = pos+neu+neg (1.0), neu = neu+neg, neg = neg.
+    // Real share = this layer's cumulative minus the next-lower layer's.
+    bands.forEach((layers, base) => {
+      const { pos, neu, neg } = layers;
+      if (!pos || !neu || !neg) return;
+      const pct = (x: number) => (Math.max(0, x) * 100).toFixed(1) + '%';
+      rows.push({ id: `${base} · pos`, formatted: pct(pos.v - neu.v), color: pos.color });
+      rows.push({ id: `${base} · neu`, formatted: pct(neu.v - neg.v), color: neu.color });
+      rows.push({ id: `${base} · neg`, formatted: pct(neg.v), color: neg.color });
     });
 
     if (rows.length === 0) {

@@ -6,12 +6,14 @@ export function isChartMutation(update: ChartMutation | ChartSnapshot | null | u
 
 function pointSignature(point: Record<string, unknown> | undefined): string {
   if (!point) return '';
+  // Band points carry pos/neu/neg (no open/close/value) — sample pos so an
+  // in-place revision of a band day changes the signature, not just new dates.
   return [
     String(point.time ?? ''),
-    String(point.open ?? point.value ?? ''),
+    String(point.open ?? point.value ?? point.pos ?? ''),
     String(point.high ?? ''),
     String(point.low ?? ''),
-    String(point.close ?? point.value ?? ''),
+    String(point.close ?? point.value ?? point.pos ?? ''),
   ].join(':');
 }
 

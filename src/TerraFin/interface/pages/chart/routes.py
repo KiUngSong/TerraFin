@@ -12,7 +12,6 @@ from TerraFin.data.contracts.dataframes import TimeSeriesDataFrame
 from TerraFin.interface.pages.chart.chart_view import apply_view
 from TerraFin.interface.pages.chart.formatters import (
     build_multi_payload_from_items,
-    build_source_payload,
     build_source_payload_from_items,
     format_series_item,
 )
@@ -361,20 +360,40 @@ def _display_name(name: str) -> str:
     return name.upper() if name == name.lower() else name
 
 
+def _match_custom_name(display_name: str, custom_specs: dict) -> str:
+    """Map a case-variant custom-indicator name onto its canonical spec key.
+
+    _display_name uppercases all-lowercase input ("news sentiment" ->
+    "NEWS SENTIMENT"), which would otherwise miss the spec registry and fall
+    through to the yfinance ticker path. Non-matches pass through unchanged.
+    """
+    if display_name in custom_specs:
+        return display_name
+    match = {k.lower(): k for k in custom_specs}.get(display_name.lower())
+    return match if match is not None else display_name
+
+
 def _payload_needs_layout(payload: dict) -> bool:
     series = payload.get("series", [])
     if not isinstance(series, list) or not series:
         return False
+    saw_layoutable = False
     for item in series:
         if not isinstance(item, dict):
             return False
+        # ownScale contract: the item owns its dedicated price scale — its
+        # presence must not suppress layout for the rest of the payload.
+        # build_multi_payload_from_items skips ownScale items symmetrically.
+        if item.get("ownScale"):
+            continue
         if item.get("indicator"):
             return False
         if item.get("priceScaleId") is not None:
             return False
         if item.get("returnSeries"):
             return False
-    return True
+        saw_layoutable = True
+    return saw_layoutable
 
 
 def _series_data_signature(item: dict) -> tuple:
@@ -387,9 +406,12 @@ def _series_data_signature(item: dict) -> tuple:
         first.get("time"),
         middle.get("time"),
         last.get("time"),
-        first.get("open", first.get("value")),
-        middle.get("close", middle.get("value")),
-        last.get("close", last.get("value")),
+        # Band points carry pos/neu/neg (no open/close/value) — sample pos so an
+        # in-place revision of a band day (the ETL re-aggregates trailing days)
+        # changes the signature and repaints, not just a new date.
+        first.get("open", first.get("value", first.get("pos"))),
+        middle.get("close", middle.get("value", middle.get("pos"))),
+        last.get("close", last.get("value", last.get("pos"))),
     )
 
 
@@ -464,11 +486,18 @@ def _rebuild_from_named_series(sid: str) -> dict:
         return source
     named_items = get_named_series_items(sid)
     ordered_names = get_series_names(sid)
-    if len(named_items) == len(named):
-        source = build_source_payload_from_items([named_items[name] for name in ordered_names if name in named_items])
-    else:
-        frames = [named[name] for name in ordered_names]
-        source = build_source_payload(frames)
+    # Per-series fallback: use the stored formatted item when present, format the
+    # frame otherwise. An all-or-nothing frames fallback would silently DROP
+    # custom-indicator series (their frame is intentionally empty — the data
+    # lives only in the formatted item) whenever any other series lacks an item.
+    items: list[dict] = []
+    for name in ordered_names:
+        item = named_items.get(name)
+        if item is None:
+            item = format_series_item(named.get(name), default_id=name)
+        if item is not None:
+            items.append(item)
+    source = build_source_payload_from_items(items)
     return _render_source_payload(source, sid)
 
 
@@ -506,6 +535,12 @@ def add_single_series_chart(
 
 def remove_single_series_chart(name: str, sid: str) -> dict:
     display_name = _display_name(name)
+    # Symmetric with add: a case-variant custom-indicator name must resolve to
+    # its canonical spec key, or the pop below silently misses.
+    if display_name not in get_series_names(sid):
+        from TerraFin.interface.pages.chart.custom_indicators import load_custom_indicators
+
+        display_name = _match_custom_name(display_name, load_custom_indicators())
 
     # If named series is empty but payload has data (from update_chart),
     # adopt current source series into named series so we can rebuild without the removed one.
@@ -658,6 +693,21 @@ def create_chart_router(build_dir: Path) -> APIRouter:
             }
         names = get_series_names(sid)
         display_name = _display_name(name)
+
+        # Custom declarative indicators (band/line specs) do not fit the
+        # single-value TimeSeriesDataFrame/progressive-history path. Build the
+        # formatted item directly and store it as a formatted named-series item.
+        # The case-insensitive remap runs BEFORE the duplicate check so that a
+        # case-variant re-add ("news sentiment" -> "NEWS SENTIMENT") answers
+        # "Already added" instead of silently replacing the stored series.
+        from TerraFin.interface.pages.chart.custom_indicators import (
+            build_custom_indicator,
+            load_custom_indicators,
+        )
+
+        custom_specs = load_custom_indicators()
+        display_name = _match_custom_name(display_name, custom_specs)
+
         if display_name in names:
             return {
                 "ok": False,
@@ -672,6 +722,33 @@ def create_chart_router(build_dir: Path) -> APIRouter:
                 "historyBySeries": _history_by_series_response(sid),
                 **_chart_response(get_chart_payload(sid), sid),
             }
+
+        if display_name in custom_specs:
+            before_payload = get_chart_payload(sid)
+            try:
+                item = build_custom_indicator(custom_specs[display_name])
+            except Exception as e:
+                return {
+                    "ok": False,
+                    "error": str(e),
+                    "historyBySeries": _history_by_series_response(sid),
+                    **_chart_response(get_chart_payload(sid), sid),
+                }
+            from TerraFin.data.contracts.dataframes import TimeSeriesDataFrame
+
+            add_named_series(display_name, TimeSeriesDataFrame.make_empty(), sid, formatted_item=item)
+            _rebuild_from_named_series(sid)
+            if pinned:
+                set_pinned_names(get_pinned_names(sid) | {display_name}, sid)
+            after_payload = get_chart_payload(sid)
+            return {
+                "ok": True,
+                "names": get_series_names(sid),
+                "requestToken": "",
+                "historyBySeries": _history_by_series_response(sid),
+                "mutation": _mutation_response(before_payload, after_payload, sid),
+            }
+
         before_payload = get_chart_payload(sid)
         try:
             from TerraFin.data import get_data_factory
@@ -900,8 +977,11 @@ def create_chart_router(build_dir: Path) -> APIRouter:
             _search_yahoo,
         )
 
+        from TerraFin.interface.pages.chart.custom_indicators import load_custom_indicators
+
         all_names: list[str] = []
         all_names.extend(MARKET_INDICATOR_REGISTRY.keys())
+        all_names.extend(load_custom_indicators().keys())
         all_names.extend(INDEX_MAP.keys())
         all_names.extend(indicator_registry._indicators.keys())
 
