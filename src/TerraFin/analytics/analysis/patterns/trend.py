@@ -1,60 +1,36 @@
-"""Trend conditions — moving averages, Minervini template, Faber TAA."""
-
-from TerraFin.analytics.analysis.technical.ma import moving_average
+"""Trend conditions — moving-average crosses, Minervini template."""
 
 from ._base import Signal, resample, sma, spy_trend_ok
 from ._base import closes as _closes
 
 
+# Close-vs-MA(N) golden/death crosses, evaluated on a grid of MA lengths and
+# timeframes. Daily uses the raw frame; weekly resamples first.
+_DAILY_MA_PERIODS = (20, 60, 120, 200)
+_WEEKLY_MA_PERIODS = (20, 60, 120)
+
+
 def evaluate(ticker: str, ohlc) -> list[Signal]:
     out: list[Signal] = []
-    out.extend(_ma_50_200_cross(ticker, ohlc))
-    out.extend(_bar_ma_cross(ticker, ohlc, period=50, min_gap_pct=0.5))
+    out.extend(_ma_cross_grid(ticker, ohlc))
     out.extend(_minervini_template(ticker, ohlc))
-    out.extend(_faber_monthly(ticker, ohlc, period=10))
     return out
 
 
-# ─── 50/200 golden / death cross ─────────────────────────────────────────────
+# ─── Close-vs-MA(N) cross grid (daily + weekly) ──────────────────────────────
 
 
-def _ma_50_200_cross(ticker: str, ohlc) -> list[Signal]:
-    cs = _closes(ohlc)
-    if len(cs) < 202:
-        return []
-    _, fast = moving_average(cs, 50)
-    _, slow = moving_average(cs, 200)
-    if len(fast) < 2 or len(slow) < 2:
-        return []
-    trim = len(fast) - len(slow)
-    fast_aligned = fast[trim:]
-    diffs = [f - s for f, s in zip(fast_aligned, slow)]
-    snapshot = {"ma50": round(fast_aligned[-1], 4), "ma200": round(slow[-1], 4)}
-    # Only fire on the most recent bar's transition.
-    if diffs[-2] < 0 <= diffs[-1]:
-        return [
-            Signal(
-                name="MA_GOLDEN_CROSS",
-                ticker=ticker,
-                severity="medium",
-                message="50-day MA crossed above 200-day MA (golden cross).",
-                snapshot=snapshot,
-            )
-        ]
-    if diffs[-2] > 0 >= diffs[-1]:
-        return [
-            Signal(
-                name="MA_DEATH_CROSS",
-                ticker=ticker,
-                severity="high",
-                message="50-day MA crossed below 200-day MA (death cross).",
-                snapshot=snapshot,
-            )
-        ]
-    return []
-
-
-# ─── Generic close-vs-MA(N) cross with min-gap whipsaw filter ────────────────
+def _ma_cross_grid(ticker: str, ohlc) -> list[Signal]:
+    out: list[Signal] = []
+    for p in _DAILY_MA_PERIODS:
+        out.extend(_bar_ma_cross(ticker, ohlc, period=p, label=f"MA{p}", horizon="day"))
+    try:
+        weekly = resample(ohlc, "W")
+    except ValueError:
+        return out
+    for p in _WEEKLY_MA_PERIODS:
+        out.extend(_bar_ma_cross(ticker, weekly, period=p, label=f"MA{p}W", horizon="week"))
+    return out
 
 
 def _side(close: float, ma: float, min_gap: float) -> int:
@@ -72,7 +48,9 @@ def _bar_ma_cross(
     ticker: str,
     ohlc,
     *,
-    period: int = 50,
+    period: int,
+    label: str,
+    horizon: str,
     min_gap_pct: float = 0.5,
 ) -> list[Signal]:
     cs = _closes(ohlc)
@@ -90,10 +68,10 @@ def _bar_ma_cross(
     gap_pct = (cs[-1] - mas[-1]) / mas[-1] * 100.0
     return [
         Signal(
-            name=f"MA{period}_{'GOLDEN' if cur_side == 1 else 'DEATH'}_CROSS",
+            name=f"{label}_{'GOLDEN' if cur_side == 1 else 'DEATH'}_CROSS",
             ticker=ticker,
             severity="medium",
-            message=(f"{period}-day MA {kind} cross (close {cs[-1]:.2f} vs MA {mas[-1]:.2f}, gap {gap_pct:+.2f}%)."),
+            message=(f"{period}-{horizon} MA {kind} cross (close {cs[-1]:.2f} vs MA {mas[-1]:.2f}, gap {gap_pct:+.2f}%)."),
             snapshot={"close": cs[-1], "ma": mas[-1], "gap_pct": gap_pct},
         )
     ]
@@ -166,35 +144,5 @@ def _minervini_template(ticker: str, ohlc) -> list[Signal]:
             severity="high",
             message=(f"Minervini Trend Template entry (close {cs[-1]:.2f}; RS-vs-benchmark not yet implemented)."),
             snapshot={"close": cs[-1]},
-        )
-    ]
-
-
-# ─── Faber 10-month MA cross (monthly resample) ──────────────────────────────
-
-
-def _faber_monthly(ticker: str, ohlc, *, period: int = 10) -> list[Signal]:
-    try:
-        monthly = resample(ohlc, "ME")
-    except ValueError:
-        return []
-    cs = _closes(monthly)
-    if len(cs) < period + 1:
-        return []
-    mas = sma(cs, period)
-    if len(mas) < 2:
-        return []
-    cur_above = cs[-1] > mas[-1]
-    prev_above = cs[-2] > mas[-2]
-    if cur_above == prev_above:
-        return []
-    kind = "ENTER" if cur_above else "EXIT"
-    return [
-        Signal(
-            name=f"FABER_MA{period}_{'ENTRY' if cur_above else 'EXIT'}",
-            ticker=ticker,
-            severity="high",
-            message=(f"Faber {period}-month MA cross — {kind} (monthly close {cs[-1]:.2f} vs MA {mas[-1]:.2f})."),
-            snapshot={"close": cs[-1], "ma": mas[-1]},
         )
     ]

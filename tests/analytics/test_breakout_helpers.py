@@ -55,6 +55,23 @@ def test_52w_status_below_high_not_new():
     assert st["pct_from_high"] < 0.0
 
 
+# ── 52W_NEW_LOW (mirror of 52W_NEW_HIGH) ────────────────────────────────
+
+
+def test_52w_new_low_fires_on_fresh_low_below_50dma():
+    """A series grinding to a fresh 252-day low on the last bar → 52W_NEW_LOW."""
+    closes = [200.0 - i * 0.2 for i in range(303)]  # strictly falling → last is the min
+    names = {s.name for s in evaluate("TEST", _ohlc(closes))}
+    assert "52W_NEW_LOW" in names
+
+
+def test_52w_new_low_absent_when_not_a_new_low():
+    """Rising series → last bar is a high, never a new low."""
+    closes = [100.0 + i * 0.2 for i in range(303)]
+    names = {s.name for s in evaluate("TEST", _ohlc(closes))}
+    assert "52W_NEW_LOW" not in names
+
+
 # ── detect_weekly_volume_dryup ──────────────────────────────────────────
 
 

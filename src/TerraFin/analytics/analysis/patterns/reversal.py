@@ -1,4 +1,4 @@
-"""Reversal conditions — engulfing, Sperandeo 1-2-3, RSI/price divergence."""
+"""Reversal conditions — RSI/price divergence."""
 
 from ._base import (
     Signal,
@@ -8,105 +8,12 @@ from ._base import (
 from ._base import (
     closes as _closes,
 )
-from ._base import (
-    highs as _highs,
-)
-from ._base import (
-    lows as _lows,
-)
-from ._base import (
-    opens as _opens,
-)
-from ._base import (
-    volumes as _volumes,
-)
 
 
 def evaluate(ticker: str, ohlc) -> list[Signal]:
     out: list[Signal] = []
-    out.extend(_engulfing(ticker, ohlc))
     out.extend(_rsi_divergence(ticker, ohlc))
     return out
-
-
-# ─── Engulfing reversal at extreme location + volume confirm ─────────────────
-
-
-def _engulfing(
-    ticker: str,
-    ohlc,
-    *,
-    location_window: int = 10,
-    vol_multiple: float = 1.5,
-) -> list[Signal]:
-    cs = _closes(ohlc)
-    os = _opens(ohlc)
-    hs = _highs(ohlc)
-    ls = _lows(ohlc)
-    vs = _volumes(ohlc)
-    if len(cs) < max(location_window, 21):
-        return []
-    if len(os) != len(cs):
-        return []
-    prev_c, prev_o = cs[-2], os[-2]
-    cur_c, cur_o = cs[-1], os[-1]
-
-    if vs is not None and len(vs) >= 21:
-        avg_vol = sum(vs[-21:-1]) / 20
-        if avg_vol > 0 and vs[-1] < avg_vol * vol_multiple:
-            return []
-        vol_ratio = (vs[-1] / avg_vol) if avg_vol > 0 else None
-    else:
-        vol_ratio = None
-
-    prior_lows = ls[-(location_window + 1) : -1]
-    prior_highs = hs[-(location_window + 1) : -1]
-
-    bullish = (
-        prev_c < prev_o
-        and cur_c > cur_o
-        and cur_o <= prev_c
-        and cur_c >= prev_o
-        and prior_lows
-        and ls[-1] <= min(prior_lows)
-    )
-    if bullish:
-        msg = f"Bullish engulfing at {location_window}-bar low (close {cur_c:.2f}"
-        if vol_ratio:
-            msg += f", vol×{vol_ratio:.1f}"
-        msg += ")."
-        return [
-            Signal(
-                name="ENGULFING_BULL",
-                ticker=ticker,
-                severity="medium",
-                message=msg,
-                snapshot={"close": cur_c, "vol_ratio": vol_ratio},
-            )
-        ]
-    bearish = (
-        prev_c > prev_o
-        and cur_c < cur_o
-        and cur_o >= prev_c
-        and cur_c <= prev_o
-        and prior_highs
-        and hs[-1] >= max(prior_highs)
-    )
-    if bearish:
-        msg = f"Bearish engulfing at {location_window}-bar high (close {cur_c:.2f}"
-        if vol_ratio:
-            msg += f", vol×{vol_ratio:.1f}"
-        msg += ")."
-        return [
-            Signal(
-                name="ENGULFING_BEAR",
-                ticker=ticker,
-                severity="medium",
-                message=msg,
-                snapshot={"close": cur_c, "vol_ratio": vol_ratio},
-            )
-        ]
-    return []
 
 
 # ─── RSI / price divergence (fractal pivot based) ────────────────────────────

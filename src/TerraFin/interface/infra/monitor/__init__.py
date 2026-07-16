@@ -4,9 +4,9 @@
 
 A *monitor* is an external service (currently DataFactory's
 ``datafactory.monitor``) that holds a live broker WebSocket open, runs
-intraday detectors (5m / 30m / 1h timeframes) over the tick stream, and
+intraday detectors (5m timeframe) over the tick stream, and
 emits *signals* — discrete, time-stamped events such as
-``CAPITULATION_BOTTOM``, ``DONCHIAN50_UP``, ``MACD_BULL_CROSS``. TerraFin
+``bar_ma20_cross``, ``bar_volume_spike``. TerraFin
 itself does not run a WebSocket; it delegates realtime signal generation
 to the monitor and consumes the emitted events.
 

@@ -66,7 +66,8 @@ def test_scan_skips_erroring_tickers(monkeypatch):
     def _fake_fetch(ticker):
         if ticker == "ERR":
             raise RuntimeError("network error")
-        return _make_ohlc([100.0 + i * 2 for i in range(50)])
+        # An MA golden cross so the good ticker reliably produces a signal.
+        return _make_ohlc([100.0] * 200 + [99.0, 101.0])
 
     monkeypatch.setattr(sm, "get_watchlist_service", lambda: _FakeSvc())
     monkeypatch.setattr(sm, "_fetch_ohlc", _fake_fetch)

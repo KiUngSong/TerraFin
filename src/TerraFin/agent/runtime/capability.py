@@ -156,7 +156,7 @@ def build_default_capability_registry(
             ),
             TerraFinCapability(
                 name="patterns",
-                description="Evaluate every named market pattern (CAPITULATION_BOTTOM, MA_GOLDEN_CROSS, WYCKOFF_SPRING, etc.) against the latest bar of a single asset and return whichever patterns currently match.",
+                description="Evaluate every named market pattern (MA20_GOLDEN_CROSS, MINERVINI_TEMPLATE, 52W_NEW_HIGH, etc.) against the latest bar of a single asset and return whichever patterns currently match.",
                 handler=resolved_service.patterns,
                 focus_extractor=_focus_from_input_keys("name"),
                 backgroundable=True,

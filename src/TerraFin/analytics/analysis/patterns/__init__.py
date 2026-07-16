@@ -22,12 +22,9 @@ evaluation is triggered differs.
 
 Split by methodology so a new pattern lands in an obvious file:
 
-- ``trend``     — MA crosses, Minervini template, Faber TAA
-- ``breakout``  — Bollinger / Donchian / squeeze / NR7 / Keltner / Wyckoff Spring
-- ``meanrev``   — RSI extremes, Connors RSI(2)
-- ``momentum``  — MACD cross, Coppock
-- ``reversal``  — engulfing, RSI/price divergence
-- ``volume``    — capitulation, OBV divergence, CMF, MFI
+- ``trend``     — MA crosses, Minervini template
+- ``breakout``  — 52-week high/low, weekly volume dry-up
+- ``reversal``  — RSI/price divergence
 
 Each school module exposes ``evaluate(ticker, ohlc) -> list[Signal]``;
 the package-level ``evaluate`` aggregates them.
@@ -35,11 +32,11 @@ the package-level ``evaluate`` aggregates them.
 
 from TerraFin.data.contracts.dataframes import TimeSeriesDataFrame
 
-from . import breakout, meanrev, momentum, reversal, trend, volume
+from . import breakout, reversal, trend
 from ._base import Severity, Signal, _OHLCV_CACHE_KEY
 
 
-_ACTIVE_SCHOOLS = (trend, breakout, meanrev, momentum, reversal, volume)
+_ACTIVE_SCHOOLS = (trend, breakout, reversal)
 
 
 def _preload_ohlcv(ohlc) -> None:
