@@ -1,4 +1,5 @@
 import pandas as pd
+import pytest
 
 from TerraFin.data.contracts import FinancialStatementFrame
 
@@ -520,12 +521,15 @@ def test_build_stock_template_uses_computed_beta_when_provider_beta_is_missing(m
     template = build_stock_template("AAPL", data_factory=_PriceFactory({"AAPL": 150.0}))
 
     assert template.status == "ready"
-    assert template.assumptions["beta"] == 1.37
+    # Computed beta 1.37 is Blume-adjusted (0.67*b + 0.33) before the discount
+    # rate — see 4ad1394; only an explicit override skips the shrinkage.
+    assert template.assumptions["beta"] == pytest.approx(0.67 * 1.37 + 0.33)
     assert template.assumptions["betaSource"] == "computed"
     assert template.assumptions["betaMethodId"] == "beta_5y_monthly"
     assert template.assumptions["betaBenchmarkSymbol"] == "^SPX"
-    assert round(template.assumptions["discountSpreadPct"], 2) == 6.85
+    assert template.assumptions["discountSpreadPct"] == pytest.approx((0.67 * 1.37 + 0.33) * 5.0)
     assert any("using computed beta_5y_monthly" in warning for warning in template.warnings)
+    assert any("Blume-adjusted" in warning for warning in template.warnings)
 
 
 def test_build_stock_template_falls_back_to_fcf_cagr_and_marks_insufficient(monkeypatch) -> None:
