@@ -479,6 +479,14 @@ class WatchlistService:
             return [dict(i) for i in items]
 
     def delete_group(self, name: str) -> list[dict]:
+        """Delete a group AND the items that belonged only to it.
+
+        An item that is also in another group merely loses this group's tag;
+        an item whose only group was the deleted one (reserved tags like
+        ``monitor`` don't count as groups) is removed from the watchlist.
+        Without this, group deletion strands tag-less items that the UI has
+        to park in an auto-created "Base Group".
+        """
         tag_key = name.strip().lower()
         if not tag_key:
             raise WatchlistValidationError("Group name is required.")
@@ -487,14 +495,20 @@ class WatchlistService:
         self._require_backend_configured()
         with self._lock:
             items = self._load_items_locked()
+            kept: list[dict] = []
             for item in items:
-                item["tags"] = [t for t in (item.get("tags") or []) if t.lower() != tag_key]
+                tags = [t for t in (item.get("tags") or []) if t.lower() != tag_key]
+                had_group = len(tags) != len(item.get("tags") or [])
+                if had_group and not any(not is_reserved_tag(t) for t in tags):
+                    continue  # its only group was the deleted one → item goes too
+                item["tags"] = tags
+                kept.append(item)
             self._explicit_groups = [e for e in (self._explicit_groups or []) if e.lower() != tag_key]
             self._group_order = [g for g in (self._group_order or []) if g.lower() != tag_key]
             self._item_order = {k: v for k, v in (self._item_order or {}).items() if k.lower() != tag_key}
-            self._write_items_locked(items)
-            self._items = items
-            return [dict(i) for i in items]
+            self._write_items_locked(kept)
+            self._items = kept
+            return [dict(i) for i in kept]
 
     def _build_item(self, symbol: str, tags: list[str] | None = None) -> dict:
         try:

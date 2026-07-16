@@ -487,6 +487,13 @@ The watchlist page is a dedicated personal-management surface. It reuses the
 dashboard watchlist API family rather than exposing a separate `/watchlist/api`
 namespace.
 
+The per-item bell (🔔) toggles the reserved `monitor` tag. It selects which
+watchlist tickers the **realtime intraday monitor** subscribes to — nothing
+else. EOD signal alerts (daily/weekly/monthly, sent by the DataFactory EOD
+scan) cover the full watchlist regardless of the bell; to stop those for a
+name, remove it from the watchlist. Scope table: DataFactory
+`docs/signal-catalog.md` § Routing policy.
+
 ### Page routes
 
 | Method | Path | Description |
@@ -505,7 +512,7 @@ The watchlist page uses the `/terminal/api/watchlist` API family.
 | `PATCH` | `/terminal/api/watchlist/{symbol}/tags` | Update tags (`body: {tags, mode: "set"|"add"|"remove"}`) |
 | `GET` | `/terminal/api/watchlist/groups` | List groups with item counts |
 | `POST` | `/terminal/api/watchlist/groups` | Create an empty named group (`body: {name}`) |
-| `DELETE` | `/terminal/api/watchlist/groups/{tag}` | Delete a group and remove its tag from all items |
+| `DELETE` | `/terminal/api/watchlist/groups/{tag}` | Delete a group; items whose only group it was are removed from the watchlist, items also in other groups just lose the tag |
 | `POST` | `/terminal/api/watchlist/groups/rename` | Rename a group (`body: {old, new}`) |
 | `PUT` | `/terminal/api/watchlist/groups/order` | Persist group display order (`body: {groups: [name, ...]}`) |
 | `PUT` | `/terminal/api/watchlist/groups/{group}/item-order` | Persist item order within a group (`body: {symbols: [...]}`) |

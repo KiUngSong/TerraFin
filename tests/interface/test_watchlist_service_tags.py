@@ -237,3 +237,22 @@ def test_legacy_doc_without_tags_loads_empty(monkeypatch):
     svc, _ = _make_service(items)
     result = svc.get_watchlist_snapshot()
     assert result[0]["tags"] == []
+
+
+# ─── delete_group: items whose only group it was are removed ──────────────────
+
+
+def test_delete_group_removes_sole_group_items(monkeypatch):
+    items = [
+        {"symbol": "AAA", "name": "A", "move": "+1%", "tags": ["Bio"]},
+        {"symbol": "BBB", "name": "B", "move": "+1%", "tags": ["Bio", "Core"]},
+        {"symbol": "CCC", "name": "C", "move": "+1%", "tags": ["Bio", "monitor"]},
+        {"symbol": "DDD", "name": "D", "move": "+1%", "tags": ["Core"]},
+    ]
+    svc, _ = _make_service(items)
+    result = svc.delete_group("Bio")
+    by_symbol = {i["symbol"]: i for i in result}
+    assert "AAA" not in by_symbol            # only group was Bio → item removed
+    assert "CCC" not in by_symbol            # monitor is reserved, not a group → removed too
+    assert by_symbol["BBB"]["tags"] == ["Core"]  # also in Core → survives, tag stripped
+    assert by_symbol["DDD"]["tags"] == ["Core"]  # untouched
