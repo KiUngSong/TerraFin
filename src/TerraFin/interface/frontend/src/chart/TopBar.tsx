@@ -150,11 +150,15 @@ const DatePickerButton: React.FC<{ onClick: () => void }> = ({ onClick }) => (
 );
 
 const StatusBadgeOverlay: React.FC<{ label: string }> = ({ label }) => (
+  // Fully BELOW the top bar (never straddling it — a half-overlap covers the
+  // bar's own controls), on the left: recent price action lives on the chart's
+  // right edge and older history loads on the left, so the top-left corner is
+  // the spot that covers neither the freshest candles nor the bar.
   <div
     style={{
       position: 'absolute',
-      right: 12,
-      bottom: -12,
+      left: 12,
+      top: 'calc(100% + 6px)',
       zIndex: 4,
       pointerEvents: 'none',
       display: 'inline-flex',

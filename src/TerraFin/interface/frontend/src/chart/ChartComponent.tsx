@@ -733,7 +733,10 @@ const ChartComponentInner = React.forwardRef<ChartComponentHandle, ChartComponen
 
   const isEmpty = (payload.series ?? []).every((s) => (s.data ?? []).length === 0);
 
-  const chartBodyTopInset = !isEmpty && statusBadgeLabel && !isNarrow ? 16 : 0;
+  // The status badge hangs ~31px below the top bar (top: 100% + 6px + pill
+  // height) — inset the chart body past it in BOTH wide and narrow modes so
+  // it never sits on the canvas / left price-scale labels.
+  const chartBodyTopInset = !isEmpty && statusBadgeLabel ? 36 : 0;
 
   return (
     <div
