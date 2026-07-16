@@ -1,8 +1,8 @@
-import React, { useMemo } from 'react';
+import React, { useEffect, useMemo } from 'react';
 import TerminalWorkspace from './components/TerminalWorkspace';
 import LiveTickerTape from './widgets/LiveTickerTape';
 import MacroStack from './widgets/MacroStack';
-import SectorGrid from './widgets/SectorGrid';
+import SectorGrid, { prefetchSectors } from './widgets/SectorGrid';
 import StockHeatmap from './widgets/StockHeatmap';
 import SentimentCalendarStack from './widgets/SentimentCalendarStack';
 import WatchlistSnapshotCard from './widgets/WatchlistSnapshotCard';
@@ -21,6 +21,10 @@ const WIDGET_CATALOG: Record<WidgetId, React.ReactNode> = {
 };
 
 const DashboardPage: React.FC = () => {
+  // Warm the Sectors fetch on dashboard mount so the tab opens instantly.
+  useEffect(() => {
+    prefetchSectors().catch(() => {});
+  }, []);
   const layoutPreset = useTerminalStore((s) => s.layoutPreset);
   const preset = useMemo(
     () => LAYOUT_PRESETS[layoutPreset] ?? LAYOUT_PRESETS.trader,

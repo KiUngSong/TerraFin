@@ -71,6 +71,35 @@ const fmtPct = (pct: number | null): string => {
   return `${sign}${Math.abs(pct).toFixed(2)}%`;
 };
 
+// Module-level singleton so the Sectors fetch can be warmed in the background
+// from the dashboard mount and reused instantly when the Sectors tab is first
+// opened — the tab no longer starts loading only on click. The prefetch and the
+// tab-open share the one in-flight request; a failed fetch clears the cache so
+// the next mount/prefetch retries. Cached data expires after REFRESH_MS (same
+// policy as FearGreedGauge) so a later tab open refetches instead of serving
+// hours-old sector performance.
+const REFRESH_MS = 5 * 60 * 1000;
+let sectorsPromise: Promise<SectorTile[]> | null = null;
+let sectorsFetchedAt = 0;
+
+export const prefetchSectors = (): Promise<SectorTile[]> => {
+  if (!sectorsPromise || Date.now() - sectorsFetchedAt > REFRESH_MS) {
+    sectorsFetchedAt = Date.now();
+    const p: Promise<SectorTile[]> = fetch('/terminal/api/sectors')
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`${r.status}`))))
+      .then((payload: SectorsPayload) => payload.tiles || [])
+      .catch((e) => {
+        // Only clear the cache if WE are still the cached promise — a hung
+        // fetch failing after the TTL already replaced it must not clobber
+        // the newer in-flight request.
+        if (sectorsPromise === p) sectorsPromise = null;
+        throw e;
+      });
+    sectorsPromise = p;
+  }
+  return sectorsPromise;
+};
+
 const SectorGrid: React.FC = () => {
   const [tiles, setTiles] = useState<SectorTile[]>([]);
   const [loading, setLoading] = useState(true);
@@ -78,14 +107,22 @@ const SectorGrid: React.FC = () => {
   const markDataFresh = useTerminalStore((s) => s.markDataFresh);
 
   useEffect(() => {
-    fetch('/terminal/api/sectors')
-      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`${r.status}`))))
-      .then((p: SectorsPayload) => {
-        setTiles(p.tiles || []);
+    let alive = true;
+    prefetchSectors()
+      .then((t) => {
+        if (!alive) return;
+        setTiles(t);
         markDataFresh();
       })
-      .catch(() => setTiles([]))
-      .finally(() => setLoading(false));
+      .catch(() => {
+        if (alive) setTiles([]);
+      })
+      .finally(() => {
+        if (alive) setLoading(false);
+      });
+    return () => {
+      alive = false;
+    };
   }, [markDataFresh]);
 
   if (loading) return <div className="tf-table__status">loading sectors…</div>;
