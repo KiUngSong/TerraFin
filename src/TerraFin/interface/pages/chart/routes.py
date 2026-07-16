@@ -381,10 +381,10 @@ def _payload_needs_layout(payload: dict) -> bool:
     for item in series:
         if not isinstance(item, dict):
             return False
-        # ownScale contract: the item owns its dedicated price scale — its
+        # Bands lay themselves out (renderer assigns their pane/scale) — their
         # presence must not suppress layout for the rest of the payload.
-        # build_multi_payload_from_items skips ownScale items symmetrically.
-        if item.get("ownScale"):
+        # build_multi_payload_from_items skips bands symmetrically.
+        if item.get("seriesType") == "band":
             continue
         if item.get("indicator"):
             return False
@@ -394,6 +394,14 @@ def _payload_needs_layout(payload: dict) -> bool:
             return False
         saw_layoutable = True
     return saw_layoutable
+
+
+_POINT_BASE_KEYS = ("time", "open", "high", "low", "close", "value")
+
+
+def _first_layer_value(point: dict):
+    """First band-layer value of a point (None for non-band points)."""
+    return next((v for k, v in point.items() if k not in _POINT_BASE_KEYS), None)
 
 
 def _series_data_signature(item: dict) -> tuple:
@@ -406,12 +414,13 @@ def _series_data_signature(item: dict) -> tuple:
         first.get("time"),
         middle.get("time"),
         last.get("time"),
-        # Band points carry pos/neu/neg (no open/close/value) — sample pos so an
-        # in-place revision of a band day (the ETL re-aggregates trailing days)
-        # changes the signature and repaints, not just a new date.
-        first.get("open", first.get("value", first.get("pos"))),
-        middle.get("close", middle.get("value", middle.get("pos"))),
-        last.get("close", last.get("value", last.get("pos"))),
+        # Band points carry n layer keys (no open/close/value) — sample the
+        # first layer so an in-place revision of a band day (the ETL
+        # re-aggregates trailing days) changes the signature and repaints,
+        # not just a new date.
+        first.get("open", first.get("value", _first_layer_value(first))),
+        middle.get("close", middle.get("value", _first_layer_value(middle))),
+        last.get("close", last.get("value", _first_layer_value(last))),
     )
 
 

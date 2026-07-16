@@ -14,10 +14,11 @@ const CANDLE_GREEN = '#26a69a';
 const CANDLE_RED = '#ef5350';
 // Band (stacked sentiment) colors — opaque so back-to-front fills hide each other.
 // Match the app's semantic up/down tokens (--tf-up / --tf-down) with a slate neutral.
-const BAND_POS = '#00d97e';
-const BAND_NEU = '#64748b';
-const BAND_NEG = '#ff5d5d';
-const BAND_PANE_INDEX = 1; // sentiment band lives in its own pane below price
+// Band layer palette by layer position (top layer first); the first three keep
+// the original pos/neu/neg colors so existing bands render unchanged. Cycles
+// for bands with more layers.
+const BAND_LAYER_COLORS = ['#00d97e', '#64748b', '#ff5d5d', '#7c6df2', '#e8a13c'];
+const BAND_PANE_INDEX = 1; // bands live in their own panes below price
 const CANDLE_COLOR_PAIRS: Array<{ up: string; down: string }> = [
   { up: CANDLE_GREEN, down: CANDLE_RED },
   { up: '#1976d2', down: '#f57c00' },
@@ -107,18 +108,33 @@ function areaOptions(spec: SeriesSpec): Record<string, unknown> {
   };
 }
 
+// A band's scale id is derived from its own id — layout is renderer policy,
+// the backend item carries data only.
+const bandScaleId = (item: ChartSeries): string => `band:${item.id}`;
+
+// Layer keys in point order (JSON preserves the producer's field order),
+// top layer first.
+const bandLayerKeys = (pts: BandPoint[]): string[] =>
+  Object.keys(pts[0] ?? {}).filter((k) => k !== 'time');
+
 function bandAreaSpecs(item: ChartSeries, paneIndex: number): SeriesSpec[] {
-  // Expand one band item into 3 cumulative area series (each single-value).
-  // Drawn back-to-front: pos fills full height (1.0), neu to neg+neu, neg to
-  // neg — so visible bands are [0,neg]=neg, [neg,neg+neu]=neu, [neg+neu,1]=pos.
+  // Expand one band item into n cumulative area series (each single-value),
+  // drawn back-to-front: layer i's value is the sum of layers i..n-1, so the
+  // first key fills the full stack and the last key is the bottom band.
   const pts = item.data as BandPoint[];
-  const scale = item.priceScaleId ?? 'news-sentiment';
-  const layer = (suffix: string, color: string, value: (p: BandPoint) => number): SeriesSpec => {
-    const data = pts.map((p) => ({ time: p.time, value: value(p) }));
+  const scale = bandScaleId(item);
+  const keys = bandLayerKeys(pts);
+  return keys.map((suffix, i) => {
+    const color = BAND_LAYER_COLORS[i % BAND_LAYER_COLORS.length];
+    const tail = keys.slice(i);
+    const data = pts.map((p) => ({
+      time: p.time,
+      value: tail.reduce((sum, k) => sum + (typeof p[k] === 'number' ? (p[k] as number) : 0), 0),
+    }));
     return {
       key: `${item.id}::${suffix}`,
       id: `${item.id}::${suffix}`,
-      kind: 'area',
+      kind: 'area' as const,
       color,
       priceScaleId: scale,
       paneIndex,
@@ -128,20 +144,15 @@ function bandAreaSpecs(item: ChartSeries, paneIndex: number): SeriesSpec[] {
       dataSignature: dataSignature(data),
       recreateSignature: JSON.stringify({ kind: 'area', priceScaleId: scale, pane: paneIndex, suffix }),
     };
-  };
-  return [
-    layer('pos', BAND_POS, (p) => p.pos + p.neu + p.neg),
-    layer('neu', BAND_NEU, (p) => p.neu + p.neg),
-    layer('neg', BAND_NEG, (p) => p.neg),
-  ];
+  });
 }
 
-function ownScalePaneAssignments(series: ChartSeries[]): Map<string, number> {
+function bandPaneAssignments(series: ChartSeries[]): Map<string, number> {
   // Each band gets its own pane below the price pane (allocated in series order).
   const panes = new Map<string, number>();
   series.forEach((item) => {
     if (item.seriesType !== 'band') return;
-    const scale = item.priceScaleId ?? 'news-sentiment';
+    const scale = bandScaleId(item);
     if (!panes.has(scale)) {
       panes.set(scale, BAND_PANE_INDEX + panes.size);
     }
@@ -174,11 +185,11 @@ export function buildSeriesSpecs(
   let lineColorIndex = 0;
   let candleIndex = 0;
   const seenZoneKeys = new Set<string>();
-  const ownScalePanes = ownScalePaneAssignments(series);
+  const bandPanes = bandPaneAssignments(series);
 
   return series.flatMap((item): SeriesSpec | SeriesSpec[] => {
     if (item.seriesType === 'band') {
-      return bandAreaSpecs(item, ownScalePanes.get(item.priceScaleId ?? 'news-sentiment') ?? BAND_PANE_INDEX);
+      return bandAreaSpecs(item, bandPanes.get(bandScaleId(item)) ?? BAND_PANE_INDEX);
     }
 
     const priceScaleId = item.priceScaleId ?? 'right';

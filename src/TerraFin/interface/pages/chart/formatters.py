@@ -143,9 +143,9 @@ def build_multi_payload_from_items(source_items: list[dict]) -> dict:
     for source_item in source_items:
         item = dict(source_item)
         st = item.get("seriesType")
-        # ownScale items keep their own dedicated scale and must not skew
+        # Bands own their pane/scale (renderer-assigned) and must not skew
         # the candlestick/line layout heuristics for the other series.
-        if not item.get("ownScale"):
+        if item.get("seriesType") != "band":
             if st == "candlestick":
                 n_candlestick += 1
             elif st == "line":
@@ -170,9 +170,9 @@ def build_multi_payload_from_items(source_items: list[dict]) -> dict:
     primary_assigned = False
     for item in items:
         st = item.get("seriesType")
-        if item.get("ownScale"):
-            # ownScale contract: the item carries its own dedicated price
-            # scale; never reassign it.
+        if item.get("seriesType") == "band":
+            # Bands own their pane/scale (renderer-derived from the item id);
+            # never assign them a layout scale.
             continue
         if force_percentage:
             if item.get("returnSeries"):

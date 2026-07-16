@@ -60,7 +60,7 @@ export function createTooltip(ctx: TooltipContext): {
     }
 
     const rows: Array<{ id: string; formatted: string; color: string }> = [];
-    // Band series render as 3 cumulative area layers keyed `<base>::pos|neu|neg`.
+    // Band series render as n cumulative area layers keyed `<base>::<layer>`.
     // The crosshair sees cumulative values; difference them back to real shares.
     const bands = new Map<string, Record<string, { v: number; color: string }>>();
     param.seriesData.forEach((data, series) => {
@@ -97,15 +97,16 @@ export function createTooltip(ctx: TooltipContext): {
       rows.push({ id, formatted, color });
     });
 
-    // Cumulative layers: pos = pos+neu+neg (1.0), neu = neu+neg, neg = neg.
+    // Band layers carry cumulative values (layer i = sum of layers i..n-1), so
+    // sorting by value descending recovers the stack order for any n layers.
     // Real share = this layer's cumulative minus the next-lower layer's.
     bands.forEach((layers, base) => {
-      const { pos, neu, neg } = layers;
-      if (!pos || !neu || !neg) return;
+      const ordered = Object.entries(layers).sort(([, a], [, b]) => b.v - a.v);
       const pct = (x: number) => (Math.max(0, x) * 100).toFixed(1) + '%';
-      rows.push({ id: `${base} · pos`, formatted: pct(pos.v - neu.v), color: pos.color });
-      rows.push({ id: `${base} · neu`, formatted: pct(neu.v - neg.v), color: neu.color });
-      rows.push({ id: `${base} · neg`, formatted: pct(neg.v), color: neg.color });
+      ordered.forEach(([name, layer], i) => {
+        const next = ordered[i + 1];
+        rows.push({ id: `${base} · ${name}`, formatted: pct(layer.v - (next?.[1].v ?? 0)), color: layer.color });
+      });
     });
 
     if (rows.length === 0) {

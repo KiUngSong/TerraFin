@@ -76,17 +76,16 @@ def _resample_line(data: list[dict], view: str) -> list[dict]:
 
 
 def _resample_band(data: list[dict], view: str) -> list[dict]:
-    """Resample band data (pos/neu/neg shares): last value per period."""
+    """Resample band data (n ordered layer shares): last point per period."""
     if not data or view == "daily":
         return data
     buckets: dict[str, dict] = {}
     order: list[str] = []
     for p in data:
-        t = p.get("time", "")
-        key = _period_key(t, view)
+        key = _period_key(p.get("time", ""), view)
         if key not in buckets:
             order.append(key)
-        buckets[key] = {"time": t, "pos": p.get("pos"), "neu": p.get("neu"), "neg": p.get("neg")}
+        buckets[key] = dict(p)  # layer keys pass through untouched
     return [buckets[k] for k in order]
 
 
@@ -132,8 +131,6 @@ def apply_view(source_payload: dict, view: str) -> dict:
             out["returnSeries"] = True
         if item.get("indicator"):
             out["indicator"] = True
-        if item.get("ownScale"):
-            out["ownScale"] = True
         if item.get("indicatorGroup") is not None:
             out["indicatorGroup"] = item["indicatorGroup"]
         if item.get("description") is not None:

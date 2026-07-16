@@ -8,7 +8,6 @@ A spec is one JSON dict; specs merge by name (later wins) from a local
 import json
 import logging
 import os
-import re
 import time
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -55,7 +54,7 @@ def _get_client():
     from TerraFin.configuration import load_terrafin_config
 
     # Shared cluster URI (TERRAFIN_MONGODB_URI or MONGODB_URI), same as the stores.
-    uri = load_terrafin_config().market_voices.uri
+    uri = load_terrafin_config().watchlist.uri
     if not uri:
         return None
     _client = MongoClient(uri, serverSelectionTimeoutMS=3000)
@@ -70,7 +69,9 @@ class MongoSource:
     collection: str
     time_field: str
     value_field: str | None  # line specs: the single value column
-    fields: dict[str, str] | None  # band specs: output key -> source field
+    # Band specs: ordered layer key -> source field (top layer first). The
+    # renderer stacks the layers cumulatively; any n >= 2 layers.
+    fields: dict[str, str] | None
     filter: dict
 
 
@@ -81,7 +82,6 @@ class IndicatorSpec:
     group: str
     series_type: str  # "line" | "band"
     source: MongoSource
-    price_scale_id: str
 
 
 def _load_default_specs() -> list[dict]:
@@ -100,10 +100,6 @@ def _load_default_specs() -> list[dict]:
 DEFAULT_SPECS: list[dict] = _load_default_specs()
 
 
-def _derived_price_scale_id(name: str) -> str:
-    return re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")
-
-
 def _parse_spec(raw) -> IndicatorSpec:
     """Validate one raw spec dict; raises ValueError on any contract violation."""
     if not isinstance(raw, dict):
@@ -112,7 +108,7 @@ def _parse_spec(raw) -> IndicatorSpec:
     if not name:
         raise ValueError("spec is missing a name")
     if "::" in name:
-        # The frontend expands band items into layers keyed "<name>::pos|neu|neg"
+        # The frontend expands band items into layers keyed "<name>::<layer>"
         # and routes tooltips on that separator — a literal "::" in a spec name
         # would silently break tooltip attribution.
         raise ValueError(f"{name}: spec names must not contain '::'")
@@ -146,18 +142,18 @@ def _parse_spec(raw) -> IndicatorSpec:
             isinstance(k, str) and isinstance(v, str) for k, v in fields.items()
         ):
             raise ValueError(f"{name}: fields must map output keys to source field names")
-        # The whole band pipeline (backend _resample_band, frontend bandAreaSpecs)
-        # is keyed to exactly pos/neu/neg — any other keys would load "valid" and
-        # then break rendering. Reject at parse time so a bad user spec degrades
-        # to a skipped spec instead of a blank chart. Relax if/when the frontend
-        # generalizes band keys.
-        if set(fields.keys()) != {"pos", "neu", "neg"}:
-            raise ValueError(f"{name}: band fields keys must be exactly pos/neu/neg")
+        # A band is an ordered stack of layers (top first, insertion order).
+        # One layer isn't a band; "time" collides with the point's time key;
+        # "::" is the frontend's layer-id separator; digit-only keys would be
+        # iterated numerically by JS objects, silently reordering the stack.
+        if len(fields) < 2:
+            raise ValueError(f"{name}: band specs need at least 2 fields entries")
+        if any(not k or k == "time" or "::" in k or k.isdigit() for k in fields):
+            raise ValueError(f"{name}: band field keys must be non-empty, not 'time'/digit-only, without '::'")
         value_field = None
     spec_filter = source.get("filter") or {}
     if not isinstance(spec_filter, dict):
         raise ValueError(f"{name}: filter must be a dict")
-    price_scale_id = str(raw.get("price_scale_id") or "").strip() or _derived_price_scale_id(name)
     return IndicatorSpec(
         name=name,
         description=str(raw.get("description") or ""),
@@ -171,7 +167,6 @@ def _parse_spec(raw) -> IndicatorSpec:
             fields=fields,
             filter=spec_filter,
         ),
-        price_scale_id=price_scale_id,
     )
 
 
@@ -266,9 +261,10 @@ def _spec_rows(spec: IndicatorSpec) -> list[dict]:
 def build_custom_indicator(spec: IndicatorSpec) -> dict:
     """Build the formatted ChartSeries item for one spec.
 
-    Line: ``{"time", "value"}`` points (overlay-scale line, like any indicator).
-    Band: ``{"time", <fields keys>}`` points on its own pane; the renderer stacks
-    them into cumulative [0,1] areas (band layers are keyed pos/neu/neg).
+    Line: ``{"time", "value"}`` points. Band: ``{"time", <layer keys>}`` points,
+    layer keys in spec order (top first). All layout — scales, panes, band
+    stacking — is the renderer's job, keyed off ``seriesType``; this item
+    carries data only.
     """
     src = spec.source
     rows = _spec_rows(spec)
@@ -279,18 +275,12 @@ def build_custom_indicator(spec: IndicatorSpec) -> dict:
             {"time": str(r[src.time_field]), **{key: float(r[f]) for key, f in (src.fields or {}).items()}}
             for r in rows
         ]
-    item = {
+    return {
         "id": spec.name,
         "seriesType": spec.series_type,
         "data": data,
-        # indicator:True would need an indicatorGroup or the ChartCanvas filter drops it.
+        # Custom series are added explicitly (like tickers), not toggled as an
+        # indicator group — so they are always-visible, non-indicator series.
         "indicator": False,
         "description": spec.description,  # feeds the legend info button
     }
-    if spec.series_type == "band":
-        # Only the band earns its own pane/scale (ownScale). A line leaves its
-        # scale unset so the layout pass gives it a hidden overlay, like any
-        # other line indicator.
-        item["priceScaleId"] = spec.price_scale_id
-        item["ownScale"] = True
-    return item

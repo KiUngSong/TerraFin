@@ -4,16 +4,25 @@ export function isChartMutation(update: ChartMutation | ChartSnapshot | null | u
   return Boolean(update && 'upsertSeries' in update && 'seriesOrder' in update);
 }
 
+const POINT_BASE_KEYS = new Set(['time', 'open', 'high', 'low', 'close', 'value']);
+
+// First band-layer value of a point (undefined for non-band points).
+function firstLayerValue(point: Record<string, unknown>): unknown {
+  const key = Object.keys(point).find((k) => !POINT_BASE_KEYS.has(k));
+  return key === undefined ? undefined : point[key];
+}
+
 function pointSignature(point: Record<string, unknown> | undefined): string {
   if (!point) return '';
-  // Band points carry pos/neu/neg (no open/close/value) — sample pos so an
-  // in-place revision of a band day changes the signature, not just new dates.
+  // Band points carry n layer keys (no open/close/value) — sample the first
+  // layer so an in-place revision of a band day changes the signature, not
+  // just new dates.
   return [
     String(point.time ?? ''),
-    String(point.open ?? point.value ?? point.pos ?? ''),
+    String(point.open ?? point.value ?? firstLayerValue(point) ?? ''),
     String(point.high ?? ''),
     String(point.low ?? ''),
-    String(point.close ?? point.value ?? point.pos ?? ''),
+    String(point.close ?? point.value ?? firstLayerValue(point) ?? ''),
   ].join(':');
 }
 

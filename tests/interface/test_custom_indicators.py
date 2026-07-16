@@ -96,7 +96,6 @@ _DEFAULT_SPEC_DOCS = [
             "fields": {"pos": "pos_share", "neu": "neu_share", "neg": "neg_share"},
             "filter": {"pos_share": {"$ne": None}},
         },
-        "price_scale_id": "news-sentiment",
     },
     {
         "name": "Sentiment Entropy",
@@ -167,9 +166,7 @@ def test_executor_band_item_matches_legacy_news_sentiment_shape(monkeypatch):
         ],
         "indicator": False,
         "description": "News sentiment band.",
-        # band earns its own pane/scale.
-        "priceScaleId": "news-sentiment",
-        "ownScale": True,
+        # No layout fields: scales/panes/stacking are the renderer's job.
     }
 
 
@@ -297,13 +294,6 @@ def test_loader_skips_invalid_specs_keeps_valid_ones(monkeypatch, tmp_path):
     assert set(specs) == {"News Sentiment", "Sentiment Entropy", "Sentiment Conviction", "Good Local"}
 
 
-def test_price_scale_id_defaults_to_slug_of_name(monkeypatch, tmp_path):
-    local_path = tmp_path / "indicators.json"
-    local_path.write_text(json.dumps([_spec("Fund Flows Total")]), encoding="utf-8")
-    monkeypatch.setenv(ci.INDICATORS_PATH_ENV, str(local_path))
-    assert ci.load_custom_indicators()["Fund Flows Total"].price_scale_id == "fund-flows-total"
-
-
 # ── Catalog wiring ──────────────────────────────────────────────────────────
 
 
@@ -327,10 +317,9 @@ def test_build_indicator_entries_uses_per_spec_groups(monkeypatch, tmp_path):
 # ── Spec validation: band keys ──────────────────────────────────────────────
 
 
-def test_band_fields_keys_must_be_pos_neu_neg(monkeypatch, tmp_path):
-    # The band pipeline (backend resample + frontend stacking) is keyed to
-    # exactly pos/neu/neg; any other keys must reject at parse time so a bad
-    # user spec degrades to a skipped spec instead of a broken chart.
+def test_band_accepts_any_n_layers_ge_2(monkeypatch, tmp_path):
+    # A band is an ordered stack of n layers (top first) — 2-layer bands are
+    # first-class, not just pos/neu/neg.
     local_path = tmp_path / "indicators.json"
     band_source = {
         "kind": "mongo",
@@ -340,19 +329,42 @@ def test_band_fields_keys_must_be_pos_neu_neg(monkeypatch, tmp_path):
         "fields": {"inflow": "in_share", "outflow": "out_share"},
     }
     local_path.write_text(
-        json.dumps([{"name": "Bad Band", "series_type": "band", "source": band_source}]),
+        json.dumps([{"name": "Flows Band", "series_type": "band", "source": band_source}]),
         encoding="utf-8",
     )
     monkeypatch.setenv(ci.INDICATORS_PATH_ENV, str(local_path))
-    assert "Bad Band" not in ci.load_custom_indicators()
+    spec = ci.load_custom_indicators()["Flows Band"]
+    assert list(spec.source.fields) == ["inflow", "outflow"]  # order preserved
 
 
-# ── ownScale layout contract ────────────────────────────────────────────────
+def test_band_rejects_single_layer_and_reserved_keys(monkeypatch, tmp_path):
+    # One layer isn't a band; "time" collides with the point's time key.
+    local_path = tmp_path / "indicators.json"
+    src = {"kind": "mongo", "database": "d", "collection": "c", "time_field": "t"}
+    local_path.write_text(
+        json.dumps([
+            {"name": "One Layer", "series_type": "band", "source": {**src, "fields": {"only": "f"}}},
+            {"name": "Time Key", "series_type": "band", "source": {**src, "fields": {"time": "f", "b": "g"}}},
+            # "::" is the frontend layer-id separator; digit-only keys get
+            # reordered by JS object iteration; empty keys make broken ids.
+            {"name": "Sep Key", "series_type": "band", "source": {**src, "fields": {"a::b": "f", "b": "g"}}},
+            {"name": "Digit Key", "series_type": "band", "source": {**src, "fields": {"1": "f", "2": "g"}}},
+            {"name": "Empty Key", "series_type": "band", "source": {**src, "fields": {"": "f", "b": "g"}}},
+        ]),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv(ci.INDICATORS_PATH_ENV, str(local_path))
+    specs = ci.load_custom_indicators()
+    for bad in ("One Layer", "Time Key", "Sep Key", "Digit Key", "Empty Key"):
+        assert bad not in specs
 
 
-def test_own_scale_band_does_not_suppress_layout_for_other_series(monkeypatch):
-    # Two plain lines + the ownScale band: the lines still get their left/right
-    # layout scales; the band's own scale is never reassigned.
+# ── band layout contract ────────────────────────────────────────────────────
+
+
+def test_band_does_not_suppress_layout_for_other_series(monkeypatch):
+    # Two plain lines + a band: the lines still get their left/right layout
+    # scales; the band gets NO layout scale (the renderer derives its own).
     from TerraFin.interface.pages.chart.formatters import build_multi_payload_from_items
     from TerraFin.interface.pages.chart.routes import _payload_needs_layout
 
@@ -369,7 +381,7 @@ def test_own_scale_band_does_not_suppress_layout_for_other_series(monkeypatch):
     by_id = {item["id"]: item for item in laid_out["series"]}
     assert by_id["AAPL"]["priceScaleId"] == "left"
     assert by_id["MSFT"]["priceScaleId"] == "right"
-    assert by_id["News Sentiment"]["priceScaleId"] == "news-sentiment"
+    assert "priceScaleId" not in by_id["News Sentiment"]
 
 
 def test_custom_line_indicator_gets_overlay_scale_beside_price(monkeypatch):
@@ -398,7 +410,7 @@ def test_payload_of_only_the_band_needs_no_layout(monkeypatch):
     assert _payload_needs_layout({"mode": "multi", "series": [band]}) is False
 
 
-def test_own_scale_survives_apply_view_resample(monkeypatch):
+def test_band_survives_apply_view_resample(monkeypatch):
     from TerraFin.interface.pages.chart.chart_view import apply_view
 
     _install_fake_mongo(monkeypatch)
@@ -406,9 +418,10 @@ def test_own_scale_survives_apply_view_resample(monkeypatch):
     series = [ci.build_custom_indicator(specs[name]) for name in ("News Sentiment", "Sentiment Entropy")]
     out = apply_view({"mode": "multi", "series": series}, "weekly")
     by_id = {item["id"]: item for item in out["series"]}
-    assert by_id["News Sentiment"]["ownScale"] is True
-    assert "ownScale" not in by_id["Sentiment Entropy"]
     assert {item["seriesType"] for item in out["series"]} == {"band", "line"}
+    assert "ownScale" not in by_id["News Sentiment"]  # layout fields are gone
+    # band layer keys pass through the resample untouched
+    assert set(by_id["News Sentiment"]["data"][0]) == {"time", "pos", "neu", "neg"}
 
 
 # ── HTTP-level: add/remove dispatch + case handling ─────────────────────────
@@ -422,7 +435,7 @@ def test_api_add_remove_custom_indicator_and_case_variants(monkeypatch):
     _install_fake_mongo(monkeypatch)
     client = TestClient(create_app())
 
-    # Add via canonical name -> band item lands in the payload with ownScale.
+    # Add via canonical name -> band item lands in the payload (data only).
     r = client.post("/chart/api/chart-series/add", json={"name": "News Sentiment"})
     assert r.status_code == 200 and r.json()["ok"] is True
 
@@ -436,10 +449,11 @@ def test_api_add_remove_custom_indicator_and_case_variants(monkeypatch):
     names = client.get("/chart/api/chart-series/names").json()["entries"]
     assert {e["name"] for e in names} == {"News Sentiment", "Sentiment Entropy"}
 
-    # Payload: the band keeps its own scale; the lone line takes the main axis.
+    # Payload: the band carries no layout scale (renderer derives it); the
+    # lone line takes the main axis.
     payload = client.get("/chart/api/chart-data").json()
     by_id = {s["id"]: s for s in payload["series"]}
-    assert by_id["News Sentiment"]["priceScaleId"] == "news-sentiment"
+    assert "priceScaleId" not in by_id["News Sentiment"]
     assert by_id["Sentiment Entropy"]["priceScaleId"] == "right"
     # description survives the add→rebuild→payload path (feeds the legend info button).
     assert by_id["News Sentiment"]["description"] == "News sentiment band."
