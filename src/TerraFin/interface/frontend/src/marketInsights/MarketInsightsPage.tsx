@@ -6,6 +6,7 @@ import { BREAKPOINTS } from '../shared/responsive';
 import SpxGexSnapshotCard from '../terminal/widgets/SpxGexSnapshotCard';
 import { useGex } from '../stock/useStockData';
 import MacroFocusPanel from './components/MacroFocusPanel';
+import MarketVoicesSection from './components/MarketVoicesSection';
 
 // Page reflows earlier than the shared tablet breakpoint (1023) because the
 // sidebar + macro chart + top-companies grid become cramped well above that.
@@ -259,6 +260,8 @@ const MarketInsightsPage: React.FC = () => {
             </div>
           </div>
         </div>
+
+        <MarketVoicesSection />
 
         <InsightCard title="Investor Positioning" subtitle="Guru portfolio concentration and top holdings.">
           <div style={{ display: 'grid', gap: 12 }}>

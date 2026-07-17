@@ -34,6 +34,7 @@ CACHE_TTL_REGISTRY: dict[str, int] = {
     # background refresh interval (configuration.py) so the cache is always
     # served warm and a user request never blocks on the upstream call.
     "private.fear_greed": 600,
+    "private.market_voices": 3_600,
     "private.top_companies": 7 * 86_400,
     # Private-source per-series
     "private.series.history": 86_400,

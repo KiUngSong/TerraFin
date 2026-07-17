@@ -36,6 +36,7 @@ SRC_CALENDAR = "private.calendar"
 SRC_MACRO = "private.macro"
 SRC_FEAR_GREED = "private.fear_greed"
 SRC_TOP_COMPANIES = "private.top_companies"
+SRC_MARKET_VOICES = "private.market_voices"
 
 
 PANEL_SOURCES: tuple[str, ...] = (
@@ -46,6 +47,7 @@ PANEL_SOURCES: tuple[str, ...] = (
     SRC_MACRO,
     SRC_FEAR_GREED,
     SRC_TOP_COMPANIES,
+    SRC_MARKET_VOICES,
 )
 
 
@@ -74,6 +76,15 @@ def _load_top_companies_panel() -> list[dict]:
     payload = _client().fetch_panel("top-companies?top_k=50")
     response = TopCompaniesResponse.model_validate(payload)
     return [company.model_dump(exclude_none=True) for company in response.companies]
+
+
+def _load_market_voices_panel() -> dict:
+    """Fetch the raw view docs and shape them (gate/latest/tally) in one pass;
+    the cached payload is the fully renderable {views, summary, history}."""
+    from TerraFin.data.providers.corporate.market_voices import shape_market_voices
+
+    payload = _client().fetch_panel("market-voices")
+    return shape_market_voices(payload.get("views") if isinstance(payload, dict) else [])
 
 
 def _fetch_cape() -> dict:
@@ -217,6 +228,15 @@ _PANEL_SPECS: tuple[CachePayloadSpec, ...] = (
         ttl_seconds=ttl_for(SRC_TOP_COMPANIES),
         fetch_fn=_load_top_companies_panel,
         fallback_fn=get_top_companies_fallback,
+    ),
+    CachePayloadSpec(
+        source=SRC_MARKET_VOICES,
+        namespace="private_market_voices",
+        key="panel",
+        ttl_seconds=ttl_for(SRC_MARKET_VOICES),
+        fetch_fn=_load_market_voices_panel,
+        # Endpoint down/unset -> dormant section (read-if-present), never an error.
+        fallback_fn=lambda: {"views": [], "summary": None, "history": {}},
     ),
 )
 

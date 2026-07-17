@@ -66,6 +66,21 @@ class InvestorPositioningResponse(BaseModel):
 def create_market_insights_data_router() -> APIRouter:
     router = APIRouter()
 
+    from TerraFin.data.providers.corporate.market_voices import (
+        MarketVoicesResponse,
+        get_market_voices,
+        get_market_voices_history,
+    )
+
+    @router.get(f"{MARKET_INSIGHTS_API_PREFIX}/market-voices", response_model=MarketVoicesResponse)
+    def api_get_market_voices():
+        return MarketVoicesResponse.model_validate(get_market_voices())
+
+    @router.get(f"{MARKET_INSIGHTS_API_PREFIX}/market-voices/{{slug}}/history")
+    def api_get_market_voices_history(slug: str):
+        # Read-if-present: no allowlist — an unknown slug is a slug with no views.
+        return {"slug": slug, "views": get_market_voices_history(slug)}
+
     @router.get(f"{MARKET_INSIGHTS_API_PREFIX}/regime", response_model=MarketRegimeResponse)
     def api_get_market_regime():
         # Initial placeholder to stabilize page contract; can be replaced by real regime model.
