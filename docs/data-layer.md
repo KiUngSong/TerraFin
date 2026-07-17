@@ -258,6 +258,28 @@ coverage for private dashboard data. That fallback behavior should be treated
 as an operational convenience for controlled deployments, not as a blanket
 permission to serve cached restricted data publicly.
 
+**The boundary — what lives here, what does not.** For any private source,
+TerraFin owns exactly two things: the **contract** (the shape it renders) and
+the **rendering**. It never owns **acquisition or storage** — no collector, no
+source-specific database, and no roster of producers belongs in this repo. How
+the data is produced and where it is stored is the operator's concern, behind
+the endpoint; TerraFin reads whatever conforms and shapes it for display. Three
+rules follow, and they are what keep the OSS boundary clean:
+
+- **Minimal contracts.** Model only the fields the UI renders. Producer-side
+  concerns — extraction confidence, provenance tiers, per-source freshness
+  windows, collection roster — do not belong in the contract or the read path.
+  A user just has to emit docs matching the contract; how they get them is
+  theirs to decide (this is finance data — sources, budgets, and pipelines
+  differ per operator).
+- **Read-if-present.** Absence is part of the contract: when the endpoint
+  returns nothing (or is unset), the feature renders empty / dormant — never an
+  error, never a fabricated placeholder.
+- **Boundary smell test.** If a new private feature finds itself wanting a Mongo
+  store, a scraper, a model client, or a per-producer registry *inside TerraFin*,
+  it has crossed the boundary. That logic belongs in the operator/private repo
+  (e.g. DataFactory + the collector); TerraFin reads its output over the endpoint.
+
 Configuration via env vars:
 
 | Variable | Description |
@@ -281,6 +303,7 @@ resources:
 - calendar data
 - fear/greed
 - top companies
+- market voices (strategist stance/thesis, read-if-present)
 
 ### Private series vs private widget
 
