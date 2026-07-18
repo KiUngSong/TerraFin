@@ -1,7 +1,7 @@
 ---
 name: terrafin
 description: Use when an agent needs structured market, macro, portfolio, calendar, fundamentals, valuation (DCF / reverse DCF / S&P 500 DCF, including turnaround mode), SEC filings, sentiment/breadth, or watchlist research through TerraFin's optimized processing pipeline, including progressive history metadata and optional chart opening.
-version: "0.0.1"
+version: "0.0.2"
 allowed-tools:
   - Bash
   - Read
