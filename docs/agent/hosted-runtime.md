@@ -21,7 +21,7 @@ It answers a narrower question:
     TerraFin's transcript-first session persistence follows the same core shape
     used by OpenClaw and Claude Code: append-only per-session transcripts with a
     separate session index and explicit rewrite paths. TerraFin's runtime
-    controller, financial capability kernel, task/approval flow, widget, and API
+    controller, financial capability layer, task/approval flow, widget, and API
     integration remain TerraFin-specific. The orchestrator-agent-with-persona-
     subagents pattern also takes inspiration from the role-separation style in
     `ai-hedge-fund`, but TerraFin keeps shared capabilities and prompt-level
@@ -33,7 +33,7 @@ It answers a narrower question:
 
 Today the hosted runtime has:
 
-- a shared financial capability kernel
+- a shared financial capability layer
 - a hosted agent definition registry
 - a policy-enforcing runtime controller
 - a hosted tool adapter

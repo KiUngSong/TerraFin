@@ -25,7 +25,7 @@ symlink-based, so `git pull` upgrades every host at once.
 | Data layer | Unified access to market, economic, corporate, and private-access data |
 | Analytics | Technical indicators, DCF tooling, risk helpers, and standalone analysis modules |
 | Interface | FastAPI app with chart, terminal, stock, market-insights, calendar, and watchlist surfaces |
-| Agent harness | Shared capability kernel, hosted runtime, model-provider registry, and browser widget |
+| Agent harness | Shared capability layer, hosted runtime, model-provider registry, and browser widget |
 | Cache system | In-memory and on-disk warming, fallback behavior, and refresh coordination |
 
 ## Pick your track
@@ -40,7 +40,7 @@ symlink-based, so `git pull` upgrades every host at once.
       first server.
     - [Hosted Runtime](agent/hosted-runtime.md) — runtime architecture,
       model bindings, session state.
-    - [Agent Architecture](agent/architecture.md) — capability kernel,
+    - [Agent Architecture](agent/architecture.md) — capability layer,
       orchestrator-as-tool persona routing.
     - [Model Management](agent/models.md) — provider catalog, credentials,
       `provider/model` refs.

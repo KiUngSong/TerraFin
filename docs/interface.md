@@ -584,7 +584,7 @@ research option via `lppl(..., n_windows=None)` and is not exposed over HTTP.
 
 Runtime route note:
 `/agent/api/runtime/*` is the stateful hosted-agent family. It uses the same
-shared capability kernel as the Python client, CLI, and stateless
+shared capability layer as the Python client, CLI, and stateless
 `/agent/api/*` routes, but persists conversation history through append-only
 local transcripts plus a transcript-derived session index. Tasks, approvals,
 audit, and published view context remain in the hosted runtime store. Hosted

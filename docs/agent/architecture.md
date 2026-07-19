@@ -1,6 +1,6 @@
 ---
 title: Agent Architecture
-summary: Design guide for TerraFin's shared agent kernel and the boundary between hosted and external agent modes.
+summary: Design guide for TerraFin's shared capability layer and the boundary between hosted and external agent modes.
 read_when:
   - Designing the next layer of TerraFin's agent harness
   - Deciding where a new agent feature belongs
@@ -18,9 +18,9 @@ This document is for maintainers.
     Code: append-only per-session transcripts plus a separate session index. The
     hidden guru-role split described below also borrows the high-level idea of
     explicit analyst role separation from `ai-hedge-fund`, while deliberately
-    keeping TerraFin's shared capability kernel instead of per-guru Python
+    keeping TerraFin's shared capability layer instead of per-guru Python
     analysis modules.
-    The shared financial capability kernel, hosted-runtime policy layer,
+    The shared financial capability layer, hosted-runtime policy layer,
     permission flow, widget integration, and view-context design described here
     are TerraFin-specific architecture.
 
@@ -29,11 +29,11 @@ The main rule is simple:
 > Do not create an agent-only shortcut path that bypasses TerraFin's real data,
 > chart, and analysis pipeline.
 
-Hosted agents and external agents should both sit on top of the same shared kernel.
+Hosted agents and external agents should both sit on top of the same shared capability layer.
 
 ## Core idea
 
-TerraFin should converge on one shared **agent kernel** that owns:
+TerraFin should converge on one shared **capability layer** that owns:
 
 - capability registration
 - typed inputs and outputs
@@ -49,11 +49,14 @@ Then two controllers can sit on top:
 - **External agent mode**
   Another system owns the model loop and calls TerraFin through Python, CLI, HTTP, or future MCP-like adapters.
 
-The unification point is not the LLM loop. It is the kernel.
+The unification point is not the LLM loop. It is the capability layer.
+The capability layer plays the role an MCP server plays for MCP clients — it
+exposes one typed capability set identically to the hosted runtime and to
+external agents.
 
-## Shared kernel layers
+## Capability-layer components
 
-### Capability layer
+### Capability registry
 
 Examples:
 
@@ -293,7 +296,7 @@ business")`, a hidden session spins up with:
 Tools available to the persona agent inside the hidden subagent:
 
 - **Research / data tools** — a persona-scoped subset chosen by
-  `_select_guru_worker_tools` in `guru.py`. Same capability kernel
+  `_select_guru_worker_tools` in `guru.py`. Same capability layer
   as the orchestrator, but curated per persona (Buffett skews to
   `valuation`, `financials`, `fundamental_screen`; Marks to
   `economic`, `risk_profile`, `macro_focus`; Druckenmiller to
@@ -374,7 +377,7 @@ TerraFin owns:
 
 Shape:
 
-`User -> hosted runtime -> shared context/session -> capability/task kernel`
+`User -> hosted runtime -> shared context/session -> capability layer`
 
 ### External agent mode
 
@@ -386,13 +389,13 @@ Another system owns:
 
 TerraFin owns:
 
-- the same capability kernel
+- the same capability layer
 - optional session/task semantics
 - transport adapters
 
 Shape:
 
-`External agent -> Python/CLI/HTTP adapter -> shared context/session -> capability/task kernel`
+`External agent -> Python/CLI/HTTP adapter -> shared context/session -> capability layer`
 
 ## Current code map
 
@@ -431,9 +434,9 @@ working, but new code should target the canonical paths below.
 
 - Do not fork financial logic away from the product path.
 - Do not make hosted-only capabilities that external agents cannot also reach.
-- Do not let HTTP, CLI, and Python semantics drift away from the same kernel.
+- Do not let HTTP, CLI, and Python semantics drift away from the same capability layer.
 - Do not treat chart-opening as a toy path if agents can create chart artifacts.
-- Do not overbuild remote or multi-agent orchestration before local kernel semantics are solid.
+- Do not overbuild remote or multi-agent orchestration before local capability-layer semantics are solid.
 - Do not expose hidden guru roles as a product picker unless the product
   direction explicitly changes.
 - Do not let internal guru orchestration depend on regex recovery from prose;

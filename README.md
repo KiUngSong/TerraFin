@@ -177,7 +177,7 @@ TerraFin-specific. See
 <https://kiungsong.github.io/TerraFin/agent/models/> for the explicit
 attribution boundary. The hidden guru-router pattern also takes high-level role
 separation inspiration from `ai-hedge-fund`, while keeping TerraFin's shared
-capability kernel instead of hardcoded per-guru Python analysis modules.
+capability layer instead of hardcoded per-guru Python analysis modules.
 
 ## Development
 

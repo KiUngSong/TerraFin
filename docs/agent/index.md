@@ -15,11 +15,11 @@ TerraFin's agent surface has three separate jobs:
     TerraFin's model-management layer borrows some UX and naming ideas from
     OpenClaw, especially canonical `provider/model` refs, the `models ...`
     command family, and the GitHub Copilot login flow. TerraFin's hosted
-    runtime, financial capability kernel, session/task model, widget, and API
+    runtime, financial capability layer, session/task model, widget, and API
     wiring are TerraFin-specific unless a page says otherwise. The hosted
     runtime's orchestrator-agent-with-persona-subagents architecture also
     borrows the high-level idea of explicit analyst-role separation from
-    `ai-hedge-fund`, while keeping TerraFin's shared capability kernel
+    `ai-hedge-fund`, while keeping TerraFin's shared capability layer
     instead of per-guru Python modules. See the architecture diagrams in
     [architecture.md § Orchestrator + persona subagents](./architecture.md#orchestrator-persona-subagents)
     for the authoritative shape.
@@ -30,7 +30,7 @@ TerraFin's agent surface has three separate jobs:
 |-----|-------------------|
 | [Usage](usage.md) | You want Python, CLI, HTTP, OpenAPI, or widget usage |
 | [Model Management](models.md) | You want to inspect providers, save credentials, or switch hosted models |
-| [Architecture](architecture.md) | You are designing the shared agent kernel or provider routing |
+| [Architecture](architecture.md) | You are designing the shared capability layer or provider routing |
 | [Hosted Runtime](hosted-runtime.md) | You are maintaining the current tool loop, sessions, tasks, and approvals |
 
 ## Quick Mental Model
@@ -41,7 +41,7 @@ TerraFin supports two agent modes:
 - **Hosted runtime mode**: TerraFin owns the conversation loop, tools, and widget
 
 Both modes should stay aligned with the same shared financial capability
-kernel.
+layer.
 
 ## Glossary
 
