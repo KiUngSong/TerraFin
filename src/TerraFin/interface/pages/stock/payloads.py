@@ -515,71 +515,26 @@ def _sankey_metric(
     }
 
 
-def build_income_sankey_payload(ticker: str, *, period: str = "quarter") -> dict[str, Any]:
-    """Build the income-statement Sankey payload for a single ticker.
+_SANKEY_KEYS = ("revenue", "costOfRevenue", "grossProfit", "operatingExpense",
+                "researchAndDevelopment", "sellingGeneralAdmin", "operatingIncome",
+                "pretaxIncome", "taxProvision", "netIncome")
 
-    Returns ``nodes`` and ``links`` ready to feed @nivo/sankey, plus a flat
-    ``metrics`` map keyed by canonical line item so the UI can render the
-    summary KPI row without re-deriving values from the diagram. Each metric
-    carries the absolute value and Y/Y delta (vs the same-quarter-prior-year
-    when ``period == "quarter"``, vs the prior fiscal year for ``"annual"``).
 
-    Raises HTTPException(404) when no statement rows are available — typically
-    a non-equity ticker (ETF, index) or a name yfinance does not cover.
-    """
-    if period not in ("quarter", "annual"):
-        raise HTTPException(status_code=400, detail="period must be 'quarter' or 'annual'")
-    normalized = ticker.upper()
-
-    factory = get_data_factory()
-    frame = factory.get_corporate_data(normalized, "income", period=period)
-    dates, by_date = _income_frame_to_period_map(frame)
-    if not dates:
-        raise HTTPException(status_code=404, detail=f"No income statement data for '{ticker}'.")
-
-    current_date = dates[0]
-    current_row = by_date[current_date]
-    # Pick the prior period by DATE, not by index. Index-based lookup silently
-    # picks the wrong quarter for newly-listed names, after restated periods,
-    # or across 53-week fiscal years. Target = current_date − 1 year; accept
-    # the nearest available column within ±45 days, else leave priors empty
-    # so Y/Y deltas surface as null instead of misleading numbers.
-    try:
-        current_dt = datetime.fromisoformat(current_date)
-    except ValueError:
-        current_dt = None
-    prior_date: str | None = None
-    prior_row: dict[str, float] = {}
-    if current_dt is not None:
-        target_dt = current_dt.replace(year=current_dt.year - 1) if current_dt.month != 2 or current_dt.day != 29 else current_dt.replace(year=current_dt.year - 1, day=28)
-        best: tuple[int, str] | None = None  # (abs_days_off, date_str)
-        for candidate in dates[1:]:
-            try:
-                cand_dt = datetime.fromisoformat(candidate)
-            except ValueError:
-                continue
-            diff = abs((cand_dt - target_dt).days)
-            if diff > 45:
-                continue
-            if best is None or diff < best[0]:
-                best = (diff, candidate)
-        if best is not None:
-            prior_date = best[1]
-            prior_row = by_date[prior_date]
-
-    def _val(key: str, row: dict[str, float]) -> float | None:
-        return _pick_income_value(row, key)
-
-    revenue = _val("revenue", current_row)
-    cost_of_revenue = _val("costOfRevenue", current_row)
-    gross_profit = _val("grossProfit", current_row)
-    op_expense = _val("operatingExpense", current_row)
-    rd = _val("researchAndDevelopment", current_row)
-    sga = _val("sellingGeneralAdmin", current_row)
-    op_income = _val("operatingIncome", current_row)
-    pretax = _val("pretaxIncome", current_row)
-    tax = _val("taxProvision", current_row)
-    net_income = _val("netIncome", current_row)
+def _assemble_income_sankey(cur, prior, *, ticker, period, current_date, prior_date):
+    """Build the {metrics, nodes, links, ...} income Sankey from resolved current +
+    prior scalar maps (keyed by _SANKEY_KEYS). Shared by the yfinance path
+    (build_income_sankey_payload) and the SEC-filing fallback
+    (build_income_sankey_from_filing) so both emit an identical shape."""
+    revenue = cur.get("revenue")
+    cost_of_revenue = cur.get("costOfRevenue")
+    gross_profit = cur.get("grossProfit")
+    op_expense = cur.get("operatingExpense")
+    rd = cur.get("researchAndDevelopment")
+    sga = cur.get("sellingGeneralAdmin")
+    op_income = cur.get("operatingIncome")
+    pretax = cur.get("pretaxIncome")
+    tax = cur.get("taxProvision")
+    net_income = cur.get("netIncome")
 
     # Derived fallbacks — yfinance occasionally omits one or two intermediate
     # lines. Compute from the others rather than presenting a hole in the
@@ -625,22 +580,22 @@ def build_income_sankey_payload(ticker: str, *, period: str = "quarter") -> dict
         }
 
     nodes: list[dict[str, Any]] = [
-        _node("revenue", "Total revenue", revenue, _val("revenue", prior_row), "neutral"),
-        _node("grossProfit", "Gross profit", gross_profit, _val("grossProfit", prior_row), "good"),
-        _node("costOfRevenue", "Cost of sales", cost_of_revenue, _val("costOfRevenue", prior_row), "bad"),
+        _node("revenue", "Total revenue", revenue, prior.get("revenue"), "neutral"),
+        _node("grossProfit", "Gross profit", gross_profit, prior.get("grossProfit"), "good"),
+        _node("costOfRevenue", "Cost of sales", cost_of_revenue, prior.get("costOfRevenue"), "bad"),
     ]
     if op_income is not None:
-        nodes.append(_node("operatingIncome", "Operating income", op_income, _val("operatingIncome", prior_row), "good"))
+        nodes.append(_node("operatingIncome", "Operating income", op_income, prior.get("operatingIncome"), "good"))
     if op_expense is not None:
-        nodes.append(_node("operatingExpense", "Operating expenses", op_expense, _val("operatingExpense", prior_row), "bad"))
+        nodes.append(_node("operatingExpense", "Operating expenses", op_expense, prior.get("operatingExpense"), "bad"))
     if rd is not None:
-        nodes.append(_node("rd", "R&D", rd, _val("researchAndDevelopment", prior_row), "bad"))
+        nodes.append(_node("rd", "R&D", rd, prior.get("researchAndDevelopment"), "bad"))
     if sga is not None:
-        nodes.append(_node("sga", "SG&A", sga, _val("sellingGeneralAdmin", prior_row), "bad"))
+        nodes.append(_node("sga", "SG&A", sga, prior.get("sellingGeneralAdmin"), "bad"))
     if net_income is not None:
-        nodes.append(_node("netIncome", "Net income", net_income, _val("netIncome", prior_row), "good"))
+        nodes.append(_node("netIncome", "Net income", net_income, prior.get("netIncome"), "good"))
     if tax is not None:
-        nodes.append(_node("tax", "Taxes", tax, _val("taxProvision", prior_row), "bad"))
+        nodes.append(_node("tax", "Taxes", tax, prior.get("taxProvision"), "bad"))
     # Only surface "Other" when the net is materially non-zero (>1% of revenue).
     # Otherwise it adds clutter for no signal.
     other_threshold = (revenue or 0) * 0.01
@@ -702,19 +657,19 @@ def build_income_sankey_payload(ticker: str, *, period: str = "quarter") -> dict
     # Flat metrics map for the summary KPI row above the diagram. Carries the
     # same Y/Y deltas as the nodes for code-path consistency.
     metrics = {
-        "revenue": _sankey_metric(revenue, _val("revenue", prior_row)),
-        "grossProfit": _sankey_metric(gross_profit, _val("grossProfit", prior_row)),
-        "costOfRevenue": _sankey_metric(cost_of_revenue, _val("costOfRevenue", prior_row)),
-        "operatingIncome": _sankey_metric(op_income, _val("operatingIncome", prior_row)),
-        "operatingExpense": _sankey_metric(op_expense, _val("operatingExpense", prior_row)),
-        "researchAndDevelopment": _sankey_metric(rd, _val("researchAndDevelopment", prior_row)),
-        "sellingGeneralAdmin": _sankey_metric(sga, _val("sellingGeneralAdmin", prior_row)),
-        "netIncome": _sankey_metric(net_income, _val("netIncome", prior_row)),
-        "taxProvision": _sankey_metric(tax, _val("taxProvision", prior_row)),
+        "revenue": _sankey_metric(revenue, prior.get("revenue")),
+        "grossProfit": _sankey_metric(gross_profit, prior.get("grossProfit")),
+        "costOfRevenue": _sankey_metric(cost_of_revenue, prior.get("costOfRevenue")),
+        "operatingIncome": _sankey_metric(op_income, prior.get("operatingIncome")),
+        "operatingExpense": _sankey_metric(op_expense, prior.get("operatingExpense")),
+        "researchAndDevelopment": _sankey_metric(rd, prior.get("researchAndDevelopment")),
+        "sellingGeneralAdmin": _sankey_metric(sga, prior.get("sellingGeneralAdmin")),
+        "netIncome": _sankey_metric(net_income, prior.get("netIncome")),
+        "taxProvision": _sankey_metric(tax, prior.get("taxProvision")),
     }
 
     return {
-        "ticker": normalized,
+        "ticker": ticker,
         "period": period,
         "asOf": current_date,
         "priorAsOf": prior_date,
@@ -722,3 +677,64 @@ def build_income_sankey_payload(ticker: str, *, period: str = "quarter") -> dict
         "nodes": nodes,
         "links": links,
     }
+
+
+def build_income_sankey_payload(ticker: str, *, period: str = "quarter") -> dict[str, Any]:
+    """Build the income-statement Sankey payload for a single ticker.
+
+    Returns ``nodes`` and ``links`` ready to feed @nivo/sankey, plus a flat
+    ``metrics`` map keyed by canonical line item so the UI can render the
+    summary KPI row without re-deriving values from the diagram. Each metric
+    carries the absolute value and Y/Y delta (vs the same-quarter-prior-year
+    when ``period == "quarter"``, vs the prior fiscal year for ``"annual"``).
+
+    Raises HTTPException(404) when no statement rows are available — typically
+    a non-equity ticker (ETF, index) or a name yfinance does not cover.
+    """
+    if period not in ("quarter", "annual"):
+        raise HTTPException(status_code=400, detail="period must be 'quarter' or 'annual'")
+    normalized = ticker.upper()
+
+    factory = get_data_factory()
+    frame = factory.get_corporate_data(normalized, "income", period=period)
+    dates, by_date = _income_frame_to_period_map(frame)
+    if not dates:
+        raise HTTPException(status_code=404, detail=f"No income statement data for '{ticker}'.")
+
+    current_date = dates[0]
+    current_row = by_date[current_date]
+    # Pick the prior period by DATE, not by index. Index-based lookup silently
+    # picks the wrong quarter for newly-listed names, after restated periods,
+    # or across 53-week fiscal years. Target = current_date − 1 year; accept
+    # the nearest available column within ±45 days, else leave priors empty
+    # so Y/Y deltas surface as null instead of misleading numbers.
+    try:
+        current_dt = datetime.fromisoformat(current_date)
+    except ValueError:
+        current_dt = None
+    prior_date: str | None = None
+    prior_row: dict[str, float] = {}
+    if current_dt is not None:
+        target_dt = current_dt.replace(year=current_dt.year - 1) if current_dt.month != 2 or current_dt.day != 29 else current_dt.replace(year=current_dt.year - 1, day=28)
+        best: tuple[int, str] | None = None  # (abs_days_off, date_str)
+        for candidate in dates[1:]:
+            try:
+                cand_dt = datetime.fromisoformat(candidate)
+            except ValueError:
+                continue
+            diff = abs((cand_dt - target_dt).days)
+            if diff > 45:
+                continue
+            if best is None or diff < best[0]:
+                best = (diff, candidate)
+        if best is not None:
+            prior_date = best[1]
+            prior_row = by_date[prior_date]
+
+    def _val(key: str, row: dict[str, float]) -> float | None:
+        return _pick_income_value(row, key)
+
+    cur = {k: _val(k, current_row) for k in _SANKEY_KEYS}
+    prior = {k: _val(k, prior_row) for k in _SANKEY_KEYS}
+    return _assemble_income_sankey(cur, prior, ticker=normalized, period=period,
+                                   current_date=current_date, prior_date=prior_date)
