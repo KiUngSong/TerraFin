@@ -451,6 +451,20 @@ class TerraFinHostedToolAdapter:
         message = str(error or "").strip()
         lowered = message.lower()
 
+        # Type beats substring. A transient market-data failure carries whatever
+        # text the upstream client happened to emit, which can contain "429" or
+        # "rate limit" and would otherwise be misfiled below as a non-retryable
+        # auth/quota error. It is exactly the retryable case.
+        from TerraFin.data.providers.market.yfinance import TransientMarketDataError
+
+        if isinstance(error, TransientMarketDataError):
+            return _ToolErrorDisposition(
+                code="upstream_transient_error",
+                message=message or "The market-data source is temporarily unavailable.",
+                retryable=True,
+                expose_to_user=True,
+            )
+
         fatal_markers = (
             "rate limit",
             "quota",

@@ -20,7 +20,12 @@ from .providers.corporate.investor_positioning import PortfolioOutput, get_portf
 from .providers.economic import get_economic_indicator, get_fred_data
 from .providers.economic.macro_calendar import get_macro_events_all
 from .providers.market import INDEX_MAP, MARKET_INDICATOR_REGISTRY, get_market_data
-from .providers.market.yfinance import get_yf_data, get_yf_full_history_backfill, get_yf_recent_history
+from .providers.market.yfinance import (
+    TransientMarketDataError,
+    get_yf_data,
+    get_yf_full_history_backfill,
+    get_yf_recent_history,
+)
 from .providers.private_access import PRIVATE_SERIES, get_private_series_current
 from .providers.private_access.panels import (
     PANEL_SOURCES,
@@ -241,7 +246,11 @@ class DataFactory:
                 chunk = get_yf_recent_history(ticker, period=period, force_refresh=force_refresh)
                 chunk.frame.name = name.split(":", 1)[-1]
                 return chunk
-            except ValueError:
+            except (ValueError, TransientMarketDataError):
+                # ValueError => the symbol itself is bad. TransientMarketDataError
+                # => upstream is throttling or unreachable, so falling back to a
+                # stale slice would present degraded data as if it were current.
+                # Both must propagate; only genuinely unexpected errors fall back.
                 raise
             except Exception:
                 if force_refresh:
@@ -267,7 +276,9 @@ class DataFactory:
                 chunk = get_yf_full_history_backfill(ticker, loaded_start=loaded_start)
                 chunk.frame.name = name.split(":", 1)[-1]
                 return chunk
-            except ValueError:
+            except (ValueError, TransientMarketDataError):
+                # See get_recent_history: a throttled fetch must not be masked with
+                # stale history. This path has no force_refresh escape hatch at all.
                 raise
             except Exception:
                 logger.exception("Falling back to full history slice for %s", name)

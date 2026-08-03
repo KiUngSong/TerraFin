@@ -1,7 +1,7 @@
 from TerraFin.data.contracts.dataframes import TimeSeriesDataFrame
 
 from .market_indicator import MARKET_INDICATOR_REGISTRY
-from .yfinance import get_yf_data
+from .yfinance import TransientMarketDataError, get_yf_data
 
 
 INDEX_MAP = {
@@ -45,6 +45,7 @@ def get_market_data(ticker_or_index_name_or_indicator_name: str) -> TimeSeriesDa
 __all__ = [
     "get_market_data",
     "get_index_ticker_if_exists",
+    "TransientMarketDataError",
     "INDEX_MAP",
     "INDEX_DESCRIPTIONS",
     "MARKET_INDICATOR_REGISTRY",

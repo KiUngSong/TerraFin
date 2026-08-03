@@ -25,6 +25,45 @@ _RECENT_TOLERANCE_DAYS = 14
 # per-ticker fetch lock does not serialize across tickers, so this must.
 _YF_DOWNLOAD_LOCK = threading.Lock()
 
+# Yahoo throttles bulk fetches by returning an empty chart payload rather than an
+# HTTP error, which is indistinguishable from a delisted symbol. The old code spent
+# a SECOND request on `valid_ticker()` for every empty result purely to phrase the
+# error — so a throttled 700-name sweep issued ~1400 requests at a rate limiter
+# that was already refusing (2026-08-02: 663 failures, 52 priced).
+#
+# Retrying the empty download is NOT the fix: sub-10s backoff is orders of
+# magnitude below Yahoo's throttle window, so it only multiplies the request count.
+# Instead, break the circuit — once consecutive empties make throttling obvious,
+# stop probing and report the fetch as transient. That halves request volume during
+# an outage while keeping the precise "Invalid ticker" verdict for isolated misses.
+_EMPTY_STREAK_PROBE_LIMIT = 5
+_empty_streak = 0
+_EMPTY_STREAK_LOCK = threading.Lock()
+
+
+class TransientMarketDataError(RuntimeError):
+    """Fetch failed for a reason that says nothing about the ticker's validity.
+
+    Distinct from ``ValueError("Invalid ticker: …")``, which asserts the symbol
+    itself is bad. Callers doing bulk sweeps should count these as coverage loss
+    and retry later rather than dropping the symbol.
+    """
+
+
+def _note_download_result(*, empty: bool) -> int:
+    """Track consecutive empty downloads; returns the current streak."""
+    global _empty_streak
+    with _EMPTY_STREAK_LOCK:
+        _empty_streak = _empty_streak + 1 if empty else 0
+        return _empty_streak
+
+
+def reset_empty_streak() -> None:
+    """Clear the throttle circuit breaker (call between independent sweeps)."""
+    global _empty_streak
+    with _EMPTY_STREAK_LOCK:
+        _empty_streak = 0
+
 
 def _normalize_index(index: pd.Index) -> pd.DatetimeIndex:
     normalized = pd.to_datetime(index, errors="coerce", utc=True)
@@ -146,7 +185,17 @@ def _download_frame(ticker: str, *, period: str) -> pd.DataFrame:
     with _YF_DOWNLOAD_LOCK:
         frame = yf.download(ticker, period=period, auto_adjust=True, multi_level_index=False)
     normalized = _normalize_market_frame(frame)
-    if normalized.empty and not valid_ticker(ticker):
+    streak = _note_download_result(empty=normalized.empty)
+    if not normalized.empty:
+        return normalized
+    if streak >= _EMPTY_STREAK_PROBE_LIMIT:
+        # Everything is coming back empty — this is the source throttling us, not a
+        # run of delisted symbols. Don't spend another request confirming it.
+        raise TransientMarketDataError(
+            f"{ticker}: empty payload, and the last {streak} downloads were also "
+            f"empty — treating as upstream throttling rather than an invalid symbol"
+        )
+    if not valid_ticker(ticker):
         raise ValueError(f"Invalid ticker: {ticker}")
     return normalized
 
@@ -497,7 +546,14 @@ def valid_ticker(ticker: str) -> bool:
     ticker_name = ticker.upper()
     # Ticker.history() writes yfinance's shared globals on its error path, so it
     # must hold the same lock as yf.download to avoid racing a concurrent fetch.
-    with _YF_DOWNLOAD_LOCK:
-        ticker_data = yf.Ticker(ticker_name)
-        hist = ticker_data.history(period="1d")
+    try:
+        with _YF_DOWNLOAD_LOCK:
+            ticker_data = yf.Ticker(ticker_name)
+            hist = ticker_data.history(period="1d")
+    except Exception as exc:
+        # A failed probe proves nothing about the symbol. yfinance raises from its
+        # own internals here on a malformed upstream response (TypeError on
+        # data['chart'] when Yahoo returns no payload), so never let that surface
+        # as "Invalid ticker".
+        raise TransientMarketDataError(f"validity probe failed for {ticker_name}: {exc}") from exc
     return not hist.empty
