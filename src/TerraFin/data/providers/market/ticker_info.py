@@ -327,9 +327,15 @@ def _fetch_earnings(ticker: str) -> list[dict]:
         reported = _safe_float(row.get("Reported EPS"))
         surprise = _safe_float(row.get("Surprise(%)"))
 
+        # The index is an ET-localized timestamp WITH the hour, and that hour is
+        # the before-open / after-close discriminator (CAT 06:00 = BMO, NVDA 16:00
+        # = AMC). Truncating to the date alone threw it away, leaving consumers to
+        # guess — carry it so they don't have to.
+        et_hour = getattr(idx, "hour", None)
         records.append(
             {
                 "date": date_str,
+                "etHour": et_hour if isinstance(et_hour, int) else None,
                 "epsEstimate": _fmt(estimate),
                 "epsReported": _fmt(reported),
                 "surprise": _fmt(reported - estimate) if estimate is not None and reported is not None else "-",

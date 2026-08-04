@@ -121,6 +121,9 @@ class CompanyInfoResponse(BaseModel):
 
 class EarningsRecord(BaseModel):
     date: str
+    # Release hour in ET — the before-open (~6-9) vs after-close (16+) signal.
+    # Optional: older cached payloads predate it.
+    etHour: int | None = None
     epsEstimate: str
     epsReported: str
     surprise: str
@@ -300,6 +303,11 @@ class FcfHistoryResponse(_PermissiveResponse):
 
 class SimilaritySearchResponse(_PermissiveResponse):
     ticker: str | None = None
+
+
+class DeepResearchReportResponse(_PermissiveResponse):
+    question: str | None = None
+    title: str | None = None
 
 
 class HostedToolDefinitionResponse(BaseModel):
