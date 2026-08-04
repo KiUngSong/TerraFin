@@ -360,6 +360,12 @@ The internal `_register_default_sources(manager)` now does two things:
 | `GET` | `/terminal/api/cache-status` | Return status of all registered sources |
 | `POST` | `/terminal/api/cache-refresh?force=true` | Trigger refresh of due sources (or all if `force=true`) |
 
+Use the endpoint, not `file_cache_clear`, to invalidate a running server: the serving
+process holds its own in-memory source state, so clearing the file from another
+process leaves it serving the stale payload. This is the usual reason an upstream
+data fix "does nothing" — e.g. `private.calendar` holds for 7 days, so a DataFactory
+re-scrape stays invisible until a forced refresh inside the server.
+
 ## Extending the cache system
 
 To register a new cache source:

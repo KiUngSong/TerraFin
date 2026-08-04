@@ -123,6 +123,22 @@ Used for calendar / earnings / FOMC-style streams.
   `start`.
 - `importance`, `description`, `metadata` are optional.
 
+For `category: "earning"`, `description` is a JSON **string** carrying the EPS
+payload:
+
+```json
+{"estimate": "6.20", "reported": "-", "surprise": "-", "et_hour": 8,
+ "history": [{"date": "2026-04-30", "estimate": "...", "reported": "...", "surprise": "..."}]}
+```
+
+- `et_hour` is the release hour in the listing's exchange timezone and is the
+  before-open vs after-close signal. For future events the producer sends a bucket
+  sentinel — **8** = unconfirmed pre-open, **16** = unconfirmed after-close; past
+  rows carry the real hour. `null` when unknown, in which case a consumer should
+  assume after-close.
+- Consumers converting to another timezone must use the hour, not the date alone: a
+  pre-open print is the same KST day, an after-close one the next.
+
 ## FilingDocument, FinancialStatementFrame, PortfolioOutput
 
 These contracts are served by TerraFin's own providers (SEC EDGAR, yfinance
