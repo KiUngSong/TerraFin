@@ -92,6 +92,14 @@ packages = {find = {where = ["src"], namespaces = false}}
 [tool.setuptools.package-data]
 "*" = ["*.json"]
 
+[tool.pytest.ini_options]
+# Put `tests/` on sys.path so shared test doubles live in an ordinary module
+# (`tests/fakes.py`) that every test package can import. Relying on pytest's
+# implicit rootdir insertion instead would break under
+# `--import-mode=importlib`, if `tests/__init__.py` were added, or as soon as a
+# nested `conftest.py` shadowed the name.
+pythonpath = ["tests"]
+
 [tool.ruff]
 line-length = 119
 

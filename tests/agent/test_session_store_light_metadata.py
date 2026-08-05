@@ -1,5 +1,11 @@
 from datetime import UTC, datetime
 
+# Reuse the shared stub service + chart opener from tests/conftest.py:
+# build_default_capability_registry needs every service method, but
+# list_light_metadata itself never invokes any capability.
+from fakes import BaseFakeService as _FakeService
+from fakes import fake_chart_opener as _fake_chart_opener
+
 from TerraFin.agent.contracts.conversation_state import RUNTIME_MODEL_METADATA_KEY
 from TerraFin.agent.runtime import build_default_capability_registry
 from TerraFin.agent.runtime.context import create_agent_context
@@ -10,11 +16,6 @@ from TerraFin.agent.session_store import (
     SQLiteHostedSessionStore,
     TerraFinHostedSessionRecord,
 )
-
-# Reuse the full-featured fake service + chart opener the hosted-runtime tests
-# already maintain: build_default_capability_registry needs every service
-# method, but list_light_metadata itself never invokes any capability.
-from tests.agent.test_hosted_runtime import _FakeService, _fake_chart_opener
 
 
 def _ts(hour: int) -> datetime:
