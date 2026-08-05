@@ -371,10 +371,16 @@ Data + chart:
 Valuation + fundamentals:
 
 - `GET /agent/api/beta-estimate` — 5-year monthly beta with adjusted beta, R², benchmark.
+- `GET /agent/api/fcf-history` — FCF history + 3yr-avg / latest-annual / TTM candidates.
 - `GET /agent/api/fundamental-screen` — Fundamental quality and moat screen for a ticker.
 - `GET /agent/api/risk-profile` — Statistical risk profile (tail risk, convexity, vol regime, drawdown).
 - `GET /agent/api/sp500-dcf` — Full S&P 500 DCF valuation (scenarios, sensitivity, methods).
 - `GET /agent/api/valuation` — DCF (incl. turnaround mode), reverse DCF, relative valuation, Graham number.
+
+Pattern / similarity:
+
+- `GET /agent/api/patterns` — Named market patterns matching the latest bar for one asset.
+- `GET /agent/api/similarity-search` — Chart-pattern similarity search across a stock universe.
 
 SEC filings:
 
@@ -390,12 +396,6 @@ Sentiment / breadth / market state:
 - `GET /agent/api/top-companies` — Top companies by market cap (private API or yfinance fallback).
 - `GET /agent/api/trailing-forward-pe` — S&P 500 trailing vs forward P/E spread (history + summary).
 - `GET /agent/api/watchlist` — The user's current watchlist (read-only).
-
-Other:
-
-- `GET /agent/api/fcf-history` — FCF history + 3yr-avg / latest-annual / TTM candidates.
-- `GET /agent/api/patterns` — Named market patterns matching the latest bar for one asset.
-- `GET /agent/api/similarity-search` — Chart-pattern similarity search across a stock universe.
 
 <!-- generated:route-summary:end -->
 

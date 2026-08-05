@@ -144,6 +144,14 @@ USAGE_CATEGORIES: list[tuple[str, set[str]]] = [
             "fundamental_screen",
             "risk_profile",
             "beta_estimate",
+            "fcf_history",
+        },
+    ),
+    (
+        "Pattern / similarity",
+        {
+            "patterns",
+            "similarity_search",
         },
     ),
     (
@@ -180,6 +188,15 @@ def render_usage_route_summary(caps: list[dict[str, Any]]) -> str:
     if other:
         other.sort(key=lambda c: c["name"])
         sections.append(("Other", other))
+        # Landing in "Other" is almost always an oversight rather than a choice:
+        # add the capability to USAGE_CATEGORIES above so it is grouped in
+        # docs/agent/usage.md. Warn loudly instead of silently mis-filing it.
+        print(
+            "WARNING: uncategorised capabilities fell into the 'Other' usage bucket: "
+            + ", ".join(c["name"] for c in other)
+            + "\n         Add them to USAGE_CATEGORIES in scripts/generate-agent-artefacts.py.",
+            file=sys.stderr,
+        )
 
     lines: list[str] = []
     for label, bucket in sections:
