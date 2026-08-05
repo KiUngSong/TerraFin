@@ -389,6 +389,87 @@ Use:
 
 - `top_companies()` — market-cap-ranked equity list driving Market Insights.
 
+### Pattern sweep (idea sourcing)
+
+Find which symbols are triggering technical patterns right now, instead of checking one ticker at a time.
+`patterns` verifies a name you already have; `pattern_scan` is how you find candidates in the first place.
+
+Use:
+
+- `pattern_scan(group=None, tickers=None, severity_min="low")`
+
+Parameters:
+
+- `group` — one watchlist tag. Omit both arguments to sweep the entire watchlist.
+- `tickers` — comma-separated string or list, to sweep symbols that are not on the watchlist.
+- `severity_min` — `"low"` (default), `"medium"`, `"high"`. Raise it when sweeping a large set.
+
+Patterns evaluated per symbol:
+
+- close-vs-MA cross grid — `MA20/60/120/200_{GOLDEN,DEATH}_CROSS` (daily) and `MA20/60/120W_{GOLDEN,DEATH}_CROSS` (weekly)
+- `52W_NEW_HIGH`, `52W_NEW_LOW`, `MINERVINI_TEMPLATE`, `RSI_BULL_DIVERGENCE`, `RSI_BEAR_DIVERGENCE`, `WEEKLY_VOLUME_DRYUP`
+
+Severity, as the catalogue actually emits it:
+
+- no pattern emits `low`, so `severity_min="low"` and `"medium"` return the same set
+- `"high"` narrows to exactly `52W_NEW_HIGH`, `52W_NEW_LOW`, `MINERVINI_TEMPLATE`
+
+A cross fires only on the bar where the close flips sides, so expect roughly 1–2 signals per symbol — not a flood.
+
+Coverage fields — check these before concluding "nothing is triggering":
+
+- `requested` — symbols asked for
+- `scanned` — symbols actually fetched and evaluated
+- `failed` — the difference (a rate-limited sweep can silently scan far fewer)
+- `matched` — hits before truncation; `returned` / `truncated` describe the clipped `signals[]` (`limit`, default 200)
+
+Cost: one price-history fetch per symbol. Cache reads run 8-way concurrently, but cold downloads are serialised by a process-wide lock, so a cold sweep of hundreds of symbols takes minutes and slows other price requests in the same process. Use `start_pattern_scan_task` for large sets; keep interactive calls to a few dozen symbols.
+
+```bash
+curl "http://127.0.0.1:8001/agent/api/pattern-scan?severity_min=high"
+curl "http://127.0.0.1:8001/agent/api/pattern-scan?tickers=NVDA,AMD,AVGO,MU"
+```
+
+There is no `TerraFinAgentClient.pattern_scan` method — like most capabilities added after the original set, this one is reachable through the HTTP route, the hosted agent tool, or `TerraFinAgentService` directly.
+
+### Relative strength (leadership ranking)
+
+Rank a universe by price momentum, or find where one ticker sits in that ranking.
+Answers "is this name actually strong relative to the market?" with a percentile instead of a chart impression.
+
+Use:
+
+- `relative_strength(ticker=None, universe="sp500", top_n=20)`
+
+Parameters:
+
+- `ticker` — omit for the top-`top_n` leaderboard; pass it for just that name's rating and rank. A ticker outside the universe is ranked alongside it, not rejected.
+- `universe` — `"sp500"` (default), `"nasdaq100"`, `"kospi200"`, `"sp500+kospi200"`, `"sp500+nasdaq100+kospi200"`, or `"watchlist"`.
+- `top_n` — leaderboard length (1–100, default 20).
+
+Response fields per result:
+
+- `rsRating` — IBD-style 1–99 percentile of a weighted 3/6/9/12-month price blend, most recent quarter double-weighted. Minervini's trend template wants `>= 70`.
+- `momentum12m1` — plain 12-1 momentum (trailing 12-month return skipping the last month).
+- `rank` — 1 = strongest in the ranked set.
+
+Coverage fields: `universeSize` (members requested) vs `ranked` (members with enough history). Names with fewer than ~253 trading days are omitted and reported in `warnings`.
+
+**Ratings are only comparable within one `universe`** — the percentile is computed across that set, so an sp500 rating and a kospi200 rating do not mean the same thing.
+
+`momentum12m1` is a **fraction**, not a percent: `0.34` means +34%.
+
+```bash
+curl "http://127.0.0.1:8001/agent/api/relative-strength?universe=nasdaq100&top_n=10"
+curl "http://127.0.0.1:8001/agent/api/relative-strength?ticker=NVDA&universe=sp500"
+```
+
+There is no `TerraFinAgentClient.relative_strength` method — use the HTTP route, the hosted agent tool, or `TerraFinAgentService` directly.
+
+Cost: one price-history fetch per universe member (sp500 501, nasdaq100 101, kospi200 199). Cache reads run 8-way concurrently, but cold downloads are serialised by a process-wide lock, so a cold sp500 run takes minutes and slows other price requests. Use `start_relative_strength_task` and poll. Results are memoised for 5 minutes.
+
+`"watchlist"` is the smallest universe, but with no watchlist store configured it falls back to a bundled sample list — treat a tiny `universeSize` as a sign the percentile is not meaningful.
+
 ### Chart similarity search
 
 Find historical periods where another stock's chart had the same shape as the target ticker's recent chart.
@@ -453,6 +534,8 @@ Stateless data + analysis (each has a matching `/agent/api/*` HTTP route):
 - `market_data` — Chart-ready OHLC time series for one asset. `GET /agent/api/market-data`
 - `indicators` — Chart-matching technical indicators for one asset. `GET /agent/api/indicators`
 - `patterns` — Named market patterns matching the latest bar for one asset. `GET /agent/api/patterns`
+- `pattern_scan` — Sweep a watchlist group or ticker list for pattern triggers. `GET /agent/api/pattern-scan`
+- `relative_strength` — IBD-style relative-strength rating and rank across a universe. `GET /agent/api/relative-strength`
 - `market_snapshot` — Compact market snapshot for one asset. `GET /agent/api/market-snapshot`
 - `lppl_analysis` — LPPL bubble analysis (super-exponential growth + log-periodic oscillation detection). `GET /agent/api/lppl`
 - `company_info` — Company profile and valuation fields for a ticker. `GET /agent/api/company`

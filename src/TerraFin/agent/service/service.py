@@ -191,6 +191,181 @@ class TerraFinAgentService:
             "processing": payload["processing"],
         }
 
+    def pattern_scan(
+        self,
+        *,
+        group: str | None = None,
+        tickers: str | list[str] | None = None,
+        severity_min: str = "low",
+        limit: int = 200,
+    ) -> dict[str, Any]:
+        """Sweep a symbol set for pattern triggers instead of checking one ticker."""
+        from TerraFin.analytics.reports.scanner import scan_detailed
+
+        order = {"low": 0, "medium": 1, "high": 2}
+        if severity_min not in order:
+            raise ValueError(f"severity_min must be one of {sorted(order)}, got {severity_min!r}")
+
+        # Resolve the symbol set here rather than letting the scanner read the
+        # watchlist, so `scanned` reports true coverage instead of only the
+        # symbols that happened to trigger.
+        if tickers is None:
+            snapshot = get_watchlist_service().get_watchlist_snapshot(group=group) or []
+            symbols = [str(item["symbol"]).upper() for item in snapshot]
+        elif isinstance(tickers, str):
+            symbols = [item.strip().upper() for item in tickers.split(",") if item.strip()]
+        else:
+            symbols = [str(item).strip().upper() for item in tickers if str(item).strip()]
+
+        # 3y matches the window the single-ticker `patterns` capability uses, so
+        # the two agree; the scanner's own 1y default cannot reach the patterns
+        # that need more history.
+        signals, failed = scan_detailed(tickers=symbols, period="3y") if symbols else ([], [])
+        threshold = order[severity_min]
+        matched = [s for s in signals if order.get(s.severity, 0) >= threshold]
+
+        total_matched = len(matched)
+        truncated = total_matched > limit
+        shown = matched[:limit] if truncated else matched
+
+        warnings: list[str] = []
+        if failed:
+            preview = ", ".join(failed[:5])
+            more = "" if len(failed) <= 5 else f" (+{len(failed) - 5} more)"
+            warnings.append(f"{len(failed)} symbol(s) could not be scanned: {preview}{more}")
+        if truncated:
+            warnings.append(f"signal list truncated to limit={limit}; raise severity_min to narrow instead")
+
+        return {
+            "group": group,
+            "severityMin": severity_min,
+            "requested": len(symbols),
+            "scanned": len(symbols) - len(failed),
+            "failed": len(failed),
+            "truncated": truncated,
+            "warnings": warnings,
+            "matched": total_matched,
+            "returned": len(shown),
+            "signals": [
+                {
+                    "name": s.name,
+                    "ticker": s.ticker,
+                    "severity": s.severity,
+                    "message": s.message,
+                    "snapshot": s.snapshot,
+                }
+                for s in shown
+            ],
+            "processing": _full_processing(
+                requested_depth="full",
+                source_version="pattern-scan",
+                view=None,
+                frame=None,
+            ),
+        }
+
+    def relative_strength(
+        self,
+        ticker: str | None = None,
+        *,
+        universe: str = "sp500",
+        top_n: int = 20,
+    ) -> dict[str, Any]:
+        """Rank a universe by relative strength, or locate one ticker within it."""
+        from TerraFin.analytics.factors.relative_strength import ibd_rs_raw, relative_strength_score, rs_rating
+        from TerraFin.analytics.factors.universe_prices import fetch_closes_detailed, universe_symbols
+
+        members = universe_symbols(universe)
+        normalized = ticker.strip().upper() if ticker and ticker.strip() else None
+        outsider = normalized if normalized and normalized not in members else None
+        symbols = [*members, outsider] if outsider else list(members)
+
+        closes, stale = fetch_closes_detailed(symbols)
+        # Rank members only, so a symbol's rating does not depend on whether
+        # some non-member happened to be requested in the same call. An
+        # outsider is then placed against that fixed distribution below.
+        ratings = rs_rating({s: c for s, c in closes.items() if s in set(members)})
+        if not ratings:
+            return {
+                "universe": universe,
+                "universeSize": len(members),
+                "ranked": 0,
+                "ticker": normalized,
+                "results": [],
+                "warnings": ["no symbol in the universe had enough history to rank"],
+                "processing": _full_processing(
+                    requested_depth="full",
+                    source_version="relative-strength",
+                    view=None,
+                    frame=None,
+                ),
+            }
+
+        ordered = sorted(ratings, key=lambda symbol: ratings[symbol], reverse=True)
+        rank_by_symbol = {symbol: index + 1 for index, symbol in enumerate(ordered)}
+        warnings: list[str] = []
+        if stale:
+            preview = ", ".join(stale[:5])
+            more = "" if len(stale) <= 5 else f" (+{len(stale) - 5} more)"
+            warnings.append(
+                f"{len(stale)} symbol(s) ranked from a stale price artifact: {preview}{more}"
+            )
+
+        def _row(symbol: str) -> dict[str, Any]:
+            return {
+                "symbol": symbol,
+                "rsRating": round(ratings[symbol], 1),
+                "rank": rank_by_symbol[symbol],
+                "momentum12m1": relative_strength_score(closes[symbol]),
+            }
+
+        def _outsider_row(symbol: str) -> dict[str, Any] | None:
+            """Place a non-member against the members' fixed raw distribution."""
+            raw = ibd_rs_raw(closes.get(symbol, []))
+            if raw is None:
+                return None
+            member_raws = [r for s in ordered if (r := ibd_rs_raw(closes[s])) is not None]
+            if not member_raws:
+                return None
+            below = sum(1 for r in member_raws if r < raw)
+            above = sum(1 for r in member_raws if r > raw)
+            percentile = 1.0 + 98.0 * (below / max(len(member_raws) - 1, 1))
+            return {
+                "symbol": symbol,
+                "rsRating": round(min(percentile, 99.0), 1),
+                "rank": above + 1,
+                "momentum12m1": relative_strength_score(closes[symbol]),
+                "note": f"not a {universe} member; percentile measured against it",
+            }
+
+        if normalized is None:
+            results = [_row(symbol) for symbol in ordered[:top_n]]
+        elif outsider:
+            row = _outsider_row(outsider)
+            results = [row] if row else []
+            if row is None:
+                warnings.append(f"{normalized} has too little history to rank (needs >252 trading days)")
+        elif normalized in ratings:
+            results = [_row(normalized)]
+        else:
+            results = []
+            warnings.append(f"{normalized} has too little history to rank (needs >252 trading days)")
+
+        return {
+            "universe": universe,
+            "universeSize": len(members),
+            "ranked": len(ratings),
+            "ticker": normalized,
+            "results": results,
+            "warnings": warnings,
+            "processing": _full_processing(
+                requested_depth="full",
+                source_version="relative-strength",
+                view=None,
+                frame=None,
+            ),
+        }
+
     def market_snapshot(
         self,
         name: str,

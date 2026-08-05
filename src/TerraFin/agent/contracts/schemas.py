@@ -289,6 +289,18 @@ class SecFilingSectionResponse(_PermissiveResponse):
     sectionSlug: str | None = None
 
 
+class PatternScanResponse(_PermissiveResponse):
+    scanned: int | None = None
+    matched: int | None = None
+
+
+class RelativeStrengthResponse(_PermissiveResponse):
+    universe: str | None = None
+    universeSize: int | None = None
+    ranked: int | None = None
+    ticker: str | None = None
+
+
 class MarketBreadthResponse(_PermissiveResponse):
     pass
 

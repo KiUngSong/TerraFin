@@ -31,7 +31,7 @@ def test_scan_returns_signals_for_items(monkeypatch):
             return [{"symbol": "AAPL", "name": "Apple", "move": "+1%", "tags": []}]
 
     monkeypatch.setattr(sm, "get_watchlist_service", lambda: _FakeSvc())
-    monkeypatch.setattr(sm, "_fetch_ohlc", lambda ticker: _make_ohlc([100.0 + i * 2 for i in range(50)]))
+    monkeypatch.setattr(sm, "_fetch_ohlc", lambda ticker, period="1y": _make_ohlc([100.0 + i * 2 for i in range(50)]))
 
     signals = sm.scan()
     assert isinstance(signals, list)
@@ -63,7 +63,7 @@ def test_scan_skips_erroring_tickers(monkeypatch):
                 {"symbol": "OK", "name": "OK", "move": "+1%", "tags": []},
             ]
 
-    def _fake_fetch(ticker):
+    def _fake_fetch(ticker, period="1y"):
         if ticker == "ERR":
             raise RuntimeError("network error")
         # An MA golden cross so the good ticker reliably produces a signal.

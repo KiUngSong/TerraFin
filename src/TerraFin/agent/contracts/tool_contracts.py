@@ -5,11 +5,14 @@ from typing import Any
 HOSTED_TOOL_CONTRACT_VERSION = "v1"
 
 
-def _string_array_or_scalar() -> dict[str, Any]:
+def _string_array_or_scalar(*, max_items: int | None = None) -> dict[str, Any]:
+    array_schema: dict[str, Any] = {"type": "array", "items": {"type": "string"}}
+    if max_items is not None:
+        array_schema["maxItems"] = max_items
     return {
         "anyOf": [
             {"type": "string"},
-            {"type": "array", "items": {"type": "string"}},
+            array_schema,
         ]
     }
 
@@ -67,6 +70,44 @@ HOSTED_TOOL_CONTRACTS: dict[str, dict[str, Any]] = {
             required=["name", "indicators"],
         ),
         "response_model": "IndicatorsResponse",
+    },
+    "pattern_scan": {
+        "input_schema": _object_schema(
+            properties={
+                "group": {"type": "string", "minLength": 1},
+                "tickers": _string_array_or_scalar(max_items=500),
+                "severity_min": {
+                    "type": "string",
+                    "enum": ["low", "medium", "high"],
+                    "default": "low",
+                },
+                "limit": {"type": "integer", "minimum": 1, "maximum": 1000, "default": 200},
+            },
+            required=[],
+        ),
+        "response_model": "PatternScanResponse",
+    },
+    "relative_strength": {
+        "input_schema": _object_schema(
+            properties={
+                "ticker": {"type": "string", "minLength": 1},
+                "universe": {
+                    "type": "string",
+                    "enum": [
+                        "sp500",
+                        "nasdaq100",
+                        "kospi200",
+                        "sp500+kospi200",
+                        "sp500+nasdaq100+kospi200",
+                        "watchlist",
+                    ],
+                    "default": "sp500",
+                },
+                "top_n": {"type": "integer", "minimum": 1, "maximum": 100, "default": 20},
+            },
+            required=[],
+        ),
+        "response_model": "RelativeStrengthResponse",
     },
     "patterns": {
         "input_schema": _object_schema(

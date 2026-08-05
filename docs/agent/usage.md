@@ -56,6 +56,8 @@ with rate-limit, retry, cache, and progressive-history handling.
 | Read the user's watchlist                                  | `watchlist()`                                                       |
 | Get chart-matching technical indicators                    | `indicators(name, indicators, depth, view)`                         |
 | Get named pattern signals matching the latest bar          | `patterns(name, depth, view)`                                       |
+| Sweep many symbols for pattern triggers (idea sourcing)    | `pattern_scan(group, tickers, severity_min)`                        |
+| Rank a universe by relative strength / momentum             | `relative_strength(ticker, universe, top_n)`                        |
 | Read which panel/form the user is currently looking at     | `current_view_context()` (hosted runtime only)                      |
 | Open a chart artifact bound to the session                 | `open_chart(name)` (hosted runtime only)                            |
 | List / authenticate / switch hosted models                 | `terrafin-agent models ...` (see [models.md](./models.md))          |
@@ -377,9 +379,11 @@ Valuation + fundamentals:
 - `GET /agent/api/sp500-dcf` — Full S&P 500 DCF valuation (scenarios, sensitivity, methods).
 - `GET /agent/api/valuation` — DCF (incl. turnaround mode), reverse DCF, relative valuation, Graham number.
 
-Pattern / similarity:
+Pattern / similarity / factor:
 
+- `GET /agent/api/pattern-scan` — Sweep a watchlist group or ticker list for pattern triggers.
 - `GET /agent/api/patterns` — Named market patterns matching the latest bar for one asset.
+- `GET /agent/api/relative-strength` — IBD-style relative-strength rating and rank across a universe.
 - `GET /agent/api/similarity-search` — Chart-pattern similarity search across a stock universe.
 
 SEC filings:

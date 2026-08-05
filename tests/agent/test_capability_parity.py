@@ -45,6 +45,12 @@ CAPABILITIES_WITHOUT_ROUTE = frozenset({"open_chart"})
 # capability name.
 CAPABILITIES_WITH_INJECTED_HANDLER = frozenset({"open_chart"})
 
+# `patterns` declares `cli_subcommand_name="patterns"` but no such subparser is
+# wired in `agent/cli/main.py`, so `terrafin-agent patterns` does not exist.
+# Grandfathered to keep the invariant enforceable for everything else — fix by
+# either wiring the subcommand or dropping the declaration, then delete this.
+CAPABILITIES_WITH_UNWIRED_CLI = frozenset({"patterns"})
+
 _SRC_ROOT = pathlib.Path(__file__).resolve().parents[2] / "src" / "TerraFin"
 
 
@@ -166,6 +172,29 @@ def test_every_capability_handler_binds_on_the_real_service() -> None:
         "capability handlers bound to a differently-named service method "
         f"(likely a copy-paste error): {mislabelled}"
     )
+
+
+def test_declared_cli_subcommands_are_wired(capabilities) -> None:
+    """A declared `cli_subcommand_name` must exist as an argparse subparser.
+
+    The CLI dispatches through `TerraFinAgentClient` methods, so most newer
+    capabilities deliberately declare no CLI name at all. Declaring one that is
+    not wired advertises a command that fails.
+    """
+
+    import re
+
+    cli_source = (_SRC_ROOT / "agent" / "cli" / "main.py").read_text(encoding="utf-8")
+    wired = set(re.findall(r"add_parser\(\"([a-z0-9\-]+)\"", cli_source))
+
+    unwired = sorted(
+        f"{c.name} -> {c.cli_subcommand_name}"
+        for c in capabilities
+        if c.cli_subcommand_name
+        and c.cli_subcommand_name not in wired
+        and c.name not in CAPABILITIES_WITH_UNWIRED_CLI
+    )
+    assert not unwired, f"capabilities declaring a CLI subcommand that is not wired: {unwired}"
 
 
 def test_declared_http_routes_exist(capabilities, live_route_paths) -> None:

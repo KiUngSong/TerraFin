@@ -148,10 +148,12 @@ USAGE_CATEGORIES: list[tuple[str, set[str]]] = [
         },
     ),
     (
-        "Pattern / similarity",
+        "Pattern / similarity / factor",
         {
             "patterns",
+            "pattern_scan",
             "similarity_search",
+            "relative_strength",
         },
     ),
     (

@@ -166,6 +166,100 @@ def build_default_capability_registry(
                 response_model_name="PatternsResponse",
             ),
             TerraFinCapability(
+                name="pattern_scan",
+                description=(
+                    "Sweep MANY symbols for pattern triggers in one call — the "
+                    "cross-sectional counterpart to `patterns`, which checks a "
+                    "single ticker. Use this to SOURCE candidates (what is "
+                    "breaking out / breaking down right now) rather than to "
+                    "verify a name you already have.\n"
+                    "\n"
+                    "SYMBOL SET: defaults to the user's whole watchlist. Pass "
+                    "`group` for one watchlist tag, or `tickers` (comma-separated "
+                    "or a list) to sweep an arbitrary set that need not be on the "
+                    "watchlist.\n"
+                    "\n"
+                    "Patterns evaluated per symbol: the close-vs-MA cross grid "
+                    "(MA20/60/120/200 daily and MA20/60/120 weekly, golden and "
+                    "death), 52W_NEW_HIGH, 52W_NEW_LOW, MINERVINI_TEMPLATE, "
+                    "RSI_BULL_DIVERGENCE, RSI_BEAR_DIVERGENCE, and "
+                    "WEEKLY_VOLUME_DRYUP.\n"
+                    "\n"
+                    "SEVERITY: no pattern currently emits 'low', so "
+                    "`severity_min='low'` and `'medium'` return the same set. "
+                    "`'high'` narrows to exactly {52W_NEW_HIGH, 52W_NEW_LOW, "
+                    "MINERVINI_TEMPLATE}. A cross fires only on the bar where "
+                    "the close flips sides, so expect roughly 1-2 signals per "
+                    "symbol, not a flood.\n"
+                    "\n"
+                    "COVERAGE: `requested` is the symbol count asked for, "
+                    "`scanned` how many were actually fetched and evaluated, and "
+                    "`failed` the difference — a rate-limited sweep can scan far "
+                    "fewer than requested, so check `failed` before reporting "
+                    "'nothing is triggering'. `matched` is the pre-truncation hit "
+                    "count; `returned` may be smaller when `limit` clips the "
+                    "list (`truncated` says so).\n"
+                    "\n"
+                    "COST: one price history fetch per symbol. Cache reads run "
+                    "8-way concurrently, but cold downloads are serialised by a "
+                    "process-wide lock, so a cold sweep of hundreds of symbols "
+                    "takes minutes and will slow other price requests in the "
+                    "same process — prefer `start_pattern_scan_task` and keep "
+                    "`tickers` under a few dozen for interactive calls."
+                ),
+                handler=resolved_service.pattern_scan,
+                backgroundable=True,
+                summary="Sweep a watchlist group or ticker list for pattern triggers.",
+                http_route_path="/agent/api/pattern-scan",
+                response_model_name="PatternScanResponse",
+            ),
+            TerraFinCapability(
+                name="relative_strength",
+                description=(
+                    "Rank a universe by price momentum, or locate one ticker "
+                    "inside that ranking. Use it to SOURCE leadership names, or "
+                    "to answer 'is this name actually strong relative to the "
+                    "market?' with a number instead of a chart impression.\n"
+                    "\n"
+                    "Returns per symbol: `rsRating` (IBD-style 1-99 percentile "
+                    "of a weighted 3/6/9/12-month price blend, most recent "
+                    "quarter double-weighted) and `momentum12m1` (plain 12-1 "
+                    "momentum: trailing 12-month return skipping the last "
+                    "month). Minervini's trend template wants rsRating >= 70.\n"
+                    "\n"
+                    "Omit `ticker` for the top-`top_n` leaderboard. Pass "
+                    "`ticker` to get just that name's rating and rank; a ticker "
+                    "outside the universe is ranked alongside it rather than "
+                    "rejected.\n"
+                    "\n"
+                    "IMPORTANT — ratings are only comparable within one "
+                    "`universe`, because the percentile is computed across that "
+                    "set. Names with fewer than ~253 trading days of history are "
+                    "omitted from the ranking and reported in `warnings`; "
+                    "`ranked` vs `universeSize` shows the coverage.\n"
+                    "\n"
+                    "`momentum12m1` is a FRACTION, not a percent: 0.34 means "
+                    "+34%.\n"
+                    "\n"
+                    "COST: one price history fetch per universe member (sp500 is "
+                    "501, nasdaq100 101, kospi200 199). Cache reads run 8-way "
+                    "concurrently, but cold downloads are serialised by a "
+                    "process-wide lock, so a cold sp500 run takes minutes and "
+                    "slows other price requests — prefer "
+                    "`start_relative_strength_task`. Results are memoised for 5 "
+                    "minutes. 'watchlist' is the smallest universe, but it falls "
+                    "back to a bundled sample list when no watchlist store is "
+                    "configured, so treat a tiny `universeSize` as a signal that "
+                    "the percentile is not meaningful."
+                ),
+                handler=resolved_service.relative_strength,
+                focus_extractor=_focus_from_input_keys("ticker"),
+                backgroundable=True,
+                summary="IBD-style relative-strength rating and rank across a universe.",
+                http_route_path="/agent/api/relative-strength",
+                response_model_name="RelativeStrengthResponse",
+            ),
+            TerraFinCapability(
                 name="market_snapshot",
                 description=(
                     "Fetch a compact market snapshot for a single asset. "
