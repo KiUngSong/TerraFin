@@ -1,17 +1,33 @@
+import threading
+
 from TerraFin.data.cache.manager import CacheManager, CacheSourceSpec
 from TerraFin.data.cache.policy import get_default_cache_policies
 
 
 _cache_manager: CacheManager | None = None
 
+# Guards construction only. Without it, concurrent first-callers each build a
+# manager and all but one are discarded — a thread that registered a payload
+# spec on a discarded instance then fails with "Unknown cache payload source"
+# when it reads back from the winner. Reproduced with an 8-thread fan-out over
+# per-ticker yfinance specs.
+_cache_manager_lock = threading.Lock()
+
 
 def get_cache_manager() -> CacheManager:
     global _cache_manager
     if _cache_manager is None:
-        from TerraFin.interface.core.config import load_runtime_config
+        with _cache_manager_lock:
+            # Re-check inside the lock: another thread may have finished
+            # building while this one waited.
+            if _cache_manager is None:
+                from TerraFin.interface.core.config import load_runtime_config
 
-        _cache_manager = CacheManager(timezone_name=load_runtime_config().cache_timezone)
-        _register_default_sources(_cache_manager)
+                manager = CacheManager(timezone_name=load_runtime_config().cache_timezone)
+                _register_default_sources(manager)
+                # Publish only after registration, so no thread can observe a
+                # manager that is missing its default sources.
+                _cache_manager = manager
     return _cache_manager
 
 
