@@ -30,7 +30,7 @@ const LINK_TINT_BY_KIND: Record<string, string> = {
 const KPI_ORDER: Array<{ key: string; label: string }> = [
   { key: 'revenue', label: 'Revenue' },
   { key: 'grossProfit', label: 'Gross profit' },
-  { key: 'costOfRevenue', label: 'Cost of sales' },
+  { key: 'costOfRevenue', label: 'Total cost of sales' },
   { key: 'netIncome', label: 'Net income' },
 ];
 

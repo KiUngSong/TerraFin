@@ -475,14 +475,17 @@ def _pick_income_value(row_map: dict[str, float], canonical: str) -> float | Non
 
 
 def _yoy_pct(current: float | None, prior: float | None) -> float | None:
-    """Year-over-year percent change. ``None`` when either side is missing or
-    when prior == 0 (division-by-zero would be infinity, not informative)."""
+    """Year-over-year percent change. ``None`` when either side is missing, when
+    prior == 0, or when prior is NEGATIVE — a change measured from a loss or a tax
+    benefit has no meaningful percentage. AMD 2026-Q2 otherwise reported tax
+    '+130.2%' ($252M expense vs an $834M benefit) and operating income '+1585%'
+    (vs a $134M loss); both are sign-crossing artifacts, not growth."""
     if current is None or prior is None:
         return None
     try:
-        if prior == 0:
+        if prior <= 0:
             return None
-        return ((current - prior) / abs(prior)) * 100.0
+        return ((current - prior) / prior) * 100.0
     except (TypeError, ValueError, ZeroDivisionError):
         return None
 
@@ -582,7 +585,10 @@ def _assemble_income_sankey(cur, prior, *, ticker, period, current_date, prior_d
     nodes: list[dict[str, Any]] = [
         _node("revenue", "Total revenue", revenue, prior.get("revenue"), "neutral"),
         _node("grossProfit", "Gross profit", gross_profit, prior.get("grossProfit"), "good"),
-        _node("costOfRevenue", "Cost of sales", cost_of_revenue, prior.get("costOfRevenue"), "bad"),
+        # "Total cost of sales": filers also report a narrower "Cost of sales" line above
+        # it (AMD: 5,073 vs 5,333, the gap being intangible amortization), so the bare
+        # name sends a 10-Q lookup to a different number than the node carries.
+        _node("costOfRevenue", "Total cost of sales", cost_of_revenue, prior.get("costOfRevenue"), "bad"),
     ]
     if op_income is not None:
         nodes.append(_node("operatingIncome", "Operating income", op_income, prior.get("operatingIncome"), "good"))

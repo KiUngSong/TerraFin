@@ -67,6 +67,11 @@ def _classify(label: str) -> str | None:
         return "costOfRevenue"
     if l in ("revenues", "revenue", "total revenues", "total revenue", "net revenues", "net revenue", "net sales", "total net sales"):
         return "revenue"
+    # "gross profit" only. A "Gross margin 54 %" row is a RATIO, and _num strips the
+    # percent sign, so accepting it here made $54M the gross profit and the override
+    # below then set costOfRevenue = revenue - 54.
+    if l.startswith("gross profit"):
+        return "grossProfit"
     if "research and development" in l:
         return "researchAndDevelopment"
     if "selling, general and administrative" in l or "selling, general, and administrative" in l:
@@ -77,7 +82,9 @@ def _classify(label: str) -> str | None:
         return "ga"
     if "income from operations" in l or l in ("operating income", "operating income (loss)", "income (loss) from operations"):
         return "operatingIncome"
-    if ("income before" in l and "tax" in l) or "pretax income" in l:
+    # "…from continuing operations before income taxes and equity income" (AMD) puts
+    # words between "income" and "before", so match on the tax side of the phrase.
+    if "before income tax" in l or ("income before" in l and "tax" in l) or "pretax income" in l:
         return "pretaxIncome"
     if ("provision for income tax" in l) or ("income tax provision" in l) or ("income tax expense" in l) or ("provision" in l and "income tax" in l):
         return "taxProvision"
@@ -195,6 +202,20 @@ def _parse_income_statement(md: str, report_date: str):
         if any(cur.get(k) is not None and cur.get(k) < 0          # opex lines are positive spends
                for k in ("researchAndDevelopment", "sellingGeneralAdmin")):  # (not tax — can be a benefit)
             continue
+        # A reported Gross profit is authoritative; revenue − costOfRevenue is not.
+        # Filers put lines between the two (AMD: "Amortization of acquisition-related
+        # intangibles"), so the subtraction overstates gross profit and every margin
+        # derived from it. Absorb the gap into cost so the reported subtotal wins and
+        # the opex anchor below still balances.
+        for _d in (cur, prior):
+            _rv, _gp = _d.get("revenue"), _d.get("grossProfit")
+            # >=2% of revenue: a stray ratio row (54 against revenue 11,536) is not a
+            # credible gross profit, and trusting it would wipe out costOfRevenue.
+            if _rv and _gp is not None and 0.02 * _rv <= _gp < _rv:
+                _d["costOfRevenue"] = _rv - _gp
+            elif _gp is not None and _rv and _gp < 0.02 * _rv:
+                log.warning("income_filing: implausible grossProfit %s vs revenue %s — ignoring", _gp, _rv)
+                _d.pop("grossProfit", None)
         cur = {k: (v * mult if v is not None else None) for k, v in cur.items()}
         prior = {k: (v * mult if v is not None else None) for k, v in prior.items()}
         # Anchor total operating expense on the REPORTED operating income
