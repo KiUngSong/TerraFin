@@ -14,12 +14,16 @@ from .contracts import (
     chart_output,
 )
 from .contracts.dataframes import TimeSeriesDataFrame
+from .contracts.estimates import ConsensusEstimates
+from .contracts.news import NewsFeed
 from .providers.corporate.filings.sec_edgar import get_sec_data, get_sec_toc
 from .providers.corporate.fundamentals import get_corporate_data
 from .providers.corporate.investor_positioning import PortfolioOutput, get_portfolio_data
+from .providers.corporate.news import get_news as _get_news
 from .providers.economic import get_economic_indicator, get_fred_data
 from .providers.economic.macro_calendar import get_macro_events_all
 from .providers.market import INDEX_MAP, MARKET_INDICATOR_REGISTRY, get_market_data
+from .providers.market.estimates import get_consensus_estimates as _get_consensus_estimates
 from .providers.market.yfinance import (
     TransientMarketDataError,
     get_yf_data,
@@ -287,6 +291,14 @@ class DataFactory:
     def get_corporate_data(self, ticker: str, statement_type: str = "income", period: str = "annual"):
         """Get corporate data — returns a FinancialStatementFrame."""
         return get_corporate_data(ticker, statement_type, period=period)
+
+    def get_news(self, query: str, *, days: int = 7, limit: int = 25) -> NewsFeed:
+        """Headlines matching a query over the trailing window (metadata only)."""
+        return _get_news(query, days=days, limit=limit)
+
+    def get_consensus_estimates(self, ticker: str, *, force_refresh: bool = False) -> ConsensusEstimates:
+        """Forward consensus: EPS/revenue estimate levels, revisions, price targets."""
+        return _get_consensus_estimates(ticker, force_refresh=force_refresh)
 
     def get_portfolio_data(
         self,

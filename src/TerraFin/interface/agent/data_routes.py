@@ -6,6 +6,7 @@ from TerraFin.agent.contracts.definitions import is_internal_agent_definition
 from TerraFin.agent.models import (
     CalendarResponse,
     CompanyInfoResponse,
+    ConsensusResponse,
     EarningsResponse,
     EconomicResponse,
     FinancialStatementResponse,
@@ -39,6 +40,7 @@ from TerraFin.agent.models import (
     MacroFocusResponse,
     MarketDataResponse,
     MarketSnapshotResponse,
+    NewsResponse,
     PatternScanResponse,
     PatternsResponse,
     PortfolioResponse,
@@ -719,6 +721,25 @@ def create_agent_data_router() -> APIRouter:
     ):
         try:
             return PatternsResponse(**service.patterns(ticker, depth=depth, view=view))
+        except Exception as exc:
+            _raise_http_error(exc)
+
+    @router.get(f"{AGENT_API_PREFIX}/news", response_model=NewsResponse)
+    def api_agent_news(
+        ticker: str | None = Query(default=None),
+        query: str | None = Query(default=None, description="Free-form query; use instead of ticker"),
+        days: int = Query(default=7, ge=1, le=90),
+        limit: int = Query(default=25, ge=1, le=100),
+    ):
+        try:
+            return NewsResponse(**service.news(ticker, query=query, days=days, limit=limit))
+        except Exception as exc:
+            _raise_http_error(exc)
+
+    @router.get(f"{AGENT_API_PREFIX}/consensus", response_model=ConsensusResponse)
+    def api_agent_consensus(ticker: str = Query(..., min_length=1)):
+        try:
+            return ConsensusResponse(**service.consensus(ticker))
         except Exception as exc:
             _raise_http_error(exc)
 

@@ -11,6 +11,10 @@ CACHE_TTL_REGISTRY: dict[str, int] = {
     "yfinance.full": 86_400,
     "market.ticker_info": 86_400,
     "market.earnings": 86_400,
+    # Consensus moves on analyst notes, not intraday.
+    "market.estimates": 86_400,
+    # Headlines: fresh enough for "why now" without re-fetching every call.
+    "news.google": 1_800,
     # Economic — FRED
     "fred": 7 * 86_400,
     # Corporate fundamentals
@@ -134,5 +138,17 @@ def get_default_cache_policies() -> list[CachePolicy]:
             source="sec_filings.cache",
             mode="clear_only",
             interval_seconds=cache_config.interval_seconds_for("sec_filings"),
+        ),
+        CachePolicy(
+            source="estimates.cache",
+            mode="clear_only",
+            interval_seconds=cache_config.interval_seconds_for("estimates"),
+        ),
+        # The news namespace is keyed by free-form query, so it grows without
+        # bound unless something prunes it.
+        CachePolicy(
+            source="news.cache",
+            mode="clear_only",
+            interval_seconds=cache_config.interval_seconds_for("news"),
         ),
     ]

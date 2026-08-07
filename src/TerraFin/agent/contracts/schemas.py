@@ -289,6 +289,16 @@ class SecFilingSectionResponse(_PermissiveResponse):
     sectionSlug: str | None = None
 
 
+class NewsResponse(_PermissiveResponse):
+    query: str | None = None
+    count: int | None = None
+
+
+class ConsensusResponse(_PermissiveResponse):
+    ticker: str | None = None
+    hasCoverage: bool | None = None
+
+
 class PatternScanResponse(_PermissiveResponse):
     scanned: int | None = None
     matched: int | None = None

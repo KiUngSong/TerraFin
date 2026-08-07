@@ -134,6 +134,7 @@ USAGE_CATEGORIES: list[tuple[str, set[str]]] = [
             "macro_focus",
             "lppl_analysis",
             "calendar_events",
+            "news",
         },
     ),
     (
@@ -145,6 +146,7 @@ USAGE_CATEGORIES: list[tuple[str, set[str]]] = [
             "risk_profile",
             "beta_estimate",
             "fcf_history",
+            "consensus",
         },
     ),
     (

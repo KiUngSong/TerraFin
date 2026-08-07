@@ -23,6 +23,10 @@ DEFAULT_CACHE_INTERVALS = {
     "portfolio": 259200,
     "ticker_info": 43200,
     "sec_filings": 2592000,
+    # Prune intervals for the two file-cached namespaces. Both are longer than
+    # the namespace TTL so a sweep reclaims disk without discarding fresh data.
+    "estimates": 259200,
+    "news": 86400,
 }
 
 DEFAULT_WATCHLIST_DATABASE = "terrafin_status_db"

@@ -166,6 +166,125 @@ def build_default_capability_registry(
                 response_model_name="PatternsResponse",
             ),
             TerraFinCapability(
+                name="news",
+                description=(
+                    "Recent headlines for a ticker or free-form query — the "
+                    "'why now' behind a move. Use it to find or confirm a "
+                    "CATALYST instead of inferring one.\n"
+                    "\n"
+                    "Pass `ticker` for a symbol, or `query` for a theme or "
+                    "company name (a plain company name usually beats the "
+                    "symbol for coverage). `days` is the trailing window "
+                    "(1-90, default 7) and `limit` caps returned items "
+                    "(1-100, default 25).\n"
+                    "\n"
+                    "HEADLINES ONLY — title, publish date, publisher, and a "
+                    "link. Article bodies are never fetched, so do not claim "
+                    "to have read an article. `url` is a news.google.com "
+                    "REDIRECT, not the publisher's canonical address; follow it "
+                    "if you need the real page. `headline` is `title` with the "
+                    "trailing ' - Publisher' suffix removed.\n"
+                    "\n"
+                    "`fetchedAt` is when TerraFin fetched the feed, not the "
+                    "window itself — a cached or stale-served response reports "
+                    "its real vintage, so it can lag today. `null` means the "
+                    "vintage is unknown (an entry cached before the field "
+                    "existed).\n"
+                    "\n"
+                    "LIMITS: matching is keyword-based, so results include "
+                    "same-name companies and passing mentions — read the "
+                    "publisher and headline before treating an item as "
+                    "material. A week on a large cap routinely matches ~100 "
+                    "headlines; `warnings` says when the list was truncated. An "
+                    "unreachable feed returns zero items with a warning rather "
+                    "than an error, so an empty list means 'nothing found or "
+                    "feed unavailable', never 'no news happened'.\n"
+                    "\n"
+                    "For dated corporate events prefer `sec_filings` (an 8-K "
+                    "near an unexplained move is the harder evidence) and "
+                    "`calendar_events`; use this for the narrative around them."
+                ),
+                handler=resolved_service.news,
+                focus_extractor=_focus_from_input_keys("ticker"),
+                backgroundable=True,
+                summary="Recent headlines for a ticker or query (metadata only).",
+                http_route_path="/agent/api/news",
+                response_model_name="NewsResponse",
+            ),
+            TerraFinCapability(
+                name="consensus",
+                description=(
+                    "Forward analyst consensus for one ticker: EPS and revenue "
+                    "estimate levels, ESTIMATE REVISIONS, and price targets. "
+                    "Use it to answer 'what does the market already expect?' "
+                    "with observable data before claiming a variant view.\n"
+                    "\n"
+                    "REVISIONS. `revisions[]` carries up/down analyst counts "
+                    "over the last 7 and 30 days per period, plus `net30d` and "
+                    "`direction30d` ('up'/'down'/'flat'). The 30-day window "
+                    "INCLUDES the 7-day one — do not add them. An estimate LEVEL "
+                    "says where consensus sits; the revision DIRECTION says "
+                    "which way it is moving, and it is dated, so it is "
+                    "checkable later.\n"
+                    "\n"
+                    "DO NOT READ REVISIONS AS 'NOT YET PRICED IN'. Sell-side "
+                    "analysts revise toward the tape, so price usually LEADS the "
+                    "revision — that is post-earnings-announcement drift and "
+                    "revision momentum, among the most documented anomalies in "
+                    "the literature. 'Estimates are being revised up' is closer "
+                    "to a momentum signal than to evidence the market has missed "
+                    "something, and up-revision regimes are exactly when the "
+                    "drift is already being paid. Use this to record what "
+                    "consensus said and when, and to see whether 'consensus' is "
+                    "even a coherent number (see `dispersion`) — not as proof "
+                    "that a thesis is contrarian.\n"
+                    "\n"
+                    "`asOf` is the date WE fetched, not the vintage of the "
+                    "estimates themselves; upstream provides no estimate "
+                    "timestamp.\n"
+                    "\n"
+                    "A tiny `analystCount` makes `direction30d` near-meaningless "
+                    "— one analyst revising up renders identically to fifteen. "
+                    "Read the count before quoting the direction.\n"
+                    "\n"
+                    "`dispersion` on each estimate row is (high-low)/|avg| — when "
+                    "it is wide, 'consensus' is an average over genuinely "
+                    "different views, so a differentiated thesis has to beat the "
+                    "range, not the midpoint. Near break-even it is a "
+                    "denominator artifact, not disagreement: an avg of 0.01 with "
+                    "a -0.5..+0.3 range yields ~80. Sanity-check `avg` before "
+                    "quoting a large dispersion.\n"
+                    "\n"
+                    "PERIOD KEYS are relative: '0q' current quarter, '+1q' next "
+                    "quarter, '0y' current fiscal year, '+1y' next.\n"
+                    "\n"
+                    "COVERAGE — read the flags, not just `hasCoverage`. An empty "
+                    "payload has several possible causes and upstream reports "
+                    "them identically, so NEVER state 'this ticker has no "
+                    "analyst coverage':\n"
+                    "- `upstreamFailed` — nothing came back at all. Either a "
+                    "symbol without estimates (indices, ETFs) or a rate-limited "
+                    "endpoint. `quoteTypeHint` may say INDEX/ETF, but it is "
+                    "recovered from endpoints that stay up when the estimate "
+                    "endpoint is down, so it is a hint, never proof.\n"
+                    "- `estimatesMissing` — other surfaces responded but every "
+                    "estimate surface was empty: an uncovered symbol or a "
+                    "partial failure.\n"
+                    "- `cacheTier` — 'stale' or 'fallback' means the numbers are "
+                    "not fresh.\n"
+                    "An empty field always means 'unknown', never 'neutral'. "
+                    "`growth` and `upsideToMeanPct` "
+                    "are the provider's own figures; `growth` is a fraction, "
+                    "`upsideToMeanPct` is already a percent."
+                ),
+                handler=resolved_service.consensus,
+                focus_extractor=_focus_from_input_keys("ticker"),
+                backgroundable=True,
+                summary="Forward EPS/revenue consensus, revisions, and price targets.",
+                http_route_path="/agent/api/consensus",
+                response_model_name="ConsensusResponse",
+            ),
+            TerraFinCapability(
                 name="pattern_scan",
                 description=(
                     "Sweep MANY symbols for pattern triggers in one call — the "

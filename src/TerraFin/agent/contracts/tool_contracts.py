@@ -71,6 +71,25 @@ HOSTED_TOOL_CONTRACTS: dict[str, dict[str, Any]] = {
         ),
         "response_model": "IndicatorsResponse",
     },
+    "news": {
+        "input_schema": _object_schema(
+            properties={
+                "ticker": {"type": "string", "minLength": 1},
+                "query": {"type": "string", "minLength": 1},
+                "days": {"type": "integer", "minimum": 1, "maximum": 90, "default": 7},
+                "limit": {"type": "integer", "minimum": 1, "maximum": 100, "default": 25},
+            },
+            required=[],
+        ),
+        "response_model": "NewsResponse",
+    },
+    "consensus": {
+        "input_schema": _object_schema(
+            properties={"ticker": {"type": "string", "minLength": 1}},
+            required=["ticker"],
+        ),
+        "response_model": "ConsensusResponse",
+    },
     "pattern_scan": {
         "input_schema": _object_schema(
             properties={

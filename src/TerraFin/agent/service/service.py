@@ -264,6 +264,138 @@ class TerraFinAgentService:
             ),
         }
 
+    def news(
+        self,
+        ticker: str | None = None,
+        *,
+        query: str | None = None,
+        days: int = 7,
+        limit: int = 25,
+    ) -> dict[str, Any]:
+        """Recent headlines for a ticker or free-form query."""
+        resolved = (query or ticker or "").strip()
+        if not resolved:
+            raise ValueError("Either ticker or query is required")
+
+        feed = self._data_factory.get_news(resolved, days=days, limit=limit)
+        return {
+            "query": feed.query,
+            "days": feed.days,
+            "fetchedAt": feed.fetched_at,
+            "count": len(feed.items),
+            "items": [
+                {
+                    "title": item.title,
+                    "headline": item.headline,
+                    "publishedAt": item.published_at,
+                    "source": item.source,
+                    "sourceUrl": item.source_url,
+                    "url": item.url,
+                }
+                for item in feed.items
+            ],
+            "warnings": feed.warnings,
+            "processing": _full_processing(
+                requested_depth="full",
+                source_version="news-google-rss",
+                view=None,
+                frame=None,
+            ),
+        }
+
+    def consensus(self, ticker: str) -> dict[str, Any]:
+        """Forward consensus estimates, revisions, and price targets."""
+        estimates = self._data_factory.get_consensus_estimates(ticker)
+
+        def _period_rows(periods) -> list[dict[str, Any]]:
+            return [
+                {
+                    "period": item.period,
+                    "avg": item.avg,
+                    "low": item.low,
+                    "high": item.high,
+                    "analystCount": item.analyst_count,
+                    "growth": item.growth,
+                    "yearAgo": item.year_ago,
+                    "dispersion": item.dispersion,
+                }
+                for item in periods
+            ]
+
+        warnings = list(estimates.warnings)
+        if estimates.cache_tier and estimates.cache_tier != "fresh":
+            warnings.append(f"served from cache tier: {estimates.cache_tier}")
+
+        # Two distinguishable reasons for an empty payload, plus a fallback. An
+        # all-empty upstream response is NOT one of them: it is genuinely
+        # ambiguous, so it arrives as `upstream_failed` and is described as such
+        # rather than being asserted either way.
+        if not estimates.has_coverage:
+            if estimates.upstream_failed:
+                hint = (
+                    f" The instrument type looks like {estimates.quote_type_hint}, which is a hint only —"
+                    " it is recovered from endpoints that stay up when the estimate endpoint is down."
+                    if estimates.quote_type_hint
+                    else ""
+                )
+                warnings.append(
+                    "no estimate data was returned at all. That is either a symbol without analyst "
+                    "estimates (normal for indices and ETFs) or an upstream failure — upstream "
+                    "reports both as an empty result, so this is evidence of neither." + hint
+                )
+            elif estimates.estimates_missing:
+                warnings.append(
+                    "other surfaces responded but every estimate surface was empty. That is either a "
+                    "symbol without analyst coverage or a partial upstream failure — treat it as "
+                    "evidence of neither"
+                )
+            else:
+                warnings.append(
+                    "no forward estimates are present; the reason could not be determined, so "
+                    "treat this as unavailable rather than as absent coverage"
+                )
+
+        return {
+            "ticker": estimates.ticker,
+            "asOf": estimates.as_of,
+            "currency": estimates.currency,
+            "hasCoverage": estimates.has_coverage,
+            "upstreamFailed": estimates.upstream_failed,
+            "estimatesMissing": estimates.estimates_missing,
+            "quoteTypeHint": estimates.quote_type_hint,
+            "cacheTier": estimates.cache_tier,
+            "epsEstimates": _period_rows(estimates.eps),
+            "revenueEstimates": _period_rows(estimates.revenue),
+            "revisions": [
+                {
+                    "period": item.period,
+                    "up7d": item.up_7d,
+                    "down7d": item.down_7d,
+                    "up30d": item.up_30d,
+                    "down30d": item.down_30d,
+                    "net30d": item.net_30d,
+                    "direction30d": item.direction_30d,
+                }
+                for item in estimates.revisions
+            ],
+            "priceTargets": {
+                "current": estimates.price_targets.current,
+                "mean": estimates.price_targets.mean,
+                "median": estimates.price_targets.median,
+                "low": estimates.price_targets.low,
+                "high": estimates.price_targets.high,
+                "upsideToMeanPct": estimates.price_targets.upside_to_mean_pct,
+            },
+            "recommendations": [dict(row) for row in estimates.recommendations],
+            "warnings": warnings,
+            "processing": _full_processing(
+                requested_depth="full",
+                source_version="consensus-estimates",
+                view=None,
+                frame=None,
+            ),
+        }
+
     def relative_strength(
         self,
         ticker: str | None = None,

@@ -14,12 +14,8 @@ Anchors to a configurable as_of date so backtests reproduce exactly.
 import logging
 import re
 import threading
-import urllib.parse
-import urllib.request
-import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone
-from email.utils import parsedate_to_datetime
 from typing import Any
 
 log = logging.getLogger(__name__)
@@ -189,33 +185,20 @@ def _fetch_earnings(ticker: str) -> list[dict]:
 
 
 def _fetch_news_google(query: str, as_of: date, days: int = 8) -> list[dict]:
-    after = (as_of - timedelta(days=days)).isoformat()
-    before = (as_of + timedelta(days=1)).isoformat()
-    url = "https://news.google.com/rss/search?" + urllib.parse.urlencode(
-        {
-            "q": f'"{query}" stock after:{after} before:{before}',
-            "hl": "en-US", "gl": "US", "ceid": "US:en",
-        }
-    )
+    """Headlines for one query, delegated to the shared news provider.
+
+    Kept as a thin adapter so this module's relevance filtering and rendering
+    stay untouched while the fetch itself lives in the data layer (cached, and
+    retaining the link and publisher that this shape discards).
+    """
+    from TerraFin.data.providers.corporate.news import MAX_ITEMS, get_news
+
     try:
-        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-        data = urllib.request.urlopen(req, timeout=10).read()
-        root = ET.fromstring(data)
-    except Exception as exc:
+        feed = get_news(query, days=days, limit=MAX_ITEMS, as_of=as_of.isoformat())
+    except Exception as exc:  # noqa: BLE001 - never fail a report on news
         log.debug("google news fail for %r: %s", query, exc)
         return []
-    out = []
-    for it in root.findall(".//item"):
-        title = it.findtext("title")
-        pub = it.findtext("pubDate")
-        if not title or not pub:
-            continue
-        try:
-            d = parsedate_to_datetime(pub).date()
-        except Exception:
-            continue
-        out.append({"date": d.isoformat(), "title": title})
-    return out
+    return [{"date": item.published_at, "title": item.title} for item in feed]
 
 
 def _compute_wow(records: list[dict]) -> dict | None:

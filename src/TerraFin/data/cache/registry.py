@@ -34,7 +34,9 @@ def get_cache_manager() -> CacheManager:
 def _register_default_sources(manager: CacheManager) -> None:
     from TerraFin.data.providers.corporate.filings.sec_edgar.filing import clear_sec_filings_cache
     from TerraFin.data.providers.corporate.filings.sec_edgar.holdings import clear_guru_holdings_cache
+    from TerraFin.data.providers.corporate.news import clear_news_cache
     from TerraFin.data.providers.economic.fred_data import clear_fred_cache
+    from TerraFin.data.providers.market.estimates import clear_estimates_cache
     from TerraFin.data.providers.market.ticker_info import clear_ticker_info_cache
     from TerraFin.data.providers.private_access.panels import register_panel_sources
 
@@ -43,6 +45,8 @@ def _register_default_sources(manager: CacheManager) -> None:
         "portfolio.cache": clear_guru_holdings_cache,
         "ticker_info.cache": clear_ticker_info_cache,
         "sec_filings.cache": clear_sec_filings_cache,
+        "estimates.cache": clear_estimates_cache,
+        "news.cache": clear_news_cache,
     }
 
     for policy in get_default_cache_policies():

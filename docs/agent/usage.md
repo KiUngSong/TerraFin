@@ -35,6 +35,8 @@ with rate-limit, retry, cache, and progressive-history handling.
 | Get a one-asset snapshot (price action + indicators)       | `market_snapshot(name, depth, view, force_refresh=False)` — response `asof` is the ISO date of the last bar served; pass `force_refresh=True` only for time-sensitive snapshots (mid-session, freshly-closed bar) to bypass the 24h `yfinance.full` cache |
 | Get company profile / valuation fields                     | `company_info(ticker)`                                              |
 | Get earnings history (estimate / reported / surprise)      | `earnings(ticker)`                                                  |
+| Get forward consensus, revisions, and price targets         | `consensus(ticker)`                                                 |
+| Find recent headlines / the catalyst behind a move          | `news(ticker, query, days, limit)`                                  |
 | Get income / balance / cashflow statement                  | `financials(ticker, statement, period)`                             |
 | List a ticker's recent 10-K / 10-Q / 8-K filings           | `sec_filings(ticker)`                                               |
 | Get a single filing's TOC (no full body)                   | `sec_filing_document(ticker, accession, primaryDocument, form)`     |
@@ -367,12 +369,14 @@ Data + chart:
 - `GET /agent/api/macro-focus` — Macro summary plus chart-ready series for one instrument.
 - `GET /agent/api/market-data` — Chart-ready OHLC time series for one asset.
 - `GET /agent/api/market-snapshot` — Compact market snapshot for one asset.
+- `GET /agent/api/news` — Recent headlines for a ticker or query (metadata only).
 - `GET /agent/api/portfolio` — Guru portfolio holdings and summary metadata.
 - `GET /agent/api/resolve` — Resolve a free-form query into a TerraFin route.
 
 Valuation + fundamentals:
 
 - `GET /agent/api/beta-estimate` — 5-year monthly beta with adjusted beta, R², benchmark.
+- `GET /agent/api/consensus` — Forward EPS/revenue consensus, revisions, and price targets.
 - `GET /agent/api/fcf-history` — FCF history + 3yr-avg / latest-annual / TTM candidates.
 - `GET /agent/api/fundamental-screen` — Fundamental quality and moat screen for a ticker.
 - `GET /agent/api/risk-profile` — Statistical risk profile (tail risk, convexity, vol regime, drawdown).
