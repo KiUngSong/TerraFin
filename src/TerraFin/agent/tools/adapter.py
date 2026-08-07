@@ -4,7 +4,11 @@ from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any
 
 from ..contracts.definitions import TerraFinAgentDefinition, is_internal_agent_definition
-from ..contracts.tool_contracts import HOSTED_TOOL_CONTRACT_VERSION, get_hosted_tool_contract
+from ..contracts.tool_contracts import (
+    HOSTED_TOOL_CONTRACT_VERSION,
+    get_hosted_tool_contract,
+    validate_tool_arguments,
+)
 from ..runtime.capability import TerraFinCapability
 from ..runtime.errors import TerraFinAgentApprovalRequiredError
 from ..runtime.hosted import TerraFinHostedAgentRuntime
@@ -19,9 +23,9 @@ from .normalize import (
     _repair_symbol_or_name,
 )
 from .types import (
-    ToolExecutionMode,
     TerraFinToolDefinition,
     TerraFinToolInvocationResult,
+    ToolExecutionMode,
     _ToolErrorDisposition,
 )
 
@@ -75,6 +79,13 @@ class TerraFinHostedToolAdapter:
         payload: dict[str, Any]
         task: TerraFinTaskRecord | None = None
         resolved_arguments = _normalize_common_alias_arguments(dict(arguments or {}))
+        # Validate AFTER alias normalisation (so documented aliases are accepted)
+        # and BEFORE dispatch (so nothing undeclared reaches a handler).
+        schema_result, resolved_arguments = self._preflight_argument_schema(
+            tool, session_id, resolved_arguments
+        )
+        if schema_result is not None:
+            return schema_result
         preflight_result = self._preflight_tool_misuse(tool, session_id, resolved_arguments)
         if preflight_result is not None:
             return preflight_result
@@ -274,6 +285,71 @@ class TerraFinHostedToolAdapter:
                 "responseModel": contract["response_model"],
             },
         )
+
+    def _preflight_argument_schema(
+        self,
+        tool: TerraFinToolDefinition,
+        session_id: str,
+        arguments: Mapping[str, Any],
+    ) -> tuple[TerraFinToolInvocationResult | None, dict[str, Any]]:
+        """Reject arguments the tool's declared schema does not allow.
+
+        Returns `(rejection_or_None, arguments_to_dispatch)`; the second element
+        carries the validator's narrowing (see `validate_tool_arguments`) and must
+        be what the caller dispatches.
+
+        Without this the schema is decoration: dispatch went straight to
+        `capability.handler(**kwargs)`, so `additionalProperties: False` enforced
+        nothing and a handler's undeclared parameters stayed reachable. The
+        clearest case is `valuation`, whose hidden `base_growth_pct` /
+        `terminal_growth_pct` / `beta` let a caller tilt a valuation toward a
+        conclusion it already held.
+
+        Keyed on `capability_name`, not `name`: a backgroundable capability is also
+        exposed as `start_<capability>_task`, which is not a `HOSTED_TOOL_CONTRACTS`
+        key, so keying on `name` made all 24 task variants validate vacuously —
+        including `start_valuation_task`, leaving the tilt parameters reachable by
+        the one path this check exists to close. `_build_tool_definition` hands the
+        task variant the capability's own `input_schema`, so the model is shown the
+        contract validated here.
+
+        Only the agent surface is constrained. Internal Python callers keep the
+        full signature, which is the intent — a route or a controller is trusted
+        to choose inputs deliberately. `start_task`'s own `description` kwarg is
+        not in any contract, so a model that passes it is rejected; that matches
+        the `additionalProperties: false` schema the task tool advertises.
+        """
+        problems, normalized = validate_tool_arguments(tool.capability_name, arguments)
+        if not problems:
+            return None, normalized
+
+        message = f"Invalid arguments for {tool.name}: " + "; ".join(problems)
+        return TerraFinToolInvocationResult(
+            tool_name=tool.name,  # the name the model called, not the capability
+            capability_name=tool.capability_name,
+            session_id=session_id,
+            execution_mode=tool.execution_mode,
+            payload={
+                "accepted": False,
+                "error": {
+                    "code": "tool_invalid_arguments",
+                    "message": message,
+                    "detail": problems,
+                    "retryable": True,
+                    "modelHint": (
+                        "Retry with only the arguments this tool declares, using the types and "
+                        "ranges in its schema. Parameters that are not in the schema are not "
+                        "available through the tool surface, even if a related HTTP route or "
+                        "Python method accepts them."
+                    ),
+                },
+            },
+            task=None,
+            is_error=True,
+            retryable=True,
+            error_code="tool_invalid_arguments",
+            error_message=message,
+        ), normalized
 
     def _preflight_tool_misuse(
         self,

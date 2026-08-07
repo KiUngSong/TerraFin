@@ -61,6 +61,27 @@ def capabilities():
 
 
 @pytest.fixture(scope="module")
+def real_capabilities():
+    """Registry built against the REAL service *and* the real chart opener.
+
+    Signature checks must not measure a double. `BaseFakeService`'s stubs are
+    narrower than the handlers they stand in for, so a declared property the real
+    handler accepts (e.g. `market_snapshot`'s `force_refresh`) would read as a
+    mismatch. `fake_chart_opener` has the opposite problem: it is *wider* than
+    production `open_chart`, whose `client` parameter is undeclared and went
+    undetected here. Passing no `chart_opener` binds the real one.
+
+    Nothing is called — the handlers are only inspected — so this stays free of
+    network and env mutation.
+    """
+
+    from TerraFin.agent.service import TerraFinAgentService
+
+    registry = build_default_capability_registry(TerraFinAgentService())
+    return registry.list()
+
+
+@pytest.fixture(scope="module")
 def live_route_paths() -> set[str | None]:
     """Paths served by the assembled app.
 
@@ -195,6 +216,82 @@ def test_declared_cli_subcommands_are_wired(capabilities) -> None:
         and c.name not in CAPABILITIES_WITH_UNWIRED_CLI
     )
     assert not unwired, f"capabilities declaring a CLI subcommand that is not wired: {unwired}"
+
+
+# Handler parameters deliberately NOT in the tool schema. Each entry is a
+# decision, not an oversight, and the tool boundary rejects them (see
+# `tests/agent/test_tool_argument_validation.py`):
+#   valuation  — the three tilt inputs. An LLM that can set its own growth rate,
+#                terminal growth, or beta can make a DCF agree with whatever it
+#                already believed, which is the failure the locked-DCF rule in
+#                the idea-loop design exists to prevent.
+#   macro_focus, open_chart — `session_id` is injected by the runtime
+#                (`_apply_defaults`), never supplied by a caller.
+#   open_chart — `client` is the `TerraFinAgentClient` the CLI passes in-process;
+#                a model naming its own HTTP client makes no sense.
+INTERNAL_ONLY_HANDLER_PARAMS = {
+    "valuation": {"base_growth_pct", "terminal_growth_pct", "beta"},
+    "macro_focus": {"session_id"},
+    "open_chart": {"session_id", "client"},
+}
+
+
+def test_no_new_undeclared_handler_parameters(real_capabilities) -> None:
+    """A handler parameter absent from the tool schema must be a deliberate choice.
+
+    Adding one silently widens what the model could reach if validation were ever
+    bypassed, so new ones have to be named here on purpose.
+    """
+
+    import inspect
+
+    surprises: dict[str, list[str]] = {}
+    for capability in real_capabilities:
+        contract = HOSTED_TOOL_CONTRACTS.get(capability.name)
+        if contract is None:
+            continue
+        declared = set((contract.get("input_schema") or {}).get("properties") or {})
+        try:
+            parameters = inspect.signature(capability.handler).parameters
+        except (TypeError, ValueError):  # pragma: no cover - builtins
+            continue
+        accepted = {
+            name
+            for name, parameter in parameters.items()
+            if parameter.kind in (parameter.POSITIONAL_OR_KEYWORD, parameter.KEYWORD_ONLY)
+        }
+        undeclared = accepted - declared - INTERNAL_ONLY_HANDLER_PARAMS.get(capability.name, set())
+        if undeclared:
+            surprises[capability.name] = sorted(undeclared)
+
+    assert not surprises, (
+        "handler parameters that are not in the tool schema and not listed as "
+        f"deliberately internal: {surprises}"
+    )
+
+
+def test_declared_properties_are_acceptable_by_the_handler(real_capabilities) -> None:
+    """A declared property the handler cannot take is a TypeError waiting to happen."""
+
+    import inspect
+
+    broken: dict[str, list[str]] = {}
+    for capability in real_capabilities:
+        contract = HOSTED_TOOL_CONTRACTS.get(capability.name)
+        if contract is None:
+            continue
+        declared = set((contract.get("input_schema") or {}).get("properties") or {})
+        try:
+            parameters = inspect.signature(capability.handler).parameters
+        except (TypeError, ValueError):  # pragma: no cover - builtins
+            continue
+        if any(parameter.kind == parameter.VAR_KEYWORD for parameter in parameters.values()):
+            continue
+        missing = sorted(declared - set(parameters))
+        if missing:
+            broken[capability.name] = missing
+
+    assert not broken, f"schema declares properties the handler cannot accept: {broken}"
 
 
 def test_declared_http_routes_exist(capabilities, live_route_paths) -> None:

@@ -162,7 +162,26 @@ class BaseFakeService:
             "processing": processing(),
         }
 
-    def valuation(self, ticker: str) -> dict[str, object]:
+    def valuation(
+        self,
+        ticker: str,
+        *,
+        projection_years: int | None = None,
+        fcf_base_source: str | None = None,
+        breakeven_year: int | None = None,
+        breakeven_cash_flow_per_share: float | None = None,
+        post_breakeven_growth_pct: float | None = None,
+    ) -> dict[str, object]:
+        """Accepts the schema's declared optionals, deliberately NOT the hidden
+        tilt parameters (`base_growth_pct`, `terminal_growth_pct`, `beta`) — those
+        must not be reachable from the tool surface."""
+        _ = (
+            projection_years,
+            fcf_base_source,
+            breakeven_year,
+            breakeven_cash_flow_per_share,
+            post_breakeven_growth_pct,
+        )
         return {
             "ticker": ticker,
             "dcf": {"status": "ready", "intrinsic_value": 120.0},

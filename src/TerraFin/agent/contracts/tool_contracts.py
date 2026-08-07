@@ -1,3 +1,4 @@
+from collections.abc import Mapping
 from copy import deepcopy
 from typing import Any
 
@@ -464,3 +465,149 @@ def get_hosted_tool_contract(capability_name: str) -> dict[str, Any]:
         return deepcopy(HOSTED_TOOL_CONTRACTS[capability_name])
     except KeyError as exc:
         raise KeyError(f"No explicit hosted tool contract registered for capability '{capability_name}'.") from exc
+
+
+# ---------------------------------------------------------------------------
+# Argument validation
+#
+# The schemas above were advisory until this existed: the dispatch path went
+# straight from the model's arguments to `capability.handler(**kwargs)`, so
+# `additionalProperties: False` enforced nothing. That mattered because several
+# handlers accept parameters the schema deliberately hides — `valuation` takes
+# `base_growth_pct`, `terminal_growth_pct`, and `beta`, which let a caller tilt
+# a valuation into agreeing with whatever it already believed.
+#
+# Validating here makes the tool surface the schema says it is. Internal Python
+# callers (routes, the service, a controller) are unaffected by design: they
+# hold the full signature, and locking the *agent* is the point.
+#
+# Hand-rolled rather than pulling in `jsonschema`, because the contracts use a
+# small fixed subset: type, enum, minimum, maximum, minLength, maxItems, anyOf,
+# items, required, additionalProperties.
+# ---------------------------------------------------------------------------
+
+_TYPE_NAMES = {
+    "string": str,
+    "boolean": bool,
+    "array": list,
+    "object": dict,
+}
+
+
+def _type_error(value: Any, expected: str) -> str | None:
+    """None when `value` satisfies `expected`, else a human-readable reason."""
+    if expected == "integer":
+        # bool is an int subclass in Python; a JSON boolean is not an integer.
+        if isinstance(value, bool):
+            return "expected an integer, got a boolean"
+        if isinstance(value, int):
+            return None
+        # Models routinely emit 7.0 for an integer field; accept it losslessly.
+        if isinstance(value, float) and value.is_integer():
+            return None
+        return f"expected an integer, got {type(value).__name__}"
+    if expected == "number":
+        if isinstance(value, bool):
+            return "expected a number, got a boolean"
+        return None if isinstance(value, (int, float)) else f"expected a number, got {type(value).__name__}"
+    expected_type = _TYPE_NAMES.get(expected)
+    if expected_type is None:
+        return None  # unknown type keyword: nothing to assert
+    if expected == "string" and isinstance(value, bool):
+        return "expected a string, got a boolean"
+    return None if isinstance(value, expected_type) else f"expected {expected}, got {type(value).__name__}"
+
+
+def _check_value(name: str, value: Any, schema: dict[str, Any]) -> list[str]:
+    if "anyOf" in schema:
+        branches: list[dict[str, Any]] = schema["anyOf"]
+        reasons = [_check_value(name, value, branch) for branch in branches]
+        if any(not branch_errors for branch_errors in reasons):
+            return []
+        # Exactly one branch matching on type means the value's *shape* is right
+        # and something inside it is wrong — a bound, or an item's type. Report
+        # that branch's errors. The generic "expected string or array, got list"
+        # would restate the value's own type back at the model, which cannot act
+        # on it and would resend the same argument until the retry budget ends.
+        matched = [
+            branch_errors
+            for branch, branch_errors in zip(branches, reasons)
+            if branch.get("type") and not _type_error(value, branch["type"])
+        ]
+        if len(matched) == 1:
+            return matched[0]
+        allowed = " or ".join(str(branch.get("type", "?")) for branch in branches)
+        return [f"{name}: expected {allowed}, got {type(value).__name__}"]
+
+    errors: list[str] = []
+    declared_type = schema.get("type")
+    if declared_type:
+        reason = _type_error(value, declared_type)
+        if reason:
+            return [f"{name}: {reason}"]
+
+    if "enum" in schema and value not in schema["enum"]:
+        errors.append(f"{name}: {value!r} is not one of {schema['enum']}")
+    if "minimum" in schema and isinstance(value, (int, float)) and value < schema["minimum"]:
+        errors.append(f"{name}: {value} is below the minimum of {schema['minimum']}")
+    if "maximum" in schema and isinstance(value, (int, float)) and value > schema["maximum"]:
+        errors.append(f"{name}: {value} is above the maximum of {schema['maximum']}")
+    if "minLength" in schema and isinstance(value, str) and len(value) < schema["minLength"]:
+        errors.append(f"{name}: must be at least {schema['minLength']} character(s)")
+    if "maxItems" in schema and isinstance(value, list) and len(value) > schema["maxItems"]:
+        errors.append(f"{name}: at most {schema['maxItems']} item(s), got {len(value)}")
+    if isinstance(value, list) and isinstance(schema.get("items"), dict):
+        for index, item in enumerate(value):
+            errors.extend(_check_value(f"{name}[{index}]", item, schema["items"]))
+    return errors
+
+
+def validate_tool_arguments(
+    tool_name: str, arguments: Mapping[str, Any]
+) -> tuple[list[str], dict[str, Any]]:
+    """Validate model-supplied arguments against a tool's declared input schema.
+
+    Returns `(problems, arguments_to_dispatch)`. `problems` is a list of
+    human-readable strings, empty when the arguments are acceptable. The second
+    element is the dict the caller should actually dispatch: integral floats are
+    narrowed to `int` for integer-typed fields, because accepting `20.0` without
+    narrowing it only moves the failure downstream — `relative_strength(top_n=20.0)`
+    reaches `ordered[:top_n]` and raises `TypeError: slice indices must be
+    integers`, which no error classifier recognises, so the whole run aborts.
+
+    Unknown tools validate vacuously — an unregistered tool is a different error,
+    reported elsewhere. Callers must pass the *capability* name: task variants are
+    exposed as `start_<capability>_task` but are handed the capability's own
+    schema, so they validate against the same contract.
+    """
+    contract = HOSTED_TOOL_CONTRACTS.get(tool_name)
+    if contract is None:
+        return [], dict(arguments)
+    schema = contract.get("input_schema") or {}
+    properties: dict[str, Any] = schema.get("properties") or {}
+
+    errors: list[str] = []
+    for required_name in schema.get("required") or []:
+        if required_name not in arguments:
+            errors.append(f"{required_name}: required")
+        elif arguments[required_name] is None:
+            # An explicit null satisfies "key present" but not the handler, which
+            # goes on to call `.upper()` on it. Optional nulls stay allowed below.
+            errors.append(f"{required_name}: required, but was null")
+
+    if schema.get("additionalProperties") is False:
+        unknown = sorted(set(arguments) - set(properties))
+        if unknown:
+            errors.append(
+                f"unknown argument(s) {unknown}; this tool accepts only {sorted(properties)}"
+            )
+
+    normalized = dict(arguments)
+    for name, value in arguments.items():
+        declared = properties.get(name)
+        if declared is None or value is None:
+            continue
+        errors.extend(_check_value(name, value, declared))
+        if declared.get("type") == "integer" and isinstance(value, float) and value.is_integer():
+            normalized[name] = int(value)
+    return errors, normalized

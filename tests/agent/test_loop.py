@@ -1008,11 +1008,24 @@ def test_consult_tool_rejects_empty_question_argument() -> None:
         session_id="loop:consult-empty-question",
     )
 
+    # An empty string violates the contract's own `minLength: 1`, so schema
+    # validation now rejects it at the tool boundary and hands the model a
+    # retryable error instead of raising. The adapter's own guard still covers
+    # what the schema cannot see: a whitespace-only question passes minLength.
+    result = loop.tool_adapter.run_tool(
+        conversation.session_id,
+        "consult_warren_buffett",
+        {"question": ""},
+    )
+    assert result.is_error is True
+    assert result.error_code == "tool_invalid_arguments"
+    assert "question" in result.error_message
+
     with pytest.raises(ValueError, match="question"):
         loop.tool_adapter.run_tool(
             conversation.session_id,
             "consult_warren_buffett",
-            {"question": ""},
+            {"question": "   "},
         )
 
 
