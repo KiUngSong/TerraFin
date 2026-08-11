@@ -3,7 +3,8 @@
 import html
 import logging
 import re
-from datetime import datetime, timezone
+import time
+from datetime import date, datetime, timedelta, timezone
 
 import requests
 
@@ -97,11 +98,13 @@ def get_macro_events_all() -> EventList:
     events: list[CalendarEvent] = []
     day_counter: dict[str, int] = {}
 
+    dropped: list[str] = []
     for release_id, info in MACRO_RELEASES.items():
         try:
             dates = _fetch_release_dates(release_id, api_key)
         except Exception as exc:
             log.warning("FRED release %s (%s) failed: %s", release_id, info["name"], exc)
+            dropped.append(f"{info['name']}({info['importance']})")
             continue
         for date_str in dates:
             try:
@@ -134,23 +137,61 @@ def get_macro_events_all() -> EventList:
             source="Fed schedule",
         ))
 
+    # A dropped release leaves a hole a consumer cannot tell apart from "nothing
+    # scheduled" — the calendar still returns 200 with a plausible-looking list.
+    # High-importance holes are the ones that mislead (CPI, PPI, NFP, PCE), so they
+    # get an ERROR that names what is missing rather than one warning line per
+    # release buried among the rest.
+    if any("(high)" in d for d in dropped):
+        log.error("MACRO CALENDAR INCOMPLETE — high-importance releases missing: %s. "
+                  "Downstream will render this as 'nothing scheduled'.", ", ".join(dropped))
+
     events.sort(key=lambda e: e.start)
     return EventList(events=events)
 
 
 def _fetch_release_dates(release_id: int, api_key: str) -> list[str]:
-    """Upcoming release dates for a FRED release_id."""
-    resp = requests.get(
-        _FRED_RELEASES_URL,
-        params={
-            "release_id": release_id,
-            "api_key": api_key,
-            "file_type": "json",
-            "sort_order": "desc",
-            "include_release_dates_with_no_data": "true",
-            "limit": 20,
-        },
-        timeout=10,
-    )
-    resp.raise_for_status()
-    return [d["date"] for d in resp.json().get("release_dates", [])]
+    """Scheduled release dates for a FRED release_id, from today forward.
+
+    Asks for an explicit forward window. The previous query took the 20 newest
+    dates with no range, which silently truncated the NEAR term for anything
+    frequent: weekly Jobless Claims filled all 20 slots with dates months out and
+    the next print vanished from the calendar.
+
+    Retries: a single 10s timeout against FRED produced 124 swallowed failures in
+    one server log, and every one of them deleted a release from the calendar for
+    the rest of that process's life.
+    """
+    # Window starts BEHIND today: `_session_today()` on the consumer side honours a
+    # backfill pin, so a re-render of an older session needs dates already past.
+    today = date.today()
+    params = {
+        "release_id": release_id,
+        "api_key": api_key,
+        "file_type": "json",
+        "sort_order": "asc",
+        "include_release_dates_with_no_data": "true",
+        "realtime_start": (today - timedelta(days=45)).isoformat(),
+        "realtime_end": (today + timedelta(days=400)).isoformat(),
+        "limit": 200,
+    }
+    last: Exception | None = None
+    # Two attempts, not three: the caller reaches this over HTTP with a 15s client
+    # timeout, so a long retry ladder across 13 releases just moves the failure from
+    # "one release missing" to "the whole calendar request times out".
+    for attempt, timeout in enumerate((12, 20), start=1):
+        try:
+            resp = requests.get(_FRED_RELEASES_URL, params=params, timeout=timeout)
+            # A 4xx is a bad key or a bad release_id — retrying cannot fix it and
+            # would turn a fast, legible config error into a slow one.
+            resp.raise_for_status()
+            return [d["date"] for d in resp.json().get("release_dates", [])]
+        except requests.HTTPError as exc:
+            if exc.response is not None and 400 <= exc.response.status_code < 500:
+                raise
+            last = exc
+        except Exception as exc:  # timeout, connection reset, malformed JSON
+            last = exc
+        if attempt < 2:
+            time.sleep(2)
+    raise last if last else RuntimeError("FRED release dates unavailable")
