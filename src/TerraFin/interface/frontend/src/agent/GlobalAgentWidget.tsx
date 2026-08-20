@@ -1390,7 +1390,7 @@ const GlobalAgentWidget: React.FC = () => {
           onClick={() => setIsOpen(true)}
           aria-label={`Open ${AGENT_UI_NAME}`}
         >
-          AI
+          AGENT
         </button>
       </div>
     );
