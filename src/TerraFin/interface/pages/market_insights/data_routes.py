@@ -118,8 +118,16 @@ def create_market_insights_data_router() -> APIRouter:
         except Exception as exc:
             _raise_investor_positioning_error(exc, guru=guru)
         rows = output.df.to_dict(orient="records")
+        # Ticker rides along so the UI can headline it instead of the 28-char
+        # truncated issuer name. Selected defensively: PortfolioDataFrame
+        # declares no column schema, so a producer without the column is legal.
+        top_columns = [
+            column
+            for column in ("Stock", "Ticker", "% of Portfolio", "Recent Activity", "Updated")
+            if column in output.df.columns
+        ]
         top_holdings = (
-            output.df[["Stock", "% of Portfolio", "Recent Activity", "Updated"]]
+            output.df[top_columns]
             .sort_values(by="% of Portfolio", ascending=False)
             .head(8)
             .to_dict(orient="records")

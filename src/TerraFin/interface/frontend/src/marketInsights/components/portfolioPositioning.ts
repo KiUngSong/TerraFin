@@ -6,6 +6,8 @@ export interface PortfolioHoldingRow {
   Updated: number | string;
   Shares?: string;
   ['Reported Price']?: string;
+  Ticker?: string | null;
+  Cusip?: string | null;
 }
 
 interface PortfolioTone {
@@ -91,6 +93,26 @@ export const splitPortfolioStockLabel = (stock: string): { ticker: string; compa
     ticker: ticker || stock,
     company: rest.join(' - ') || '',
   };
+};
+
+/** Headline the resolved ticker, with the issuer name as the second line.
+ *
+ * A 13F reports `nameOfIssuer`, which the form caps at 28 characters, so names
+ * arrive pre-truncated ("TAIWAN SEMICONDUCTOR MANUFAC"), and every fund in an
+ * umbrella registrant shares one string — "ISHARES INC" is EWY, IEFA, and
+ * three dozen others. The CUSIP-resolved ticker is the only field that
+ * identifies the position, so it leads. Falls back to the issuer name when
+ * OpenFIGI could not map the CUSIP.
+ */
+export const getPortfolioLabel = (row: PortfolioHoldingRow): { ticker: string; company: string } => {
+  const name = (row.Stock || '').trim();
+  const resolved = (row.Ticker || '').trim();
+
+  if (resolved) {
+    return { ticker: resolved.toUpperCase(), company: name };
+  }
+
+  return splitPortfolioStockLabel(name);
 };
 
 export const getPortfolioRowKey = (row: PortfolioHoldingRow): string =>

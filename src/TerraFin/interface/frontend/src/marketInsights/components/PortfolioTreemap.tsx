@@ -8,7 +8,7 @@ import {
   getPortfolioTone,
   parsePortfolioUpdate,
   parsePortfolioWeight,
-  splitPortfolioStockLabel,
+  getPortfolioLabel,
 } from './portfolioPositioning';
 
 interface LayoutTile {
@@ -32,8 +32,83 @@ interface PortfolioTreemapProps {
 const CANVAS_WIDTH = 100;
 const CANVAS_HEIGHT = 100;
 const CANVAS_AREA = CANVAS_WIDTH * CANVAS_HEIGHT;
-const MAX_VISIBLE_COUNT = 10;
-const MIN_VISIBLE_WEIGHT = 5.0; // % of portfolio — below this folds into "Other"
+const MAX_VISIBLE_COUNT = 16;
+const MIN_VISIBLE_WEIGHT = 2.0; // % of portfolio — below this folds into "Other"
+// "Other" is a bucket, not a holding, so its area is clamped at both ends and
+// the true weight is printed on the tile either way.
+//
+// Ceiling: a concentrated-but-long book (89 positions, 4 above 5%) put 67% of
+// the pixels into one grey rectangle and left the real holdings as four strips.
+// Floor: the mirror case, one name at 95%, squeezed Other into a 5%-tall band
+// whose own label clipped — the tail still needs enough room to be clickable
+// and readable.
+const OTHER_MAX_AREA_SHARE = 0.25;
+const OTHER_MIN_AREA_SHARE = 0.1;
+
+// Minimum rendered geometry for a NAMED tile, in canvas units (the canvas is
+// 100x100, so these are percentages). Height carries the two label lines;
+// width carries a ticker plus padding. Anything smaller reads as a clipped
+// smear, so it goes to Other instead.
+const MIN_TILE_HEIGHT = 7;
+const MIN_TILE_WIDTH = 9;
+
+/** Canvas share for the "Other" bucket: its weight share, clamped both ways.
+ *  Zero when nothing folded, so a fully-named portfolio uses the whole canvas. */
+const otherAreaShareFor = (
+  head: { weight: number }[],
+  tail: { weight: number }[],
+): number => {
+  if (tail.length === 0) {
+    return 0;
+  }
+
+  const headWeight = head.reduce((acc, entry) => acc + entry.weight, 0);
+  const tailWeight = tail.reduce((acc, entry) => acc + entry.weight, 0);
+  const total = headWeight + tailWeight || 1;
+
+  return Math.min(
+    Math.max(tailWeight / total, OTHER_MIN_AREA_SHARE),
+    OTHER_MAX_AREA_SHARE,
+  );
+};
+
+interface WeightedEntry {
+  row: PortfolioHoldingRow | null;
+  weight: number;
+  otherCount?: number;
+}
+
+/** Turn a head/tail split into unpositioned tiles: "Other" takes its clamped
+ *  share of the canvas, the named holdings divide the remainder in proportion
+ *  to each other. */
+const layoutEntries = (head: WeightedEntry[], tail: WeightedEntry[]): LayoutTile[] => {
+  const otherAreaShare = otherAreaShareFor(head, tail);
+  const headWeight = head.reduce((acc, entry) => acc + entry.weight, 0) || 1;
+  const headArea = CANVAS_AREA * (1 - otherAreaShare);
+
+  const entries: WeightedEntry[] = [...head];
+  if (tail.length > 0) {
+    entries.push({
+      row: null,
+      weight: tail.reduce((acc, entry) => acc + entry.weight, 0),
+      otherCount: tail.length,
+    });
+  }
+
+  return entries.map((entry) => ({
+    x: 0,
+    y: 0,
+    w: 0,
+    h: 0,
+    area:
+      entry.row === null
+        ? CANVAS_AREA * otherAreaShare
+        : (entry.weight / headWeight) * headArea,
+    row: entry.row,
+    weight: entry.weight,
+    otherCount: entry.otherCount,
+  }));
+};
 
 const worstAspectRatio = (row: LayoutTile[], shortSide: number): number => {
   if (row.length === 0) {
@@ -151,30 +226,31 @@ const buildTiles = (rows: PortfolioHoldingRow[]): LayoutTile[] => {
   let cut = weightedRows.findIndex((r) => r.weight < MIN_VISIBLE_WEIGHT);
   if (cut < 0) cut = weightedRows.length;
   cut = Math.min(Math.max(cut, Math.min(2, weightedRows.length)), MAX_VISIBLE_COUNT);
-  const head = weightedRows.slice(0, cut);
-  const tail = weightedRows.slice(cut);
-  const entries = [...head];
-  if (tail.length > 0) {
-    entries.push({
-      row: null,
-      weight: tail.reduce((acc, t) => acc + t.weight, 0),
-      otherCount: tail.length,
-    });
+  let head = weightedRows.slice(0, cut);
+  let tail = weightedRows.slice(cut);
+
+  // Then fold by RENDERED GEOMETRY, not area. Area alone passes tiles that are
+  // wide and 4% tall, which clip their own label mid-glyph — a name like
+  // "Seagate Technology Hldngs Pl" needs real height, and a squarified strip
+  // decides height only after layout. So: lay out, find any named tile shorter
+  // than MIN_TILE_HEIGHT or narrower than MIN_TILE_WIDTH, drop the smallest head
+  // entry into Other, and lay out again. Monotone, so it terminates; the top
+  // holding always survives.
+  for (let attempt = 0; attempt <= weightedRows.length; attempt += 1) {
+    const candidate = squarify(layoutEntries(head, tail));
+    const unreadable = candidate.some(
+      (tile) => tile.row !== null && (tile.h < MIN_TILE_HEIGHT || tile.w < MIN_TILE_WIDTH),
+    );
+
+    if (!unreadable || head.length <= 1) {
+      return candidate;
+    }
+
+    tail = [head[head.length - 1], ...tail];
+    head = head.slice(0, -1);
   }
 
-  const totalWeight = entries.reduce((acc, e) => acc + e.weight, 0) || 1;
-  const normalized: LayoutTile[] = entries.map((e) => ({
-    x: 0,
-    y: 0,
-    w: 0,
-    h: 0,
-    area: (e.weight / totalWeight) * CANVAS_AREA,
-    row: e.row,
-    weight: e.weight,
-    otherCount: e.otherCount,
-  }));
-
-  return squarify(normalized);
+  return squarify(layoutEntries(head, tail));
 };
 
 const PortfolioTreemap: React.FC<PortfolioTreemapProps> = ({
@@ -313,11 +389,33 @@ const PortfolioTreemap: React.FC<PortfolioTreemapProps> = ({
                       fontFamily: 'var(--tf-mono)',
                     }}
                   >
-                    <div style={{ fontSize: 'var(--tf-fs-xs)', fontWeight: 700, letterSpacing: '0.04em' }}>OTHER</div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', gap: 8, fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>
-                      <span style={{ fontSize: 'var(--tf-fs-micro)' }}>{tile.otherCount} holdings</span>
-                      <span style={{ fontSize: 'var(--tf-fs-base)', fontWeight: 700 }}>{tile.weight.toFixed(2)}%</span>
+                    {/* A short band cannot stack two rows without clipping the
+                        label, so it collapses onto one line. */}
+                    <div
+                      style={{
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'baseline',
+                        gap: 8,
+                        fontSize: 'var(--tf-fs-xs)',
+                        fontWeight: 700,
+                        letterSpacing: '0.04em',
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      <span>OTHER</span>
+                      {tile.h < 12 ? (
+                        <span style={{ fontSize: 'var(--tf-fs-micro)', fontWeight: 600, opacity: 0.85 }}>
+                          {tile.otherCount} holdings · {tile.weight.toFixed(2)}%
+                        </span>
+                      ) : null}
                     </div>
+                    {tile.h >= 12 ? (
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', gap: 8, fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>
+                        <span style={{ fontSize: 'var(--tf-fs-micro)' }}>{tile.otherCount} holdings</span>
+                        <span style={{ fontSize: 'var(--tf-fs-base)', fontWeight: 700 }}>{tile.weight.toFixed(2)}%</span>
+                      </div>
+                    ) : null}
                   </div>
                 </button>
               );
@@ -325,7 +423,7 @@ const PortfolioTreemap: React.FC<PortfolioTreemapProps> = ({
             const row = tile.row;
             const rowKey = getPortfolioRowKey(row);
             const tone = getPortfolioTone(row.Updated, row['Recent Activity']);
-            const stock = splitPortfolioStockLabel(row.Stock || '');
+            const stock = getPortfolioLabel(row);
             const weight = parsePortfolioWeight(row['% of Portfolio']);
             const update = parsePortfolioUpdate(row.Updated);
             const isActive = activeRowKey === rowKey;
@@ -393,7 +491,7 @@ const PortfolioTreemap: React.FC<PortfolioTreemapProps> = ({
                     >
                       {stock.ticker}
                     </div>
-                    {isLarge && stock.company ? (
+                    {(isLarge || isMedium) && stock.company ? (
                       <div
                         style={{
                           marginTop: 4,

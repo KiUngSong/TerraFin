@@ -18,7 +18,7 @@ import {
   PortfolioHoldingRow,
   getPortfolioRowKey,
   parsePortfolioWeight,
-  splitPortfolioStockLabel,
+  getPortfolioLabel,
 } from './components/portfolioPositioning';
 
 interface InvestorPositioningPayload {
@@ -148,7 +148,7 @@ const MarketInsightsPage: React.FC = () => {
       .sort((left, right) => parsePortfolioWeight(right['% of Portfolio']) - parsePortfolioWeight(left['% of Portfolio']))
       .slice(0, 10)
       .map((holding, index) => {
-        const label = splitPortfolioStockLabel(holding.Stock);
+        const label = getPortfolioLabel(holding);
         return {
           rank: index + 1,
           ticker: label.ticker,
@@ -158,7 +158,7 @@ const MarketInsightsPage: React.FC = () => {
           updated: holding.Updated,
         };
       });
-    const activeLabel = activeHolding ? splitPortfolioStockLabel(activeHolding.Stock) : null;
+    const activeLabel = activeHolding ? getPortfolioLabel(activeHolding) : null;
     void publishAgentViewContext({
       source: 'market-insights-page',
       scope: 'page',

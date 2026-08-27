@@ -10,7 +10,7 @@ import {
   hasPortfolioFieldValue,
   parsePortfolioUpdate,
   parsePortfolioWeight,
-  splitPortfolioStockLabel,
+  getPortfolioLabel,
 } from './portfolioPositioning';
 
 interface PortfolioHoldingDetailsProps {
@@ -54,14 +54,14 @@ const PortfolioHoldingDetails: React.FC<PortfolioHoldingDetailsProps> = ({
   height = '100%',
 }) => {
   const { isMobile } = useViewportTier();
-  const activeTicker = activeRow ? splitPortfolioStockLabel(activeRow.Stock) : null;
+  const activeTicker = activeRow ? getPortfolioLabel(activeRow) : null;
   const activeWeight = activeRow ? parsePortfolioWeight(activeRow['% of Portfolio']) : null;
   const activeUpdate = activeRow ? parsePortfolioUpdate(activeRow.Updated) : null;
   const activeTone = activeRow ? getPortfolioTone(activeRow.Updated, activeRow['Recent Activity']) : null;
   const rankedHoldings = (rows.length > 0 ? rows : topHoldings)
     .slice()
     .sort((left, right) => parsePortfolioWeight(right['% of Portfolio']) - parsePortfolioWeight(left['% of Portfolio']));
-  const largestTicker = topHoldings[0] ? splitPortfolioStockLabel(topHoldings[0].Stock) : rows[0] ? splitPortfolioStockLabel(rows[0].Stock) : null;
+  const largestTicker = topHoldings[0] ? getPortfolioLabel(topHoldings[0]) : rows[0] ? getPortfolioLabel(rows[0]) : null;
   const largestWeight = topHoldings[0]
     ? parsePortfolioWeight(topHoldings[0]['% of Portfolio'])
     : rows[0]
@@ -267,7 +267,7 @@ const PortfolioHoldingDetails: React.FC<PortfolioHoldingDetailsProps> = ({
             <div style={{ display: 'grid', gap: 4 }}>
               {rankedHoldings.map((holding, index) => {
                 const rowKey = getPortfolioRowKey(holding);
-                const ticker = splitPortfolioStockLabel(holding.Stock);
+                const ticker = getPortfolioLabel(holding);
                 const weight = parsePortfolioWeight(holding['% of Portfolio']);
                 const update = parsePortfolioUpdate(holding.Updated);
                 const isActive = activeKey === rowKey;
