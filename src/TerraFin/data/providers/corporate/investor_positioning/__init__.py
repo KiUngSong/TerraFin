@@ -14,7 +14,6 @@ from TerraFin.data.providers.corporate.filings.sec_edgar.holdings import (
     get_guru_filings_index,
     get_guru_holdings,
     get_guru_holdings_for_date,
-    get_guru_holdings_history,
 )
 
 

@@ -162,8 +162,43 @@ def test_parse_13f_xml_captures_cusip_per_issuer() -> None:
     assert result["Mystery Trust"]["cusips"] == set()
 
 
+def test_format_rows_batches_cusip_lookups_into_one_post(monkeypatch, tmp_path) -> None:
+    """One post per CUSIP is what tripped OpenFIGI's rate limit; keep it batched."""
+    from TerraFin.data.cache import manager as cache_module
+    from TerraFin.data.providers.corporate import cusip_resolver
+
+    monkeypatch.setattr(cache_module, "_FILE_CACHE_DIR", tmp_path)
+    posts: list[list[dict]] = []
+
+    class _Resp:
+        status_code = 200
+
+        def __init__(self, count: int) -> None:
+            self._count = count
+
+        def json(self):
+            return [{"data": [{"ticker": f"T{i}", "exchCode": "US"}]} for i in range(self._count)]
+
+    def fake_post(url, json=None, timeout=None):
+        posts.append(json)
+        return _Resp(len(json))
+
+    monkeypatch.setattr(cusip_resolver.requests, "post", fake_post)
+
+    current = {
+        f"Issuer {i}": {"value": 100 + i, "shares": 10, "cusips": {f"03783310{i}"}} for i in range(9)
+    }
+
+    rows = holdings._format_rows(current, previous=None)
+
+    assert len(posts) == 1, f"expected one batched post for 9 CUSIPs, got {len(posts)}"
+    assert len(posts[0]) == 9
+    assert all(row["Ticker"] for row in rows)
+
+
 def test_format_rows_emits_ticker_and_cusip(monkeypatch) -> None:
     monkeypatch.setattr(holdings, "resolve_cusip_to_ticker", lambda cusip: {"037833100": "AAPL"}.get(cusip))
+    monkeypatch.setattr(holdings, "resolve_cusips_to_tickers", lambda cusips: {})
     rows = holdings._format_rows(
         current={
             "Apple Inc": {"value": 1000, "shares": 50, "cusips": {"037833100"}},

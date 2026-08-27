@@ -23,7 +23,10 @@ from defusedxml import ElementTree as ET
 from defusedxml.common import DefusedXmlException
 
 from TerraFin.data.cache.policy import ttl_for
-from TerraFin.data.providers.corporate.cusip_resolver import resolve_cusip_to_ticker
+from TerraFin.data.providers.corporate.cusip_resolver import (
+    resolve_cusip_to_ticker,
+    resolve_cusips_to_tickers,
+)
 from TerraFin.data.providers.corporate.filings.sec_edgar.filing import create_sec_client
 
 
@@ -228,10 +231,19 @@ def _fetch_holdings_raw(cik: int, accession: str) -> dict[str, dict]:
     return _parse_13f_xml(xml_text)
 
 
-def _resolve_row_ticker(cusips: set[str]) -> str | None:
-    """Pick the first CUSIP that resolves via OpenFIGI, or None."""
+def _resolve_row_ticker(cusips: set[str], resolved: dict[str, str | None] | None = None) -> str | None:
+    """Pick the first CUSIP that resolves to a ticker, or None.
+
+    `resolved` is the batch result `_format_rows` already holds; reading it
+    beats re-reading the disk cache twice per CUSIP. A CUSIP absent from it
+    falls back to the single-CUSIP path.
+    """
     for cusip in sorted(cusips):
-        ticker = resolve_cusip_to_ticker(cusip)
+        key = (cusip or "").strip().upper()
+        if resolved is not None and key in resolved:
+            ticker = resolved[key]
+        else:
+            ticker = resolve_cusip_to_ticker(cusip)
         if ticker:
             return ticker
     return None
@@ -257,7 +269,6 @@ def _build_activity(
 def _format_rows(
     current: dict[str, dict],
     previous: dict[str, dict] | None,
-    sparklines: dict[str, list] | None = None,
 ) -> list[dict]:
     """Format raw holdings into display rows with share change vs previous quarter.
 
@@ -266,9 +277,22 @@ def _format_rows(
     unit trusts) and a `Cusip` column (primary CUSIP, sorted picks first).
     Downstream agents must use `Ticker` (not `Stock`) when calling
     ticker-input tools like `company_info`, `earnings`, `financials`.
-    `History` is a list of share counts across quarters (None where not held),
-    or "-" when sparklines are not available.
+    `History` is always "-". The frontend still renders a sparkline from it when
+    it is a list (`PortfolioHoldingDetails.tsx:322`), but no reachable code path
+    ever produced one: the single producer was `get_guru_holdings_history`, which
+    had no callers, so the chart never drew. That producer is gone; reviving the
+    feature means feeding this field from the quarters the prefetch already
+    caches.
     """
+    # Resolve every CUSIP in one batched OpenFIGI call and keep the result, so
+    # the row loop reads a dict instead of the disk. One post per CUSIP tripped
+    # OpenFIGI's 25-per-minute unauthenticated limit on an 89-position
+    # portfolio: the throttled tail 429'd, went uncached, and cost 4.0s again
+    # on every single render.
+    resolved_tickers = resolve_cusips_to_tickers(
+        cusip for holding in current.values() for cusip in (holding.get("cusips") or ())
+    )
+
     total_value = sum(h["value"] for h in current.values())
     rows = []
     for name, h in sorted(current.items(), key=lambda x: -x[1]["value"]):
@@ -276,11 +300,10 @@ def _format_rows(
         cur_shares = h["shares"]
         cusips = h.get("cusips") or set()
         primary_cusip = sorted(cusips)[0] if cusips else None
-        ticker = _resolve_row_ticker(cusips) if cusips else None
+        ticker = _resolve_row_ticker(cusips, resolved_tickers) if cusips else None
         activity, updated = _build_activity(cur_shares, previous, name)
-        history = sparklines.get(name, []) if sparklines is not None else "-"
         rows.append({
-            "History": history,
+            "History": "-",
             "Stock": name,
             "Ticker": ticker,
             "Cusip": primary_cusip,
@@ -291,15 +314,6 @@ def _format_rows(
             "Reported Price": f"${h['value'] / cur_shares:.2f}" if cur_shares > 0 else "-",
         })
     return rows
-
-
-def _build_sparklines(raw_sequence: list[dict[str, dict]]) -> dict[str, list[int | None]]:
-    """Build share sparkline for every holding across all quarters (oldest → newest)."""
-    all_names = {name for quarter in raw_sequence for name in quarter}
-    return {
-        name: [quarter.get(name, {}).get("shares") for quarter in raw_sequence]
-        for name in all_names
-    }
 
 
 def _index_source(guru_name: str) -> str:
@@ -458,66 +472,6 @@ def get_guru_holdings_for_date(
     info = {"Period": period, "Portfolio Date": entry_filing_date, "Source": source_url}
     rows = _format_rows(raw, previous)
     return info, rows
-
-
-def get_guru_holdings_history(guru_name: str) -> list[dict]:
-    """Fetch up to _HISTORY_QUARTERS 13F filings for a guru.
-
-    Returns a list of filing dicts, newest first. Each dict has:
-        filing_date, period, accession, info, rows
-    where rows[*]["History"] is a list of share counts across all fetched
-    quarters (oldest → newest), None where the holding was absent.
-    """
-    if guru_name not in GURU_CIK:
-        raise ValueError(f"Unknown guru: {guru_name}. Available: {list(GURU_CIK.keys())}")
-
-    from TerraFin.data.cache.registry import get_cache_manager
-
-    cik = GURU_CIK[guru_name]
-    source = _ensure_index_registered(guru_name, cik)
-    filings_index = get_cache_manager().get_payload(source).payload
-
-    if not filings_index:
-        return []
-
-    # Fetch raw holdings oldest → newest for sparkline alignment
-    all_raw: list[tuple[dict, str, str, str]] = []
-    for entry in reversed(filings_index):
-        accession = entry["accession"]
-        filing_date = entry["filing_date"]
-        try:
-            raw = _fetch_or_cached_raw(cik, guru_name, accession, filing_date)
-        except (requests.RequestException, ValueError, DefusedXmlException) as exc:
-            log.warning("Failed to fetch 13F for %s/%s: %s; using empty", guru_name, filing_date, exc)
-            raw = {}
-        period_date = entry.get("report_date") or filing_date
-        try:
-            d = datetime.strptime(period_date, "%Y-%m-%d")
-            period = f"Q{(d.month - 1) // 3 + 1} {d.year}"
-        except ValueError:
-            period = period_date
-        all_raw.append((raw, accession, filing_date, period))
-
-    # Build sparklines across all quarters
-    sparklines = _build_sparklines([r for r, _, _, _ in all_raw])
-    source_url = f"https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK={cik}&type=13F"
-
-    # Build result newest → oldest
-    result = []
-    for idx in range(len(all_raw) - 1, -1, -1):
-        raw, accession, filing_date, period = all_raw[idx]
-        previous = all_raw[idx - 1][0] if idx > 0 else None
-        rows = _format_rows(raw, previous, sparklines)
-        info = {"Period": period, "Portfolio Date": filing_date, "Source": source_url}
-        result.append({
-            "filing_date": filing_date,
-            "period": period,
-            "accession": accession,
-            "info": info,
-            "rows": rows,
-        })
-
-    return result
 
 
 def get_guru_holdings(guru_name: str) -> tuple[dict, list[dict]]:

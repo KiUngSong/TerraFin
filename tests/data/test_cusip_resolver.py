@@ -91,3 +91,38 @@ def test_resolve_cusip_swallows_request_exceptions(monkeypatch) -> None:
     monkeypatch.setattr(cusip_resolver.requests, "post", boom)
 
     assert cusip_resolver.resolve_cusip_to_ticker("037833100") is None
+
+
+def test_transport_failure_is_cached_so_it_is_not_retried_every_call(monkeypatch) -> None:
+    """A 429 must cost one request per retry window, not one per render."""
+    calls = {"n": 0}
+
+    def rate_limited(url, json=None, timeout=None):
+        calls["n"] += 1
+        return _StubResponse([], status_code=429)
+
+    monkeypatch.setattr(cusip_resolver.requests, "post", rate_limited)
+
+    assert cusip_resolver.resolve_cusip_to_ticker("037833100") is None
+    assert cusip_resolver.resolve_cusip_to_ticker("037833100") is None
+    assert calls["n"] == 1
+
+
+def test_batch_resolve_sends_one_post_per_chunk(monkeypatch) -> None:
+    bodies = []
+
+    def fake_post(url, json=None, timeout=None):
+        bodies.append(json)
+        return _StubResponse([{"data": [{"ticker": f"T{i}", "exchCode": "US"}]} for i in range(len(json))])
+
+    monkeypatch.setattr(cusip_resolver.requests, "post", fake_post)
+
+    cusips = [f"03783310{i}" for i in range(9)] + ["464286772", "594918104"]
+    resolved = cusip_resolver.resolve_cusips_to_tickers(cusips)
+
+    assert len(bodies) == 2, "11 CUSIPs must batch into 2 posts, not 11"
+    assert len(bodies[0]) == cusip_resolver._MAX_JOBS_PER_REQUEST
+    assert len(bodies[1]) == 1
+    assert resolved["464286772"] == "T9"
+    # Positional mapping: results[i] belongs to jobs[i].
+    assert resolved[cusips[0]] == "T0"
