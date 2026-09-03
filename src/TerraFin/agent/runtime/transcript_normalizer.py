@@ -84,6 +84,11 @@ class TranscriptNormalizer:
                     synthetic_tool_use = TerraFinConversationMessage(
                         role="assistant",
                         content="",
+                        # Inherit the paired result's timestamp. The default factory
+                        # stamps load time, which put a future-dated message in the
+                        # middle of an old transcript and made created_at
+                        # non-monotonic — the one source of it in the tree.
+                        created_at=message.created_at,
                         metadata={"internalOnly": True, "internalToolUse": True},
                         blocks=(
                             make_tool_use_block(

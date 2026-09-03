@@ -664,6 +664,154 @@
   word-break: break-word;
 }
 
+/* Markdown-rendered assistant turns. `pre-wrap` above is right for raw text but
+   doubles every gap once the source newlines sit inside real block elements, and
+   browser default heading margins are far too large for a chat bubble. */
+.tf-agent-message__body--md {
+  white-space: normal;
+}
+
+.tf-agent-message__body--md > :first-child {
+  margin-top: 0;
+}
+
+.tf-agent-message__body--md > :last-child {
+  margin-bottom: 0;
+}
+
+.tf-agent-message__body--md p {
+  margin: 0 0 var(--tf-space-2);
+}
+
+.tf-agent-message__body--md h1,
+.tf-agent-message__body--md h2,
+.tf-agent-message__body--md h3,
+.tf-agent-message__body--md h4 {
+  margin: var(--tf-space-3) 0 var(--tf-space-2);
+  font-weight: 600;
+  line-height: 1.3;
+  color: var(--tf-text-strong);
+}
+
+.tf-agent-message__body--md h1,
+.tf-agent-message__body--md h2 {
+  font-size: var(--tf-fs-md);
+}
+
+.tf-agent-message__body--md h3,
+.tf-agent-message__body--md h4 {
+  font-size: var(--tf-fs-base);
+}
+
+.tf-agent-message__body--md ul,
+.tf-agent-message__body--md ol {
+  margin: 0 0 var(--tf-space-2);
+  padding-left: 1.25em;
+}
+
+.tf-agent-message__body--md li {
+  margin: 0 0 2px;
+}
+
+.tf-agent-message__body--md li > p {
+  margin: 0;
+}
+
+.tf-agent-message__body--md strong {
+  color: var(--tf-text-strong);
+  font-weight: 600;
+}
+
+.tf-agent-message__body--md code {
+  padding: 1px 4px;
+  border-radius: var(--tf-radius);
+  background: var(--tf-bg-hover);
+  font-size: var(--tf-fs-xs);
+}
+
+.tf-agent-message__body--md pre {
+  margin: 0 0 var(--tf-space-2);
+  padding: var(--tf-space-2);
+  border-radius: var(--tf-radius);
+  background: var(--tf-bg-hover);
+  overflow-x: auto;
+}
+
+.tf-agent-message__body--md pre code {
+  padding: 0;
+  background: none;
+}
+
+.tf-agent-message__body--md blockquote {
+  margin: 0 0 var(--tf-space-2);
+  padding-left: var(--tf-space-2);
+  border-left: 2px solid var(--tf-border-strong);
+  color: var(--tf-muted);
+}
+
+.tf-agent-message__body--md hr {
+  margin: var(--tf-space-3) 0;
+  border: 0;
+  border-top: 1px solid var(--tf-border);
+}
+
+.tf-agent-message__body--md a {
+  color: var(--tf-accent);
+}
+
+.tf-agent-message__img {
+  max-width: 100%;
+  height: auto;
+  border-radius: var(--tf-radius);
+}
+
+.tf-agent-message__img-blocked {
+  color: var(--tf-muted);
+  font-style: italic;
+}
+
+/* GFM tables. The bubble is narrow, so the table scrolls inside its own box
+   rather than widening the panel. */
+.tf-agent-message__body--md table {
+  /* Cells set only border-right/bottom, so lines are single under either box
+     model; the table's own top and left edges are intentionally open. */
+  display: block;
+  width: 100%;
+  margin: 0 0 var(--tf-space-2);
+  border-collapse: collapse;
+  overflow-x: auto;
+  font-size: var(--tf-fs-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+.tf-agent-message__body--md th,
+.tf-agent-message__body--md td {
+  padding: 3px 8px;
+  border-right: 1px solid var(--tf-border);
+  border-bottom: 1px solid var(--tf-border);
+  text-align: left;
+  white-space: nowrap;
+}
+
+.tf-agent-message__body--md th {
+  background: var(--tf-bg-hover);
+  color: var(--tf-text-strong);
+  font-weight: 600;
+}
+
+/* No default right-align. By position it right-ragged text columns; by cell
+   content it split a column whenever one value was bold, coded, a placeholder or
+   an accounting negative, which reads as broken rather than as a choice. Left is
+   never wrong, and an explicit `---:` still wins as an inline style. */
+
+.tf-agent-message__body--md del {
+  color: var(--tf-muted);
+}
+
+.tf-agent-message__body--md input[type='checkbox'] {
+  margin-right: 4px;
+}
+
 .tf-agent-message--status {
   padding: 10px 12px;
 }

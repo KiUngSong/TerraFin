@@ -1,4 +1,6 @@
 import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import { AgentShellDrawer } from './layout';
 import { getAgentViewContextId } from './viewContext';
 import { useTerminalStore } from '../terminal/store';
@@ -106,11 +108,41 @@ interface HostedRunResponse {
   toolResults: HostedToolResult[];
 }
 
+const isSameOriginUrl = (value: string) => {
+  try {
+    return new URL(value, window.location.href).origin === window.location.origin;
+  } catch {
+    return false;
+  }
+};
+
+const isInternalOnly = (message: HostedConversationMessage) =>
+  Boolean((message.metadata as Record<string, unknown> | undefined)?.internalOnly);
+
+const transcriptSignature = (messages: HostedConversationMessage[] | undefined) => {
+  const real = (messages || []).filter((message) => !isInternalOnly(message));
+  const visible = real.filter(
+    (message) => message.role !== 'system' && message.role !== 'tool'
+  );
+  return `${real.length}:${visible[visible.length - 1]?.createdAt ?? ''}`;
+};
+
 type SendStatusState =
   | {
-      kind: 'working' | 'error';
+      kind: 'working';
       content: string;
       createdAt: string;
+    }
+  | {
+      kind: 'error';
+      content: string;
+      createdAt: string;
+      // What retires this error. 'nothing' — the message never reached the
+      // transcript, so only the user can act. 'turn-end' — the notice describes a
+      // turn rather than the message, so that turn ending retires it, whether it
+      // ends by answering or by dying. Two booleans let the exits disagree about
+      // the same state; one question cannot.
+      retiredBy: 'nothing' | 'turn-end';
     }
   | null;
 
@@ -143,10 +175,16 @@ interface HostedTaskListResponse {
 }
 
 const REQUEST_TIMEOUT_MS = 12000;
+const RESYNC_POLL_INTERVAL_MS = 5000;
+const SCROLL_PIN_SLACK_PX = 48;
 const SEND_REQUEST_TIMEOUT_MS = 240000;
 const SEND_TOOL_POLL_INTERVAL_MS = 1500;
 const SEND_RECONCILE_POLL_MS = 1500;
 const SEND_RECONCILE_WINDOW_MS = 8000;
+// A foreground turn dies with its own request, so anything older than the
+// send timeout plus its reconcile window is history, not a stall.
+const RESYNC_LIVE_WINDOW_SECONDS =
+  (SEND_REQUEST_TIMEOUT_MS + SEND_RECONCILE_WINDOW_MS) / 1000;
 const TASK_POLL_INTERVAL_MS = 1500;
 const MODEL_REFRESH_INTERVAL_MS = 60000;
 const CATALOG_STALE_MS = 60000;
@@ -183,7 +221,62 @@ const AgentMessageItem = memo(
             <span>{roleLabel(message)}</span>
           </div>
         ) : null}
-        <div className="tf-agent-message__body">{message.content}</div>
+        {message.role === 'assistant' ? (
+          // The agent answers in markdown. Rendering it as a raw string put every
+          // ##, ** and list dash on screen as literal characters. Only assistant
+          // turns: user text is shown as typed, and tool/system bodies are JSON.
+          <div className="tf-agent-message__body tf-agent-message__body--md">
+            <ReactMarkdown
+              remarkPlugins={[remarkGfm]}
+              components={{
+                a: ({ node, ...props }) => (
+                  // Without this the first citation click replaces the document,
+                  // closing the panel and killing any in-flight turn.
+                  <a {...props} target="_blank" rel="noopener noreferrer" />
+                ),
+                img: ({ node, src, alt, ...props }) => {
+                  // A remote src is an outbound GET, with its query string, that
+                  // the model or injected filing text chose — and there is no CSP.
+                  // Same-origin only; anything else degrades to its alt text.
+                  if (typeof src !== 'string' || !src || !isSameOriginUrl(src)) {
+                    return (
+                      <span className="tf-agent-message__img-blocked">
+                        {alt || '[image omitted]'}
+                      </span>
+                    );
+                  }
+                  return (
+                    <img
+                      {...props}
+                      src={src}
+                      alt={alt || ''}
+                      className="tf-agent-message__img"
+                      onLoad={(event) => {
+                        // An unloaded image is a zero-height box, so the pin ran
+                        // against a scrollHeight that excluded it. Only re-pin if
+                        // the user is still at the bottom — re-pinning always
+                        // yanked anyone who had scrolled up to read.
+                        const scroller = event.currentTarget.closest('.tf-agent-transcript');
+                        if (!scroller) {
+                          return;
+                        }
+                        const distance =
+                          scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight;
+                        if (distance < SCROLL_PIN_SLACK_PX) {
+                          scroller.scrollTop = scroller.scrollHeight;
+                        }
+                      }}
+                    />
+                  );
+                },
+              }}
+            >
+              {message.content}
+            </ReactMarkdown>
+          </div>
+        ) : (
+          <div className="tf-agent-message__body">{message.content}</div>
+        )}
       </div>
     );
   },
@@ -434,6 +527,22 @@ const formatApprovalLabel = (approval: HostedApproval) => {
   return approval.toolName || approval.capabilityName;
 };
 
+const TURN_DEATH_MESSAGE: Record<string, string> = {
+  'mid-tool':
+    'A tool call in this chat was interrupted before it finished. Send your message again — it starts a clean exchange using the data already gathered.',
+  'mid-turn':
+    'This chat gathered its data but stopped before answering. Send your message again.',
+  'no-answer': 'This chat stopped before it could answer. Send your message again.',
+};
+
+// The server's 409 says "wait for it to finish" — right at the instant of
+// refusal, wrong for the rest of a notice only the user can retire.
+// Must match TURN_IN_FLIGHT_ERROR_CODE in interface/agent/data_routes.py.
+const TURN_IN_FLIGHT_ERROR_CODE = 'hosted_agent_turn_in_flight';
+
+const SEND_REFUSED_MESSAGE =
+  'Another window or session was already working on this chat, so your message was not sent. It is back in the composer — send it again.';
+
 const parseRuntimeError = (payload: unknown, fallback: string): string => {
   if (payload instanceof Error) {
     return payload.message || fallback;
@@ -515,6 +624,9 @@ const GlobalAgentWidget: React.FC = () => {
   const [pendingMessages, setPendingMessages] = useState<HostedConversationMessage[]>([]);
   const [sendStatus, setSendStatus] = useState<SendStatusState>(null);
   const transcriptRef = useRef<HTMLDivElement | null>(null);
+  // Whether the transcript is scrolled to the bottom. Every auto-scroll is gated
+  // on it so a user reading earlier output is never dragged down.
+  const pinnedRef = useRef(true);
   const promptMenuRef = useRef<HTMLDivElement | null>(null);
   const wasOpenRef = useRef(false);
   const restoreAttemptedRef = useRef(false);
@@ -636,6 +748,7 @@ const GlobalAgentWidget: React.FC = () => {
       setLoadingSessionId(sessionId);
       try {
         const payload = await fetchSessionPayload(sessionId);
+        pinnedRef.current = true; // opening a session shows its latest turn
         setSession(payload);
         setHistoryPinnedSession(Boolean(options.pinnedByHistory));
         setToolResults([]);
@@ -818,6 +931,229 @@ const GlobalAgentWidget: React.FC = () => {
     setError(runtimeSetupMessage);
   }, [isRuntimeConfigured, runtimeSetupMessage]);
 
+  // Reopening must resync, and keep resyncing until the reply lands. The restore
+  // effect below early-returns while a session is active, so a panel closed
+  // mid-run keeps its pre-send snapshot even though the server already has the
+  // answer. Uses fetchSessionPayload, not loadSessionRecord: the latter resets
+  // historyPinnedSession and pendingMessages, which would drop a pinned session
+  // and wipe a message still in flight.
+  const sendingRef = useRef(false);
+  useEffect(() => {
+    sendingRef.current = sending;
+  }, [sending]);
+  const sendStatusRef = useRef<SendStatusState>(null);
+  useEffect(() => {
+    sendStatusRef.current = sendStatus;
+  }, [sendStatus]);
+  // The send flow reports "ran but returned nothing" through `error` with
+  // sendStatus cleared, so guarding on sendStatus alone left a spinner counting
+  // up over a finished run.
+  const errorRef = useRef<string | null>(null);
+  useEffect(() => {
+    errorRef.current = error;
+  }, [error]);
+  // Whether an arriving answer actually contradicts the standing banner.
+  // `setError` is shared by concerns a turn has nothing to do with, so clearing
+  // it on any completed turn made unrelated failures vanish. Only the two setup
+  // messages are disproved by an answer arriving at all.
+  const answerContradictsErrorRef = useRef(false);
+  useEffect(() => {
+    answerContradictsErrorRef.current =
+      error != null && (error === LOCAL_SETUP_MESSAGE || error === runtimeSetupMessage);
+  }, [error, runtimeSetupMessage]);
+  useEffect(() => {
+    // Read through a ref so the resync effect does not list activeSession as a
+    // dependency: its own setSession would otherwise remount it mid-turn.
+    activeSessionRef.current = activeSession;
+  }, [activeSession]);
+  // Growth, not the clock, tells us whether a turn is alive. `elapsed` subtracts a
+  // server timestamp from a client clock, so skew alone must never silence the
+  // indicator, and an unchanged payload must not re-set state — `setSession`
+  // returns a new object each poll, which re-fires the scroll-to-bottom effect.
+  const seenSignatureRef = useRef<string | null>(null);
+  const seededForSessionRef = useRef<string | null>(null);
+  const activeSessionRef = useRef<HostedAgentSession | null>(null);
+  useEffect(() => {
+    if (!isOpen || !activeSessionId || sending || loadingSessionId) {
+      return;
+    }
+    let cancelled = false;
+    let timer: number | null = null;
+    let ticks = 0;
+    const stop = () => {
+      if (timer !== null) {
+        window.clearInterval(timer);
+        timer = null;
+      }
+    };
+    const check = async () => {
+      if (cancelled || sendingRef.current) {
+        stop();
+        return;
+      }
+      ticks += 1;
+      let payload:
+        | (HostedAgentSession & {
+            capabilityCalls?: Array<{
+              capabilityName: string;
+              calledAt: string;
+              inputs?: Record<string, unknown>;
+            }>;
+          })
+        | null = null;
+      try {
+        payload = await fetchSessionPayload(activeSessionId);
+      } catch {
+        return;
+      }
+      if (cancelled || sendingRef.current || !payload) {
+        return;
+      }
+      const visible = (payload.messages || []).filter(
+        (message) => message.role !== 'system' && message.role !== 'tool'
+      );
+      const last = visible[visible.length - 1];
+      const signature = transcriptSignature(payload.messages);
+      const grew = seenSignatureRef.current !== signature;
+      seenSignatureRef.current = signature;
+      if (grew) {
+        setSession(payload);
+      }
+      // The server reports whether it is running a turn. Every transcript-derived
+      // signal is blind during a model call, which is where a multi-step turn
+      // spends most of its time: `calledAt` is stamped only after a capability
+      // returns, unanswered tool_use blocks cover tool time only, and growth
+      // covers neither.
+      const meta = payload.metadata as Record<string, unknown> | undefined;
+      // Liveness comes from the server's in-flight flag alone. `pendingToolCalls`
+      // is a property of the transcript, not a signal: an abandoned tool_use is
+      // durable and can never be answered, so OR-ing it in pinned both exits shut
+      // for the life of the session. Tool time is already inside turnInFlight.
+      const turnInFlight = meta?.turnInFlight === true;
+      const death = typeof meta?.turnUnfinished === 'string' ? meta.turnUnfinished : null;
+      if (!turnInFlight && death) {
+        const standing = sendStatusRef.current;
+        const supersedes = standing?.kind === 'error' && standing.retiredBy === 'nothing';
+        if (supersedes) {
+          // Only the user can retire this one, so the death must not overwrite
+          // it. A 'turn-end' error falls through: that turn has now ended.
+          //
+          // `errorRef` is deliberately not consulted — it is a different UI slot
+          // that already coexists with this one, and consulting it let any stale
+          // banner suppress the death and stop the poller for good, since
+          // `error` is not in this effect's dependencies.
+          stop();
+          return;
+        }
+        // Nothing is running and the newest tool call has no result: the turn died
+        // between appending the call and appending its result. Without this, a
+        // restart mid-tool showed the model's preamble as the finished answer.
+        setSendStatus({
+          kind: 'error',
+          content: TURN_DEATH_MESSAGE[death] ?? TURN_DEATH_MESSAGE['no-answer'],
+          createdAt: new Date().toISOString(),
+          retiredBy: 'turn-end',
+        });
+        stop();
+        return;
+      }
+      if (
+        last &&
+        last.role === 'assistant' &&
+        !turnInFlight &&
+        !death
+      ) {
+        // The turn is done. An assistant message can also be a preamble before
+        // more tool calls (loop.py:295-302 appends it before checking
+        // tool_calls), and the tool-use message itself is internalOnly and
+        // filtered from this payload — so a running tool is detected through
+        // capabilityCalls, not through transcript growth, which cannot tell a
+        // finished answer from a slow tool.
+        // turnUnfinished is excluded above: a turn that died leaves the model's
+        // preamble as the last visible message, so this branch would read it as a
+        // finished answer and erase the send error along with it.
+        const failed = sendStatusRef.current?.kind === 'error' ? sendStatusRef.current : null;
+        if (answerContradictsErrorRef.current && grew) {
+          // `grew` is load-bearing: this branch fires for any session with
+          // prior history, so without it a setup banner raised mid-conversation
+          // was cleared by the *previous* turn's answer within one tick.
+          setError(null);
+        }
+        // Clear a failure only if the turn it described has ended. One that only
+        // the user can retire is the sole record that anything went wrong, and
+        // another turn's answer must not erase it.
+        if (!failed || failed.retiredBy === 'turn-end') {
+          // The turn this notice described has ended, so the notice is spent.
+          setSendStatus(null);
+        }
+        stop();
+        return;
+      }
+      if (sendStatusRef.current?.kind === 'error' || errorRef.current) {
+        // A send already reported a failure; that is the truth, not a spinner.
+        // But a 409 means another turn is genuinely running, so keep polling for
+        // its answer instead of going dark until the panel is reopened.
+        if (!turnInFlight) {
+          stop();
+        }
+        return;
+      }
+      if (last) {
+        // Reopening must look exactly like never having closed: same strings the
+        // send flow's poller produces, rebuilt from the session payload.
+        const turnStartedAt = last.createdAt ? new Date(last.createdAt).getTime() : Date.now();
+        const elapsed = Math.max(0, Math.floor((Date.now() - turnStartedAt) / 1000));
+        const turnCalls = (payload.capabilityCalls || []).filter(
+          (call) => new Date(call.calledAt).getTime() >= turnStartedAt
+        );
+        let content: string;
+        if (turnCalls.length === 0) {
+          content = `Thinking… (${elapsed}s)`;
+        } else {
+          const latest = turnCalls[turnCalls.length - 1];
+          const focus = latest.inputs && (latest.inputs.ticker || latest.inputs.name);
+          const label = focus ? `${latest.capabilityName} · ${focus}` : latest.capabilityName;
+          const suffix = turnCalls.length > 1 ? ` · ${turnCalls.length} tools` : '';
+          content = `Running ${label}…${suffix} (${elapsed}s)`;
+        }
+        // Tick count as well as elapsed: a server clock running ahead of the
+        // browser clamps elapsed to 0 forever, so the time test alone could never
+        // retire a dead turn.
+        const outOfPatience =
+          elapsed > RESYNC_LIVE_WINDOW_SECONDS ||
+          ticks * (RESYNC_POLL_INTERVAL_MS / 1000) > RESYNC_LIVE_WINDOW_SECONDS;
+        if (outOfPatience && !grew && !turnInFlight) {
+          // Stale, not moving, and no tool outstanding: history being read, not a
+          // stall. `!grew` alone did not cover a slow call — the payload only
+          // grows when a result lands, so a single long tool looked idle. Clear any
+          // spinner rather than freezing one on screen, and say nothing. The
+          // `!grew` term means a skewed clock cannot silence a live turn.
+          setSendStatus(null);
+          stop();
+          return;
+        }
+        if (sendStatusRef.current?.content !== content) {
+          setSendStatus({ kind: 'working', content, createdAt: new Date().toISOString() });
+        }
+        return;
+      }
+      stop();
+    };
+    if (seededForSessionRef.current !== activeSessionId) {
+      // Seed once per session. Seeding on every remount let the effect's own
+      // setSession reset the signature, so `grew` became an edge that guarded
+      // for milliseconds instead of a tick.
+      seededForSessionRef.current = activeSessionId;
+      seenSignatureRef.current = transcriptSignature(activeSessionRef.current?.messages);
+    }
+    void check();
+    timer = window.setInterval(() => void check(), RESYNC_POLL_INTERVAL_MS);
+    return () => {
+      cancelled = true;
+      stop();
+    };
+  }, [activeSessionId, fetchSessionPayload, isOpen, loadingSessionId, sending]);
+
   useEffect(() => {
     if (
       !isOpen ||
@@ -873,10 +1209,29 @@ const GlobalAgentWidget: React.FC = () => {
   }, [loadingCatalog]);
 
   useEffect(() => {
+    const scroller = transcriptRef.current;
+    if (!scroller || !isOpen) {
+      return;
+    }
+    // Opening the panel is an unambiguous "show me the latest".
+    pinnedRef.current = true;
+    const track = () => {
+      const distance = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight;
+      pinnedRef.current = distance < SCROLL_PIN_SLACK_PX;
+    };
+    // Deliberately not called here: at attach the node has existed for zero
+    // frames with scrollTop 0, which carries no information about intent.
+    scroller.addEventListener('scroll', track, { passive: true });
+    return () => scroller.removeEventListener('scroll', track);
+  }, [isOpen]);
+
+  useEffect(() => {
     if (!transcriptRef.current || !isOpen) {
       return;
     }
-    transcriptRef.current.scrollTop = transcriptRef.current.scrollHeight;
+    if (pinnedRef.current) {
+      transcriptRef.current.scrollTop = transcriptRef.current.scrollHeight;
+    }
   }, [isOpen, sendStatus, visibleMessageEntries]);
 
   useEffect(() => {
@@ -1066,6 +1421,17 @@ const GlobalAgentWidget: React.FC = () => {
 
   const handleSend = async (content: string) => {
     const trimmedContent = content.trim();
+    // Sending is intent: never leave the user's own turn below the fold.
+    pinnedRef.current = true;
+    // Declared here, not inside the try: the catch needs them to decide whether
+    // the message landed. null means "no baseline" — a 0 fallback would read as
+    // growth and wrongly claim it landed.
+    let baselineUserTurns: number | null = null;
+    let sentToSessionId: string | null = null;
+    const countUserTurns = (messages: HostedConversationMessage[] | undefined) =>
+      (messages || []).filter(
+        (message) => message.role === 'user' && !isInternalOnly(message)
+      ).length;
     if (!currentAgent || !trimmedContent) {
       return;
     }
@@ -1147,11 +1513,15 @@ const GlobalAgentWidget: React.FC = () => {
     try {
       const session = activeSession ?? (await ensureSession({ preserveTransientState: true }));
       if (!session) {
+        // Nothing was sent — ensureSession swallows its error and returns null.
+        // setDraft('') already ran, so give the text back rather than eat it.
         setPendingMessages([]);
         setSendStatus(null);
+        setDraft((current) => (current.trim() ? current : trimmedContent));
         return;
       }
       let baseline = 0;
+      sentToSessionId = session.sessionId;
       try {
         const initial = await fetchRuntimeJson<HostedAgentSession & {
           capabilityCalls?: unknown[];
@@ -1161,6 +1531,7 @@ const GlobalAgentWidget: React.FC = () => {
           'Reading session baseline'
         );
         baseline = (initial.capabilityCalls || []).length;
+        baselineUserTurns = countUserTurns(initial.messages);
       } catch {
         baseline = 0;
       }
@@ -1223,12 +1594,60 @@ const GlobalAgentWidget: React.FC = () => {
         setPendingMessages([]);
         setSendStatus(null);
         setError(displayMessage);
+        // The runtime never accepted the message, so the text is gone unless it
+        // goes back. Guarded on the session it was typed in, since the awaits
+        // above can outlast a switch.
+        if (activeSessionRef.current?.sessionId === sentToSessionId) {
+          setDraft((current) => (current.trim() ? current : trimmedContent));
+        }
       } else {
-        setSendStatus({
-          kind: 'error',
-          content: displayMessage,
-          createdAt: new Date(Date.now() + 2).toISOString(),
-        });
+        // Ask the transcript, not the status code. Inferring "did it land" from a
+        // status triple was wrong in both directions: a bare KeyError/LookupError
+        // maps to 404 *after* loop.py:274 persists the message, and a pre-persist
+        // RuntimeError from _ensure_message_budget (loop.py:268) surfaces as 502.
+        // The server is the only thing that knows.
+        const sessionId = activeSession?.sessionId || readStoredActiveSessionId();
+        // Refused before the message could be appended, whatever the turn count
+        // says — a concurrent sender's message inside the baseline-to-POST
+        // window would otherwise read as growth. Keyed on the server's code, not
+        // on the 409: `_raise_http_error` mints that status for a session
+        // conflict and for an approval requirement too, and this branch skips
+        // the transcript probe and writes a permanent 'nothing' notice, so
+        // reading it off the wrong 409 tells the user a landed message was never
+        // sent and hands their text back to duplicate.
+        const rejectedOutright =
+          (payload as { error?: { code?: string } } | undefined)?.error?.code ===
+          TURN_IN_FLIGHT_ERROR_CODE;
+        let landed = false;
+        if (!rejectedOutright && sessionId && baselineUserTurns !== null) {
+          try {
+            const latest = await fetchSessionPayload(sessionId);
+            landed = countUserTurns(latest.messages) > baselineUserTurns;
+          } catch {
+            landed = false; // could not confirm: assume it never left the browser
+          }
+        }
+        setPendingMessages([]);
+        // The awaits above can outlast a session switch. sendStatus renders as the
+        // last bubble inside the transcript list, so neither the draft nor the
+        // error may be applied to a session that is no longer on screen.
+        if (activeSessionRef.current?.sessionId === sentToSessionId) {
+          if (!landed) {
+            setDraft((current) => (current.trim() ? current : trimmedContent));
+          }
+          setSendStatus({
+            kind: 'error',
+            content: rejectedOutright ? SEND_REFUSED_MESSAGE : displayMessage,
+            createdAt: new Date(Date.now() + 2).toISOString(),
+            // `landed` alone. A 409 is the one case where we *know* the message
+            // never reached the transcript, so it is the strongest 'nothing'
+            // there is — filing it as turn-scoped let the other writer's turn
+            // retire it: exit 2 cleared the notice and appended that writer's
+            // answer in its place, leaving the user a foreign reply, their text
+            // in the composer, and no record that their own send had failed.
+            retiredBy: landed ? 'turn-end' : 'nothing',
+          });
+        }
       }
     } finally {
       stopToolPolling();

@@ -1,4 +1,7 @@
+import fcntl
 import json
+import logging
+import os
 from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
@@ -17,6 +20,8 @@ from ..contracts.conversation import (
 )
 from ..contracts.conversation_state import RUNTIME_MODEL_METADATA_KEY
 
+
+_logger = logging.getLogger(__name__)
 
 TRANSCRIPT_STORE_VERSION = 3
 TranscriptEventType = Literal[
@@ -83,10 +88,16 @@ class HostedTranscriptSummary:
 
 
 class HostedTranscriptLock:
-    def __init__(self) -> None:
+    def __init__(self, *, index_lock_path: Path | None = None) -> None:
         self._global_lock = Lock()
         self._session_locks: dict[str, RLock] = {}
         self._index_lock = RLock()
+        # The index is a whole-file read-modify-write and an RLock covers one
+        # process. Two writers is this store's normal deployment, and a lost
+        # update there silently reverts the other's `updated_at`.
+        self._index_lock_path = index_lock_path
+        self._index_depth = 0
+        self._warned_unlocked = False
 
     def _session_lock(self, session_id: str) -> RLock:
         with self._global_lock:
@@ -101,12 +112,80 @@ class HostedTranscriptLock:
         finally:
             lock.release()
 
-    @contextmanager
-    def index(self) -> Iterator[None]:
-        self._index_lock.acquire()
+    def _acquire_index_file(self) -> int | None:
+        """Blocking LOCK_EX on the index, or None if locking is unavailable.
+
+        Fails open, as `agent/runtime/inflight.py` does: a read-only mount must not
+        take the store down. Writers only — serialising readers measured 2.2x worse
+        than no cross-process lock at all, and they do not need it, since
+        `replace()` is atomic.
+        """
+        if self._index_lock_path is None:
+            # Same symptom as a failed flock, and previously the only silent one:
+            # no lock means every write nulls the snapshot, and a lock-free reader
+            # then pays a full re-parse.
+            self._warn_unlocked(OSError("no index lock path configured"))
+            return None
         try:
-            yield
+            handle = os.open(self._index_lock_path, os.O_RDONLY | os.O_CREAT, 0o644)
+        except OSError as exc:
+            self._warn_unlocked(exc)
+            return None
+        try:
+            fcntl.flock(handle, fcntl.LOCK_EX)
+        except OSError as exc:
+            os.close(handle)
+            self._warn_unlocked(exc)
+            return None
+        return handle
+
+    def _warn_unlocked(self, exc: OSError) -> None:
+        """Say so once. The fail-open is deliberate; its cost is not obvious.
+
+        Without the lock every write discards the index cache, and since readers are
+        lock-free that cache is all that stands between a GET and a full re-parse.
+        """
+        if self._warned_unlocked:
+            return
+        self._warned_unlocked = True
+        _logger.warning(
+            "transcript index lock unavailable at %s (%s); index writes will run "
+            "unserialised across processes and will not cache",
+            self._index_lock_path,
+            exc,
+        )
+
+    @contextmanager
+    def index(self) -> Iterator[bool]:
+        """Serialise a read-modify-write of the index, across processes.
+
+        Yields whether the lock was actually acquired. Yielded rather than stored:
+        as ambient state it could be read outside any frame and answer plausibly and
+        wrongly. Re-entrant, because `flock` is per open file description and a
+        nested acquire would deadlock against the frame above.
+        """
+        self._index_lock.acquire()
+        handle = None
+        # An inner frame reuses the outer's lock: acquiring again would open a
+        # second descriptor and block against this thread's own hold. It yields
+        # False for `locked` — it did not take the lock, so it must not be the
+        # frame that decides to trust a stat. The depth moves with the frame, not
+        # with the handle, since the acquire fails open.
+        outermost = self._index_depth == 0
+        try:
+            if outermost:
+                handle = self._acquire_index_file()
+            self._index_depth += 1
+            try:
+                yield handle is not None
+            finally:
+                self._index_depth -= 1
         finally:
+            if handle is not None:
+                try:
+                    fcntl.flock(handle, fcntl.LOCK_UN)
+                finally:
+                    os.close(handle)
             self._index_lock.release()
 
 
@@ -172,30 +251,42 @@ class HostedTranscriptStore:
         self.sessions_dir = self.root_dir / "sessions"
         self.sessions_dir.mkdir(parents=True, exist_ok=True)
         self.index_path = self.sessions_dir / "sessions.json"
-        self.lock = HostedTranscriptLock()
+        self.lock = HostedTranscriptLock(index_lock_path=self.sessions_dir / "sessions.lock")
+        # One temp name per store instance. A single shared `sessions.tmp` let
+        # two processes interleave into one file; a fresh name per write leaked
+        # the whole file on SIGKILL and needed a reaper that could delete a temp
+        # another process was mid-write. Per instance is unique without either.
+        self._index_temp_path = self.index_path.with_name(
+            f"{self.index_path.stem}.{os.getpid()}.{uuid4().hex}.tmp"
+        )
+        # Key and entries as one attribute, so a lock-free reader cannot pair a
+        # new key with old entries. One assignment, one read, atomic under the
+        # GIL.
+        self._index_snapshot: tuple[tuple[int, int, int], dict[str, HostedSessionIndexEntry]] | None = None
+        self.index_reparses = 0
         self.reader = HostedTranscriptReader(self)
         self._initialize_index()
 
     def _initialize_index(self) -> None:
-        with self.lock.index():
+        with self.lock.index() as locked:
             if not self.index_path.exists():
-                self._save_index_unlocked({})
+                self._save_index_unlocked({}, locked=locked)
                 return
             try:
                 payload = json.loads(self.index_path.read_text(encoding="utf-8"))
             except Exception:
-                self._reset_index_unlocked()
+                self._reset_index_unlocked(locked=locked)
                 return
             if not isinstance(payload, dict) or int(payload.get("version", 0)) != TRANSCRIPT_STORE_VERSION:
-                self._reset_index_unlocked()
+                self._reset_index_unlocked(locked=locked)
 
-    def _reset_index_unlocked(self) -> None:
+    def _reset_index_unlocked(self, *, locked: bool) -> None:
         if self.index_path.exists():
             archived = self.index_path.with_name(
                 f"{self.index_path.stem}.legacy.{_utc_now().strftime('%Y%m%d%H%M%S')}{self.index_path.suffix}"
             )
             self.index_path.replace(archived)
-        self._save_index_unlocked({})
+        self._save_index_unlocked({}, locked=locked)
 
     def _session_path(self, session_id: str) -> Path:
         return self.sessions_dir / f"{session_id}.jsonl"
@@ -204,7 +295,27 @@ class HostedTranscriptStore:
         suffix = deleted_at.strftime("%Y%m%d%H%M%S")
         return self.sessions_dir / f"{session_id}.deleted.{suffix}.jsonl"
 
+    def _index_stat_key(self) -> tuple[int, int, int] | None:
+        """A key that changes on every publish, whatever the clock resolution.
+
+        `st_ino` is load-bearing: HFS+ stores whole-second mtimes and an
+        `updated_at` bump rewrites a fixed-width string, so mtime and size can both
+        be identical across a real change. `replace()` always moves a new inode.
+        """
+        try:
+            info = self.index_path.stat()
+        except OSError:
+            return None
+        return (info.st_mtime_ns, info.st_size, info.st_ino)
+
     def _load_index_unlocked(self) -> dict[str, HostedSessionIndexEntry]:
+        # Keyed on the file's identity, so another process's write invalidates
+        # this too. Safe to call with no lock held: see the note above the read
+        # methods.
+        stat_key = self._index_stat_key()
+        snapshot = self._index_snapshot  # one read: never a torn key/entries pair
+        if stat_key is not None and snapshot is not None and snapshot[0] == stat_key:
+            return dict(snapshot[1])  # callers mutate what they get back
         if not self.index_path.exists():
             return {}
         payload = json.loads(self.index_path.read_text(encoding="utf-8"))
@@ -227,9 +338,20 @@ class HostedTranscriptStore:
                 runtime_model=None if raw.get("runtimeModel") is None else dict(raw.get("runtimeModel", {})),
                 deleted_at=_parse_datetime(raw.get("deletedAt")),
             )
+        # Every foreign publish costs the other process a full re-parse on its
+        # next read, and no test times that path. `+=` from lock-free readers
+        # undercounts; fine for a diagnostic, nothing gates on it.
+        self.index_reparses += 1
+        if stat_key is not None:
+            # The stat above precedes the read, so these entries are always at
+            # least as new as this key. The harmful pairing — old entries under
+            # a new key — is unreachable; a stale key merely costs one reparse.
+            self._index_snapshot = (stat_key, dict(entries))
         return entries
 
-    def _save_index_unlocked(self, entries: Mapping[str, HostedSessionIndexEntry]) -> None:
+    def _save_index_unlocked(
+        self, entries: Mapping[str, HostedSessionIndexEntry], *, locked: bool
+    ) -> None:
         payload = {
             "version": TRANSCRIPT_STORE_VERSION,
             "sessions": {
@@ -248,10 +370,27 @@ class HostedTranscriptStore:
                 for session_id, entry in entries.items()
             },
         }
-        serialized = json.dumps(payload, ensure_ascii=False, indent=2)
-        temp_path = self.index_path.with_suffix(".tmp")
-        temp_path.write_text(serialized, encoding="utf-8")
-        temp_path.replace(self.index_path)
+        # No `indent`: measured 57.6 ms of the 88.9 ms save on a 6201-entry
+        # index, and that save is what every writer holds the lock across. The
+        # file has no human reader.
+        serialized = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+        temp_path = self._index_temp_path
+        try:
+            temp_path.write_text(serialized, encoding="utf-8")
+            temp_path.replace(self.index_path)
+        except BaseException:
+            temp_path.unlink(missing_ok=True)
+            raise
+        stat_key = self._index_stat_key() if locked else None
+        if stat_key is not None:
+            self._index_snapshot = (stat_key, dict(entries))
+        else:
+            # Unlocked write: another process may have published between the
+            # `replace()` above and the `stat()` we would take, which would
+            # cache our entries under their key and never self-heal. A read
+            # stats *before* parsing, so its version of this race corrects
+            # itself on the next call; this one does not.
+            self._index_snapshot = None
 
     def _append_event_unlocked(self, session_id: str, event: HostedTranscriptEvent) -> None:
         path = self._session_path(session_id)
@@ -315,7 +454,7 @@ class HostedTranscriptStore:
         system_message: TerraFinConversationMessage | None = None,
     ) -> HostedSessionIndexEntry:
         with self.lock.session(session_id):
-            with self.lock.index():
+            with self.lock.index() as locked:
                 index = self._load_index_unlocked()
                 if session_id in index and index[session_id].deleted_at is None:
                     raise ValueError(f"Transcript session already exists: {session_id}")
@@ -368,7 +507,7 @@ class HostedTranscriptStore:
                     runtime_model=None if runtime_model is None else dict(runtime_model),
                 )
                 index[session_id] = entry
-                self._save_index_unlocked(index)
+                self._save_index_unlocked(index, locked=locked)
                 return entry
 
     def append_message(
@@ -393,11 +532,17 @@ class HostedTranscriptStore:
                 },
             )
             self._append_event_unlocked(session_id, event)
-            with self.lock.index():
+            with self.lock.index() as locked:
                 index = self._load_index_unlocked()
                 entry = index[session_id]
                 updated = replace(
                     entry,
+                    # A *message* clock, not a write clock. Two appends carrying
+                    # the same `created_at` leave this still, and the cross-process
+                    # staleness detection in interface/agent/data_routes.py keys on
+                    # it — so an explicit `created_at` on an append (a replay, a
+                    # migration, a deferred report stamped with its finish time)
+                    # would blind that detection with a green suite.
                     updated_at=message.created_at,
                 )
                 if message.role in {"user", "assistant"} and not is_internal_only_message(message):
@@ -413,7 +558,7 @@ class HostedTranscriptStore:
                             title=_message_preview(message.content, limit=72),
                         )
                 index[session_id] = updated
-                self._save_index_unlocked(index)
+                self._save_index_unlocked(index, locked=locked)
             return event
 
     def append_runtime_model(
@@ -425,8 +570,16 @@ class HostedTranscriptStore:
     ) -> HostedSessionIndexEntry:
         normalized = dict(runtime_model)
         timestamp = created_at or _utc_now()
+        # This runs on every session GET and is almost always a no-op, so check
+        # before taking the writer's frame. An absent session falls through, so
+        # the KeyError still comes from the authoritative read. A publish inside
+        # the stat-to-compare window can make it skip an event; harmless, because
+        # a reload replays the event stream and this sync re-runs every GET.
+        snapshot = self._load_index_unlocked().get(session_id)
+        if snapshot is not None and snapshot.runtime_model == normalized:
+            return snapshot
         with self.lock.session(session_id):
-            with self.lock.index():
+            with self.lock.index() as locked:
                 index = self._load_index_unlocked()
                 entry = index[session_id]
                 if entry.runtime_model == normalized:
@@ -441,7 +594,7 @@ class HostedTranscriptStore:
                 self._append_event_unlocked(session_id, event)
                 updated = replace(entry, updated_at=timestamp, runtime_model=normalized)
                 index[session_id] = updated
-                self._save_index_unlocked(index)
+                self._save_index_unlocked(index, locked=locked)
                 return updated
 
     def append_custom_title(
@@ -454,7 +607,7 @@ class HostedTranscriptStore:
         normalized_title = str(title or "").strip()
         timestamp = created_at or _utc_now()
         with self.lock.session(session_id):
-            with self.lock.index():
+            with self.lock.index() as locked:
                 index = self._load_index_unlocked()
                 entry = index[session_id]
                 event = HostedTranscriptEvent(
@@ -467,26 +620,31 @@ class HostedTranscriptStore:
                 self._append_event_unlocked(session_id, event)
                 updated = replace(entry, updated_at=timestamp, title=normalized_title or None)
                 index[session_id] = updated
-                self._save_index_unlocked(index)
+                self._save_index_unlocked(index, locked=locked)
                 return updated
 
     def load_events(self, session_id: str) -> tuple[HostedTranscriptEvent, ...]:
         with self.lock.session(session_id):
             return self._read_events_unlocked(session_id)
 
+    # Readers take neither lock. A writer holds the RLock across the whole
+    # serialise-and-rename, and every agent route is `def`, so a GET and the
+    # running turn's append are concurrent threads in one process.
+    #
+    # Safe: `replace()` swaps a directory entry and an open fd pins the old
+    # inode, and the snapshot is one attribute, so it cannot be read torn.
+
     def get_session_index(self, session_id: str) -> HostedSessionIndexEntry:
-        with self.lock.index():
-            index = self._load_index_unlocked()
-            if session_id not in index:
-                raise KeyError(session_id)
-            return index[session_id]
+        index = self._load_index_unlocked()
+        if session_id not in index:
+            raise KeyError(session_id)
+        return index[session_id]
 
     def list_sessions(self, *, include_deleted: bool = False) -> tuple[HostedSessionIndexEntry, ...]:
-        with self.lock.index():
-            index = self._load_index_unlocked()
-            items = [entry for entry in index.values() if include_deleted or entry.deleted_at is None]
-            items.sort(key=lambda item: item.updated_at, reverse=True)
-            return tuple(items)
+        index = self._load_index_unlocked()
+        items = [entry for entry in index.values() if include_deleted or entry.deleted_at is None]
+        items.sort(key=lambda item: item.updated_at, reverse=True)
+        return tuple(items)
 
     def load_conversation(
         self,
@@ -502,7 +660,7 @@ class HostedTranscriptStore:
     def archive_session(self, session_id: str, *, deleted_at: datetime | None = None) -> HostedSessionIndexEntry:
         timestamp = deleted_at or _utc_now()
         with self.lock.session(session_id):
-            with self.lock.index():
+            with self.lock.index() as locked:
                 index = self._load_index_unlocked()
                 entry = index[session_id]
                 session_path = self._session_path(session_id)
@@ -510,7 +668,7 @@ class HostedTranscriptStore:
                     session_path.replace(self._archive_path(session_id, timestamp))
                 updated = replace(entry, updated_at=timestamp, deleted_at=timestamp)
                 index[session_id] = updated
-                self._save_index_unlocked(index)
+                self._save_index_unlocked(index, locked=locked)
                 return updated
 
     def rewrite_session_messages(

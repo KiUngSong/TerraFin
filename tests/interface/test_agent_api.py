@@ -1,8 +1,10 @@
+import os
 from dataclasses import replace
 from datetime import UTC, datetime
 from types import SimpleNamespace
 
 import pandas as pd
+import pytest
 from fastapi.testclient import TestClient
 
 import TerraFin.agent.service as agent_service
@@ -617,9 +619,10 @@ def test_agent_market_snapshot_contract(monkeypatch) -> None:
 
 
 def test_agent_market_snapshot_force_refresh_threads_through_route(monkeypatch) -> None:
-    """`force_refresh=true` on the query string must reach the service —
-    that's the lever the worker uses for time-sensitive snapshots when
-    the 24h `yfinance.full` cache TTL may be hiding a freshly-closed bar."""
+    """`force_refresh=true` on the query string must reach the service — that's the lever
+    the worker uses for time-sensitive snapshots when the 24h `yfinance.full` cache TTL
+    may be hiding a freshly-closed bar.
+    """
     _configure_agent_fakes(monkeypatch)
 
     seen: dict[str, object] = {}
@@ -742,7 +745,7 @@ def test_agent_portfolio_returns_503_when_sec_edgar_is_not_configured(monkeypatc
     assert payload["error"]["details"]["feature"] == "agent_portfolio"
 
 
-def test_hosted_agent_runtime_routes(monkeypatch) -> None:
+def test_hosted_agent_runtime_routes(monkeypatch, lock_sandbox: str) -> None:
     loop = _FakeHostedLoop()
     client = _client(monkeypatch, hosted_loop=loop)
 
@@ -945,3 +948,121 @@ def test_agent_page_route_is_not_registered(monkeypatch) -> None:
     response = client.get("/agent")
 
     assert response.status_code == 404
+
+def test_claim_turn_is_atomic_and_rejects_a_second_concurrent_turn(
+    lock_sandbox: str,
+) -> None:
+    """Checking then marking was two lock acquisitions, so two near-simultaneous
+    POSTs both read 0 and both entered the same cached conversation object."""
+    from TerraFin.interface.agent.data_routes import (
+        _claim_turn,
+        _mark_turn_finished,
+        _turn_in_flight,
+    )
+
+    session_id = f"terrafin-session:claim-probe-{lock_sandbox}"
+    assert _claim_turn(session_id), "the first turn must be admitted"
+    assert not _claim_turn(session_id), "a concurrent second turn must be rejected"
+    assert _turn_in_flight(session_id)
+    _mark_turn_finished(session_id)
+    assert not _turn_in_flight(session_id)
+    assert _claim_turn(session_id), "the session must be sendable again afterwards"
+    _mark_turn_finished(session_id)
+
+
+def test_claim_turn_under_threads_admits_exactly_one(lock_sandbox: str) -> None:
+    from concurrent.futures import ThreadPoolExecutor
+
+    from TerraFin.interface.agent.data_routes import _claim_turn, _mark_turn_finished
+
+    session_id = f"terrafin-session:claim-race-{lock_sandbox}"
+    with ThreadPoolExecutor(max_workers=16) as pool:
+        results = list(pool.map(lambda _: _claim_turn(session_id), range(64)))
+    assert sum(results) == 1, f"{sum(results)} turns admitted concurrently"
+    _mark_turn_finished(session_id)
+
+
+@pytest.fixture()
+def lock_sandbox(tmp_path, monkeypatch) -> str:
+    """Keep the turn lock out of the live shared store."""
+    monkeypatch.setenv("TERRAFIN_AGENT_TRANSCRIPT_DIR", str(tmp_path / "agent"))
+    return f"pid{os.getpid()}"
+
+
+def test_session_metadata_carries_the_liveness_keys(monkeypatch, lock_sandbox: str) -> None:
+    """The whole frontend liveness design hangs on these two keys and nothing pinned them:
+    a response_model change or metadata filtering would break the spinner and
+    interrupted-detection with a green suite.
+    """
+    loop = _FakeHostedLoop()
+    client = _client(monkeypatch, hosted_loop=loop)
+    client.post(
+        "/agent/api/runtime/sessions",
+        json={"agentName": DEFAULT_HOSTED_AGENT_NAME, "sessionId": "hosted:liveness"},
+    )
+
+    payload = client.get("/agent/api/runtime/sessions/hosted:liveness").json()
+
+    assert payload["metadata"]["turnInFlight"] is False
+    assert payload["metadata"]["turnUnfinished"] is None
+
+
+def test_one_liveness_probe_serves_the_whole_session_response(monkeypatch, lock_sandbox: str) -> None:
+    """turnInFlight and turnUnfinished answer the same question, so they must come from one
+    probe.
+    """
+    from TerraFin.agent.runtime import inflight
+
+    loop = _FakeHostedLoop()
+    client = _client(monkeypatch, hosted_loop=loop)
+    client.post(
+        "/agent/api/runtime/sessions",
+        json={"agentName": DEFAULT_HOSTED_AGENT_NAME, "sessionId": "hosted:one-probe"},
+    )
+
+    probes = []
+    real = inflight.liveness
+    monkeypatch.setattr(
+        inflight,
+        "liveness",
+        lambda session_id: (probes.append(session_id), real(session_id))[1],
+    )
+
+    payload = client.get("/agent/api/runtime/sessions/hosted:one-probe").json()
+
+    assert probes == ["hosted:one-probe"], f"one probe per response, got {probes}"
+    assert payload["metadata"]["turnInFlight"] is False
+    assert payload["metadata"]["turnUnfinished"] is None
+
+
+def test_a_second_concurrent_turn_is_rejected_with_409(monkeypatch, lock_sandbox: str) -> None:
+    """Both turns would share the cached conversation object with nothing serializing them."""
+    from TerraFin.interface.agent import data_routes as agent_data_routes
+
+    loop = _FakeHostedLoop()
+    client = _client(monkeypatch, hosted_loop=loop)
+    client.post(
+        "/agent/api/runtime/sessions",
+        json={"agentName": DEFAULT_HOSTED_AGENT_NAME, "sessionId": "hosted:conflict"},
+    )
+
+    assert agent_data_routes._claim_turn("hosted:conflict"), "precondition: claimable"
+    try:
+        resp = client.post(
+            "/agent/api/runtime/sessions/hosted:conflict/messages",
+            json={"content": "second turn"},
+        )
+        assert resp.status_code == 409, resp.text
+        # The code, not the prose: the client keys the "never appended" branch on
+        # it, and two other exception classes in _raise_http_error also mint 409.
+        assert resp.json()["error"]["code"] == "hosted_agent_turn_in_flight", resp.text
+    finally:
+        agent_data_routes._mark_turn_finished("hosted:conflict")
+
+    ok = client.post(
+        "/agent/api/runtime/sessions/hosted:conflict/messages",
+        json={"content": "now it should go"},
+    )
+    assert ok.status_code == 200, ok.text
+    assert agent_data_routes._claim_turn("hosted:conflict"), "the claim must be released"
+    agent_data_routes._mark_turn_finished("hosted:conflict")

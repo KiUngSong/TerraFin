@@ -1,6 +1,14 @@
 from fastapi import APIRouter, HTTPException, Query
 
 from TerraFin.agent.contracts.conversation import is_internal_only_message
+from threading import Lock
+
+from TerraFin.agent.runtime import inflight
+
+from TerraFin.agent.contracts.conversation import (
+    iter_tool_result_blocks,
+    iter_tool_use_blocks,
+)
 from TerraFin.agent.contracts.conversation_state import RUNTIME_MODEL_METADATA_KEY
 from TerraFin.agent.contracts.definitions import is_internal_agent_definition
 from TerraFin.agent.models import (
@@ -8,6 +16,8 @@ from TerraFin.agent.models import (
     CompanyInfoResponse,
     ConsensusResponse,
     EarningsResponse,
+    ClaimVerificationRequest,
+    ClaimVerificationResponse,
     EconomicResponse,
     FinancialStatementResponse,
     HostedAgentCatalogResponse,
@@ -291,20 +301,238 @@ def _raise_if_hosted_runtime_unavailable(loop: object, *, session: object | None
     )
 
 
+# One writer per turn, across processes: the uvicorn guard stops a second HTTP
+# worker but not a second *writer*, and the in-process CLI transport is one. The
+# claim has to be held by the OS, not by this module's memory.
+#
+# A value may be None — the turn proceeded because locking was unavailable — but
+# the entry must still exist, or `turnInFlight` reads false for a live turn.
+# The one 409 from this route that proves the message was never appended.
+# Shared with the client, which must not infer that from the status code.
+TURN_IN_FLIGHT_ERROR_CODE = "hosted_agent_turn_in_flight"
+
+_IN_FLIGHT_HANDLES: dict[str, int | None] = {}
+_IN_FLIGHT_LOCK = Lock()
+
+
+def _claim_turn(session_id: str) -> bool:
+    with _IN_FLIGHT_LOCK:
+        if session_id in _IN_FLIGHT_HANDLES:
+            return False
+        handle, state = inflight.claim_or_unavailable(session_id)
+        if state == inflight.CONTENDED:
+            return False  # another process is genuinely running this turn
+        # Recorded even when handle is None (locking unavailable): the turn is
+        # running, so turnInFlight must say so, and this also keeps the
+        # same-process 409 working when the flock cannot.
+        _IN_FLIGHT_HANDLES[session_id] = handle
+        return True
+
+
+def _mark_turn_finished(session_id: str) -> None:
+    with _IN_FLIGHT_LOCK:
+        handle = _IN_FLIGHT_HANDLES.pop(session_id, None)
+    inflight.release(handle)
+
+
+# The transcript stamp this process last read, per session.
+#
+# Keyed on the store's `updated_at`, not on a lock observation: the lock says
+# only "a turn is running right now", which misses a foreign turn that starts
+# and finishes between two 5s polls.
+_TRANSCRIPT_SEEN: dict[str, str] = {}
+
+
+def _turn_state(session_id: str) -> str:
+    """One liveness verdict per response, shared by both fields it decides.
+
+    `turnInFlight` and `turnUnfinished` answer the same question, so two probes
+    could contradict each other — and the client reads that pair as a death. A
+    local entry outranks the lock: the turn is running here even when locking
+    was unavailable.
+    """
+    with _IN_FLIGHT_LOCK:
+        if session_id in _IN_FLIGHT_HANDLES:
+            return inflight.CONTENDED
+    return inflight.liveness(session_id)
+
+
+def _turn_in_flight(session_id: str) -> bool:
+    """True while some process is running a turn for the session.
+
+    UNKNOWN reads false: locking is unavailable, and reporting a turn in flight
+    forever would disable every exit in the client's poller.
+    """
+    return _turn_state(session_id) == inflight.CONTENDED
+
+
+def _turn_unfinished(messages: tuple) -> str | None:
+    """How the newest turn died, or None if it produced an answer.
+
+    Three deaths needing different advice: "mid-tool" left a call without its
+    result, "mid-turn" gathered data and stopped, "no-answer" stopped before
+    anything. Only this can tell them apart — the carrier that separates them is
+    internal-only and filtered from the served messages.
+
+    Terminal-state discriminator, not liveness: read only when no turn is in
+    flight. The distinguisher is order — walking back, assistant content reached
+    before any tool_use is the answer; after one it is a preamble.
+
+    Takes messages, never a conversation. Accepting both let a caller pass a
+    live conversation with a stale snapshot and get a verdict about the wrong
+    transcript.
+    """
+    if not messages:
+        return None
+    answered: set[str] = set()
+    for message in messages:
+        for block in iter_tool_result_blocks(message):
+            call_id = str((block.payload or {}).get("callId") or "").strip()
+            if call_id:
+                answered.add(call_id)
+        call_id = str(getattr(message, "tool_call_id", "") or "").strip()
+        if call_id and message.role == "tool":
+            answered.add(call_id)
+
+    saw_tool_use = False
+    for message in reversed(messages):
+        requested = {
+            call_id
+            for block in iter_tool_use_blocks(message)
+            if (call_id := str((block.payload or {}).get("callId") or "").strip())
+        }
+        if requested:
+            # Must precede the internal-only skip below: the carrier is
+            # content="" with internalOnly=True (loop.py:443-455).
+            if requested - answered:
+                return "mid-tool"
+            saw_tool_use = True
+            continue
+        if is_internal_only_message(message):
+            continue
+        if message.role == "assistant" and str(getattr(message, "content", "") or "").strip():
+            # Content after a tool_use is a preamble, not an answer.
+            return "mid-turn" if saw_tool_use else None
+        if message.role == "user":
+            # Reached the turn boundary with no answer at all.
+            return "mid-turn" if saw_tool_use else "no-answer"
+    return None
+
+
+def _transcript_stamp(loop: object, session_id: str) -> str | None:
+    """The store's own `updated_at` for this session, or None if unreadable."""
+    store = getattr(getattr(loop, "runtime", None), "transcript_store", None)
+    if store is None:
+        return None
+    try:
+        return str(getattr(store.get_session_index(session_id), "updated_at", "") or "")
+    except Exception:
+        return None
+
+
+def _forget_transcript_stamp(session_id: str) -> None:
+    with _IN_FLIGHT_LOCK:
+        _TRANSCRIPT_SEEN.pop(session_id, None)
+
+
+def _note_transcript_stamp(loop: object, session_id: str) -> None:
+    """Record the stamp after this process's own turn.
+
+    Without it every local turn leaves the stamp behind its own append, so the
+    next GET reloads the whole transcript from disk for a change it made itself.
+    """
+    stamp = _transcript_stamp(loop, session_id)
+    if stamp is None:
+        return
+    with _IN_FLIGHT_LOCK:
+        _TRANSCRIPT_SEEN[session_id] = stamp
+
+
+def _drop_stale_conversation(loop: object, session_id: str) -> str | None:
+    """Reload from the store when the transcript on disk has moved on.
+
+    `get_conversation` returns a cached object and re-reads only on a miss, so a
+    turn run by the other writer is invisible here. Returns the stamp it
+    recorded, so the caller can bracket its read against the same value.
+
+    Never while a turn runs here (the loop is mutating that object), and never
+    without a transcript store — `get_conversation` would raise and the served
+    transcript would come back empty. The compare, the record and the drop are
+    one critical section; split, a second GET served the pre-turn transcript
+    with `turnInFlight` false and stopped the client's poller for good.
+    """
+    stamp = _transcript_stamp(loop, session_id)
+    if stamp is None:
+        return None
+    with _IN_FLIGHT_LOCK:
+        if session_id in _IN_FLIGHT_HANDLES:
+            return stamp
+        if _TRANSCRIPT_SEEN.get(session_id) == stamp:
+            return stamp
+        _TRANSCRIPT_SEEN[session_id] = stamp
+        try:
+            loop.forget_conversation(session_id)
+        except Exception:
+            pass
+    return stamp
+
+
+def _reportable_death(session_id: str, *, state: str | None = None, messages: tuple = ()) -> str | None:
+    """How the newest turn died, but only when that is knowable.
+
+    The client acts on this by telling the user to resend, so only FREE
+    substantiates a death. UNKNOWN means another process may be mid-turn;
+    CONTENDED means one demonstrably is.
+    """
+    if (state if state is not None else _turn_state(session_id)) != inflight.FREE:
+        return None
+    return _turn_unfinished(messages)
+
+
+def _conversation_snapshot(conversation: object | None) -> tuple:
+    """One read of the transcript, for the verdict and the messages beside it.
+
+    `snapshot()` is a live `tuple(self.messages)` on every call, so taking it
+    twice let the two describe different transcripts. A raise propagates:
+    swallowing it into `()` made an unreadable transcript look empty, which the
+    client answers by replacing the transcript and stopping.
+    """
+    if conversation is None:
+        return ()
+    return tuple(conversation.snapshot())
+
+
 def _session_response(
     record: TerraFinHostedSessionRecord,
     *,
     loop: object | None = None,
     tools: tuple[TerraFinToolDefinition, ...],
 ) -> HostedAgentSessionResponse:
+    turn_state = _turn_state(record.session_id)  # one probe, both fields
     conversation = None
+    messages_snapshot: tuple = ()
     if loop is not None:
+        # The probe and everything the verdict is derived from must describe one
+        # instant. The read below takes ~25 ms cold, and a foreign append inside
+        # it yields `{turnInFlight: false, turnUnfinished: ...}` — which the
+        # client reads as a death and answers by stopping its poller for good.
+        # So bracket the whole read, snapshot included, on the store's stamp.
+        # Over-reporting is the safe direction: a local write also moves the
+        # stamp, costing one tick of "still working".
+        before = _drop_stale_conversation(loop, record.session_id)
         try:
             conversation = loop.get_conversation(record.session_id)
         except Exception:
             conversation = None
+        messages_snapshot = _conversation_snapshot(conversation)
+        if before is not None and _transcript_stamp(loop, record.session_id) != before:
+            turn_state = inflight.CONTENDED
     else:
         conversation = record.conversation
+        messages_snapshot = _conversation_snapshot(conversation)
+    # One read, for the same reason as the transcript above: three separate
+    # `snapshot()` calls in one response could describe three different states.
+    session_snapshot = record.context.session.snapshot()
     session_policy = record.context.session.metadata.get("agentPolicy", {})
     runtime_model = _runtime_model_response(record.context.session.metadata.get(RUNTIME_MODEL_METADATA_KEY))
     if runtime_model is None and loop is not None:
@@ -312,14 +540,21 @@ def _session_response(
     return HostedAgentSessionResponse(
         sessionId=record.session_id,
         agentName=record.agent_name,
-        metadata=dict(record.context.session.metadata),
+        metadata={
+            **dict(record.context.session.metadata),
+            # A tool's capabilityCall is only recorded once its handler returns
+            # (capability.py:116-120), so `calledAt` cannot tell a client that a
+            # tool is running right now. Unanswered tool_use blocks can.
+            "turnInFlight": turn_state == inflight.CONTENDED,
+            "turnUnfinished": _reportable_death(
+                record.session_id, state=turn_state, messages=messages_snapshot
+            ),
+        },
         runtimeModel=runtime_model,
         policy=HostedSessionPolicyResponse(**session_policy) if session_policy else None,
-        focusItems=list(record.context.session.snapshot().focus_items),
-        artifacts=[_artifact_response(artifact) for artifact in record.context.session.snapshot().artifacts],
-        capabilityCalls=[
-            _capability_call_response(call) for call in record.context.session.snapshot().capability_calls
-        ],
+        focusItems=list(session_snapshot.focus_items),
+        artifacts=[_artifact_response(artifact) for artifact in session_snapshot.artifacts],
+        capabilityCalls=[_capability_call_response(call) for call in session_snapshot.capability_calls],
         tasks=[_task_response(task) for task in record.context.task_registry.list_for_session(record.session_id)],
         approvals=[_approval_response(approval) for approval in record.approval_requests],
         auditTrail=[_audit_response(event) for event in record.audit_log],
@@ -327,7 +562,7 @@ def _session_response(
         messages=[]
         if conversation is None
         else [
-            _message_response(message) for message in conversation.snapshot() if not is_internal_only_message(message)
+            _message_response(message) for message in messages_snapshot if not is_internal_only_message(message)
         ],
     )
 
@@ -534,6 +769,7 @@ def create_agent_data_router() -> APIRouter:
             forget_conversation = getattr(loop, "forget_conversation", None)
             if callable(forget_conversation):
                 forget_conversation(session_id)
+            _forget_transcript_stamp(session_id)
             return HostedAgentSessionDeleteResponse(
                 sessionId=removed.session_id,
                 deletedAt=removed.updated_at.isoformat(),
@@ -590,7 +826,32 @@ def create_agent_data_router() -> APIRouter:
             # stale snapshot captured at session-creation time.
             if request.viewContextId:
                 loop.runtime.relink_session_view_context(session_id, request.viewContextId)
-            run_result = loop.submit_user_message(session_id, request.content)
+            if not _claim_turn(session_id):
+                # A code, not a bare 409. `_raise_http_error` mints 409 for two
+                # other exception classes (session conflict, approval required),
+                # so a client keying on the status alone reads "your message was
+                # never appended" off a status that does not mean that. Both are
+                # unreachable from this route today — one is delete-only, the
+                # other is swallowed into a tool payload — which makes the bare
+                # status correct by accident of two handlers elsewhere rather
+                # than by anything the status guarantees.
+                raise AppRuntimeError(
+                    "Another window or session is already running a turn on this chat.",
+                    code=TURN_IN_FLIGHT_ERROR_CODE,
+                    status_code=409,
+                    details={"feature": "hosted_agent_runtime"},
+                )
+            try:
+                run_result = loop.submit_user_message(session_id, request.content)
+            finally:
+                # Stamp first, or a concurrent GET reloads the whole transcript
+                # for this process's own append. Nested, because
+                # `_mark_turn_finished` is the only release of the claim and the
+                # flock: a raise from the stamp would wedge the session.
+                try:
+                    _note_transcript_stamp(loop, session_id)
+                finally:
+                    _mark_turn_finished(session_id)
             record = _get_public_session_record(loop, session_id)
             return _run_response(
                 run_result,
@@ -920,6 +1181,27 @@ def create_agent_data_router() -> APIRouter:
     ) -> dict:
         try:
             return service.similarity_search(ticker=ticker, universe=universe, period=period, top_n=top_n)
+        except Exception as exc:
+            _raise_http_error(exc)
+
+    @router.post(f"{AGENT_API_PREFIX}/verify-claims", response_model=ClaimVerificationResponse)
+    def api_agent_verify_claims(payload: ClaimVerificationRequest) -> dict:
+        """Ground draft claims against the figures in a supplied statement.
+
+        POST rather than GET: the request carries a claim list and a verbatim
+        statement block, neither of which belongs in a query string.
+        """
+        from TerraFin.agent.runtime.verify_capability import verify_financial_claims
+
+        try:
+            return verify_financial_claims(
+                claims=payload.claims,
+                source_text=payload.sourceText,
+                unit=payload.unit,
+                include_pool=payload.includePool,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
         except Exception as exc:
             _raise_http_error(exc)
 

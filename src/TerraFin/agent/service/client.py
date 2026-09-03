@@ -11,6 +11,7 @@ from ..contracts.conversation import is_internal_only_message
 from ..contracts.definitions import is_internal_agent_definition
 from ..contracts.schemas import ChartOpenResponse
 from .service import TerraFinAgentService
+from TerraFin.agent.runtime import inflight
 
 
 class TerraFinAgentClient:
@@ -496,7 +497,16 @@ class TerraFinAgentClient:
             )
         loop = self._runtime_loop()
         loop.runtime.get_public_session_record(session_id)
-        run_result = loop.submit_user_message(session_id, content)
+        # Same claim the HTTP route takes: this transport is a second writer on a
+        # shared on-disk session, and without it both append to divergent
+        # in-memory conversations while the store accumulates both turns.
+        with inflight.claimed(session_id) as acquired:
+            if not acquired:
+                raise RuntimeError(
+                    f"Session '{session_id}' is already running a turn; "
+                    "wait for it to finish before sending another message."
+                )
+            run_result = loop.submit_user_message(session_id, content)
         conversation = loop.get_conversation(session_id)
         return {
             "sessionId": run_result.session_id,
