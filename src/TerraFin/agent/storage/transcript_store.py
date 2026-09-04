@@ -263,7 +263,6 @@ class HostedTranscriptStore:
         # new key with old entries. One assignment, one read, atomic under the
         # GIL.
         self._index_snapshot: tuple[tuple[int, int, int], dict[str, HostedSessionIndexEntry]] | None = None
-        self.index_reparses = 0
         self.reader = HostedTranscriptReader(self)
         self._initialize_index()
 
@@ -338,10 +337,6 @@ class HostedTranscriptStore:
                 runtime_model=None if raw.get("runtimeModel") is None else dict(raw.get("runtimeModel", {})),
                 deleted_at=_parse_datetime(raw.get("deletedAt")),
             )
-        # Every foreign publish costs the other process a full re-parse on its
-        # next read, and no test times that path. `+=` from lock-free readers
-        # undercounts; fine for a diagnostic, nothing gates on it.
-        self.index_reparses += 1
         if stat_key is not None:
             # The stat above precedes the read, so these entries are always at
             # least as new as this key. The harmful pairing — old entries under

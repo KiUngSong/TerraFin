@@ -295,25 +295,6 @@ def test_a_lock_with_no_path_configured_also_warns(tmp_path, caplog) -> None:
     assert [r for r in caplog.records if "index lock unavailable" in r.getMessage()]
 
 
-def test_reparses_are_counted(tmp_path) -> None:
-    """Every foreign publish invalidates the key, so under two live writers each publish
-    costs the other process a full re-parse on its next read — 57 ms on a 6201-entry
-    index.
-    """
-    store = HostedTranscriptStore(root_dir=tmp_path)
-    store.create_session(session_id="s-count", agent_name="a", created_at=_ts(1))
-
-    store.get_session_index("s-count")
-    settled = store.index_reparses
-    store.get_session_index("s-count")
-    store.get_session_index("s-count")
-    assert store.index_reparses == settled, "a cache hit must not count as a re-parse"
-
-    store._index_snapshot = None
-    store.get_session_index("s-count")
-    assert store.index_reparses == settled + 1, "a miss must count"
-
-
 def test_whether_the_lock_was_taken_is_only_obtainable_inside_a_frame(tmp_path, monkeypatch) -> None:
     """It was ambient state before — first instance-wide, where reader threads holding
     nothing read True 4331 times, then thread-scoped, where they read False while a
