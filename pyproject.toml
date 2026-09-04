@@ -36,6 +36,7 @@ classifiers = [
 dependencies = [
     "beautifulsoup4",
     "defusedxml",
+    "exchange-calendars>=4.13,<5",
     "fastapi>=0.115.0",
     "fredapi",
     "numpy",

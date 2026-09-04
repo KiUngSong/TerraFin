@@ -1,4 +1,5 @@
 import json
+import logging
 import threading
 from datetime import UTC, datetime
 
@@ -12,6 +13,10 @@ from TerraFin.data.providers.market.session_calendar import (
     latest_expected_close,
     resolve_exchange,
 )
+from TerraFin.data.providers.market.sessions import missing_sessions
+
+
+log = logging.getLogger(__name__)
 
 
 _V2_NAMESPACE = "yfinance_v2"
@@ -154,9 +159,49 @@ def _empty_history_chunk(*, period: str | None, source_version: str | None, is_c
     )
 
 
+# Bounded. The "couple of dozen distinct sets" below holds for a batch sweep
+# over a static cache; on the server the frame's lower bound advances daily
+# (`period="3y"`), so holes scroll out of the window and each ticker yields a
+# fresh tuple about once a day. Unbounded, this is the same tickers-x-days
+# growth `sessions._all_sessions` rejects for itself.
+_SEEN_GAPS_MAX = 512
+_SEEN_GAPS: dict[tuple[str, ...], None] = {}
+# `_history_chunk_from_frame` runs OUTSIDE `_YF_DOWNLOAD_LOCK` — the cached-
+# artifact path never takes it — and is reached from two fan-outs (top_movers'
+# 8 workers, market_data's 12). Unsynchronised, the eviction below races:
+# `next(iter(...))` raises RuntimeError if another thread inserts mid-iteration,
+# and two threads past the same `len >=` test make the second `pop` a KeyError.
+# Either escapes through `get_recent_history(force_refresh=True)`, which
+# re-raises, into `_pinned_frame`'s except — dropping the caller onto the raw
+# yfinance branch this whole change exists to keep it off.
+_SEEN_GAPS_LOCK = threading.Lock()
+
+
+def _note_gap(gaps: tuple[str, ...]) -> bool:
+    """True the first time this exact set of holes is seen, for any ticker.
+
+    Keyed on the holes, not the ticker: a hole is a property of the calendar
+    against the feed, so it repeats across every name on that exchange. Over
+    the real cache, 277 tickers carry holes and they collapse to a couple of
+    dozen distinct sets.
+    """
+    with _SEEN_GAPS_LOCK:
+        if gaps in _SEEN_GAPS:
+            return False
+        if len(_SEEN_GAPS) >= _SEEN_GAPS_MAX:
+            # FIFO, not clear(): dropping everything would re-log every live
+            # hole at once, the flood the rate-limit exists to stop.
+            oldest = next(iter(_SEEN_GAPS), None)
+            if oldest is not None:
+                _SEEN_GAPS.pop(oldest, None)
+        _SEEN_GAPS[gaps] = None
+        return True
+
+
 def _history_chunk_from_frame(
     frame: pd.DataFrame,
     *,
+    ticker: str,
     period: str | None,
     has_older: bool,
     is_complete: bool,
@@ -167,6 +212,19 @@ def _history_chunk_from_frame(
     normalized = _normalize_market_frame(frame)
     series = TimeSeriesDataFrame(normalized)
     start, end = _frame_bounds(normalized)
+    # Judge the dates carrying a usable close: a null-close row is a session
+    # with no price, which every consumer drops later anyway.
+    dated = normalized.index[normalized["Close"].notna()] if "Close" in normalized else normalized.index
+    gaps = missing_sessions(dated, ticker)
+    # Once per distinct hole-set per process: the holes are permanent and shared
+    # across the exchange, and warning per ticker trains the reader to skip the
+    # line. `%s` names the first ticker to hit it, not the only one.
+    if gaps and _note_gap(gaps):
+        log.warning(
+            "%s: frame is missing %d session(s) within %s..%s (%s) — a return "
+            "counted by position will span the hole",
+            ticker, len(gaps), start, end, ", ".join(gaps[:5]),
+        )
     return HistoryChunk(
         frame=series,
         loaded_start=loaded_start if loaded_start is not None else start,
@@ -446,6 +504,7 @@ def get_yf_recent_history(ticker: str, *, period: str = "3y", force_refresh: boo
             normalized = _ts_to_market_frame(recent_frame)
             cached_chunk = _history_chunk_from_frame(
                 normalized,
+                ticker=ticker,
                 period=period,
                 has_older=has_older,
                 is_complete=not has_older,
@@ -494,6 +553,7 @@ def get_yf_recent_history(ticker: str, *, period: str = "3y", force_refresh: boo
     has_older = len(recent) < len(full_df)
     return _history_chunk_from_frame(
         recent,
+        ticker=ticker,
         period=period,
         has_older=has_older,
         is_complete=not has_older,
@@ -512,6 +572,7 @@ def get_yf_full_history_backfill(ticker: str, *, loaded_start: str | None = None
         normalized_older = _ts_to_market_frame(older_frame)
         return _history_chunk_from_frame(
             normalized_older,
+            ticker=ticker,
             period=None,
             has_older=False,
             is_complete=True,
@@ -528,6 +589,7 @@ def get_yf_full_history_backfill(ticker: str, *, loaded_start: str | None = None
     full_start, full_end = _frame_bounds(full_df)
     return _history_chunk_from_frame(
         older,
+        ticker=ticker,
         period=None,
         has_older=False,
         is_complete=True,
@@ -535,6 +597,37 @@ def get_yf_full_history_backfill(ticker: str, *, loaded_start: str | None = None
         loaded_start=full_start,
         loaded_end=full_end,
     )
+
+
+def get_history_window(ticker: str, start: str, end: str) -> pd.DataFrame:
+    """Closes for one bounded date window, as columns `time` (ISO date) and
+    `close`. Empty frame when the window has nothing.
+
+    A different endpoint from `get_recent_history`, which keys one per-ticker
+    artifact and slices `period` at read. Measured on 13 ticker-observations it
+    has never returned a bar the artifact lacked — a hole in Yahoo's history is
+    absent from both — so treat it as parity with the pre-existing fallback,
+    not as a rescue. Holds _YF_DOWNLOAD_LOCK for the same reason `valid_ticker`
+    does: Ticker.history() writes yfinance's shared globals on its error path,
+    and this is called from an 8-thread fan-out.
+    """
+    try:
+        with _YF_DOWNLOAD_LOCK:
+            # Explicit: a yfinance default flip would put these closes on a
+            # different basis than `_download_frame`'s inside one ranking.
+            hist = yf.Ticker(ticker.upper()).history(
+                start=start, end=end, auto_adjust=True
+            )
+    except Exception as exc:
+        log.debug("history window %s %s..%s failed: %s", ticker, start, end, exc)
+        return pd.DataFrame(columns=["time", "close"])
+    if hist is None or hist.empty or "Close" not in hist:
+        return pd.DataFrame(columns=["time", "close"])
+    closes = hist["Close"].dropna()
+    return pd.DataFrame({
+        "time": [str(d)[:10] for d in closes.index],
+        "close": [float(x) for x in closes.tolist()],
+    })
 
 
 def valid_ticker(ticker: str) -> bool:
