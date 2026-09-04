@@ -16,8 +16,6 @@ from TerraFin.agent.models import (
     CompanyInfoResponse,
     ConsensusResponse,
     EarningsResponse,
-    ClaimVerificationRequest,
-    ClaimVerificationResponse,
     EconomicResponse,
     FinancialStatementResponse,
     HostedAgentCatalogResponse,
@@ -1181,27 +1179,6 @@ def create_agent_data_router() -> APIRouter:
     ) -> dict:
         try:
             return service.similarity_search(ticker=ticker, universe=universe, period=period, top_n=top_n)
-        except Exception as exc:
-            _raise_http_error(exc)
-
-    @router.post(f"{AGENT_API_PREFIX}/verify-claims", response_model=ClaimVerificationResponse)
-    def api_agent_verify_claims(payload: ClaimVerificationRequest) -> dict:
-        """Ground draft claims against the figures in a supplied statement.
-
-        POST rather than GET: the request carries a claim list and a verbatim
-        statement block, neither of which belongs in a query string.
-        """
-        from TerraFin.agent.runtime.verify_capability import verify_financial_claims
-
-        try:
-            return verify_financial_claims(
-                claims=payload.claims,
-                source_text=payload.sourceText,
-                unit=payload.unit,
-                include_pool=payload.includePool,
-            )
-        except ValueError as exc:
-            raise HTTPException(status_code=422, detail=str(exc)) from exc
         except Exception as exc:
             _raise_http_error(exc)
 
