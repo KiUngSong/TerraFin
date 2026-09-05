@@ -24,4 +24,10 @@ PRIVATE_SERIES: dict[str, PrivateSeriesSpec] = {
         display_name="Trailing-Forward P/E Spread",
         history_cache_namespace="private_trailing_forward_pe_history",
     ),
+    "dspx": PrivateSeriesSpec(
+        key="dspx",
+        display_name="Dispersion Index",
+        history_cache_namespace="private_dspx_history",
+        current_cache_namespace="private_dspx_current",
+    ),
 }

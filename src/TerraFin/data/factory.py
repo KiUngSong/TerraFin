@@ -226,7 +226,7 @@ class DataFactory:
         on fetch failure — the next non-force caller still sees the prior
         value. Currently only the yfinance-backed path honors the flag;
         composite/private indicators (Vol Regime, VVIX/VIX, Fear & Greed,
-        CAPE, SPX GEX, Net Breadth) ignore it.
+        CAPE, SPX GEX, Dispersion Index, Net Breadth) ignore it.
 
         Exception semantics:
         * ``force_refresh=False`` (default): swallow upstream fetch errors

@@ -69,6 +69,16 @@ def test_net_breadth_in_market_registry():
     assert MARKET_INDICATOR_REGISTRY["Net Breadth"].key == "net-breadth"
 
 
+def test_dispersion_index_in_market_registry():
+    """Dispersion Index (DSPX) should be exposed as a searchable market series."""
+    from TerraFin.data.providers.market import MARKET_INDICATOR_REGISTRY
+
+    assert "Dispersion Index" in MARKET_INDICATOR_REGISTRY
+    indicator = MARKET_INDICATOR_REGISTRY["Dispersion Index"]
+    assert indicator.key == "dspx"
+    assert "DSPX" in indicator.description
+
+
 def test_vol_regime_recent_history_uses_progressive_yfinance_seed(monkeypatch) -> None:
     def _stub_recent_history(ticker: str, *, period: str = "3y") -> HistoryChunk:
         assert ticker == "^VIX"

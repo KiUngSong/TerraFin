@@ -292,6 +292,18 @@ def _trailing_forward_pe_full_history_backfill(_key: str, *, loaded_start: str |
     return _private_backfill("trailing_forward_pe", loaded_start)
 
 
+def _fetch_dspx(_key: str):
+    return _private_frame("dspx")
+
+
+def _dspx_recent_history(_key: str, *, period: str = "3y") -> HistoryChunk:
+    return _private_recent("dspx", period)
+
+
+def _dspx_full_history_backfill(_key: str, *, loaded_start: str | None = None) -> HistoryChunk:
+    return _private_backfill("dspx", loaded_start)
+
+
 def _spx_gex_frame() -> TimeSeriesDataFrame:
     from TerraFin.data.providers.market.spx_gex_history import get_spx_gex_history
 
@@ -358,6 +370,13 @@ MARKET_INDICATOR_REGISTRY = {
     "Treasury-10Y": MarketIndicator(description="Treasury-10Y", key="^TNX"),
     "Treasury-30Y": MarketIndicator(description="Treasury-30Y", key="^TYX"),
     "MOVE": MarketIndicator(description="MOVE: ICE BofA MOVE Index (bond market implied volatility)", key="^MOVE"),
+    "Dispersion Index": MarketIndicator(
+        description="DSPX: Cboe S&P 500 Dispersion Index. Expected 30-day idiosyncratic dispersion from SPX and constituent options.",
+        key="dspx",
+        get_data=_fetch_dspx,
+        get_recent_history=_dspx_recent_history,
+        get_full_history_backfill=_dspx_full_history_backfill,
+    ),
     "Vol Regime": MarketIndicator(
         description="VIX 6-month percentile rank (0-100). Calm below 20 and elevated above 80.",
         key="vol-regime",

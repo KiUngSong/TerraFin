@@ -43,3 +43,17 @@ def test_resolve_ticker_routes_net_breadth_to_market_insights() -> None:
         "name": "Net Breadth",
         "path": "/market-insights?ticker=Net%20Breadth",
     }
+
+
+def test_resolve_ticker_routes_dispersion_index_to_market_insights() -> None:
+    client = TestClient(create_app())
+
+    response = client.get("/resolve-ticker?q=dispersion%20index")
+    assert response.status_code == 200
+    payload = response.json()
+
+    assert payload == {
+        "type": "macro",
+        "name": "Dispersion Index",
+        "path": "/market-insights?ticker=Dispersion%20Index",
+    }

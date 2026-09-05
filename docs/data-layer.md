@@ -212,7 +212,7 @@ working with them in practice:
 | Domain | Backing source | Typical access path | Notes |
 |--------|----------------|---------------------|-------|
 | Market prices | yfinance | `get("AAPL")`, `get("S&P 500")`, `get("Shanghai Composite")` | Handles tickers and index aliases |
-| Market indicators | Registry-backed market series | `get("VIX")`, `get("MOVE")`, `get("Net Breadth")` | Mix of yfinance-backed and private-series-backed names resolved before raw tickers |
+| Market indicators | Registry-backed market series | `get("VIX")`, `get("MOVE")`, `get("Net Breadth")`, `get("Dispersion Index")` | Mix of yfinance-backed and private-series-backed names resolved before raw tickers |
 | Economic series | FRED | `get_fred_data("UNRATE")`, `get("Unemployment Rate")` | Human-readable names map to FRED codes |
 | Computed macro indicators | FRED-derived logic | `get("Buffett Indicator")` | Built from public series |
 | Credit and risk indicators | FRED and FRED-derived | `get("High Yield Spread")`, `get("Net Liquidity")` | HY spread, RRP, net liquidity, 18M forward rate spread, credit spread |
@@ -324,6 +324,7 @@ Examples:
 
 - `Fear & Greed` when used as a chart/searchable series
 - `Net Breadth` as a chart/searchable breadth history series
+- `Dispersion Index` (Cboe DSPX archive + yfinance tail) as a chart/searchable series
 - future chartable private series such as `CAPE` or
   `Trailing-Forward P/E Spread`, if promoted into the chart/search flow
 
