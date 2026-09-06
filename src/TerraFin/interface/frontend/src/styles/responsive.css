@@ -600,6 +600,7 @@
 
 .tf-agent-transcript {
   min-height: 0;
+  min-width: 0;
   overflow: auto;
   display: flex;
   flex-direction: column;
@@ -611,10 +612,14 @@
 .tf-agent-message {
   width: fit-content;
   max-width: min(86%, 640px);
+  min-width: 0;
   border: 1px solid var(--tf-border);
   border-radius: var(--tf-radius);
   padding: 12px 14px;
   display: grid;
+  /* Default `auto` tracks size to max-content, so a long unwrapped line
+     paints past the bubble even when max-width is set. */
+  grid-template-columns: minmax(0, 1fr);
   align-content: start;
   gap: 6px;
 }
@@ -657,6 +662,7 @@
 }
 
 .tf-agent-message__body {
+  min-width: 0;
   font-size: var(--tf-fs-base);
   line-height: 1.65;
   color: var(--tf-text);
