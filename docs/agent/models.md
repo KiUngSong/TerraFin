@@ -3,7 +3,7 @@ title: Agent Model Management
 summary: How to inspect, authenticate, and switch TerraFin's hosted agent models from the CLI.
 read_when:
   - You want the model-management layer TerraFin adapted from OpenClaw's provider UX
-  - You want to use Gemini or GitHub Copilot without editing env vars by hand
+  - You want to use Gemini without editing env vars by hand
   - You need to understand how saved model/auth state interacts with runtime env vars
 ---
 
@@ -23,7 +23,6 @@ OpenClaw:
 
 - canonical `provider/model` refs
 - the `models list/current/use/auth ...` command shape
-- the GitHub Copilot device-login flow and local auth workflow
 
 The following parts are TerraFin-specific:
 
@@ -39,7 +38,6 @@ Implementation lives in TerraFin's own code:
   `list_provider_catalog()`, `get_provider_catalog(provider_id)` — do not
   reach into the private `_PROVIDER_CATALOG` dict)
 - `src/TerraFin/agent/models/runtime.py`
-- `src/TerraFin/agent/models/providers/github_copilot.py`
 - `src/TerraFin/agent/models/providers/google.py`
 - `src/TerraFin/agent/models/providers/openai.py`
 
@@ -49,11 +47,10 @@ locations.
 
 ## What it manages
 
-The model manager currently handles three providers:
+The model manager currently handles two providers:
 
 - `openai/*`
 - `google/*`
-- `github-copilot/*`
 
 It saves state to `.terrafin/agent-models.json` by default. Override that path
 with `TERRAFIN_AGENT_MODELS_PATH` when you want a different location.
@@ -69,7 +66,7 @@ When TerraFin resolves the hosted runtime model, it uses this precedence:
 
 Provider credentials follow the same pattern:
 
-1. provider env vars such as `OPENAI_API_KEY`, `GEMINI_API_KEY`, or `COPILOT_GITHUB_TOKEN`
+1. provider env vars such as `OPENAI_API_KEY` or `GEMINI_API_KEY`
 2. saved CLI credentials in `.terrafin/agent-models.json`
 
 That means env vars still win when both are present.
@@ -98,59 +95,28 @@ Switch the saved default model:
 
 ```bash
 terrafin-agent models use google/gemini-3.1-pro-preview
-terrafin-agent models use github-copilot/gpt-4o
 ```
 
 Show provider auth status:
 
 ```bash
 terrafin-agent models auth status
-terrafin-agent models auth status --provider github-copilot
+terrafin-agent models auth status --provider google
 ```
 
-## GitHub Copilot login
+## Provider login
 
-The convenience command is:
-
-```bash
-terrafin-agent models auth login-github-copilot --set-default
-```
-
-This now follows the OpenClaw-style GitHub device flow. TerraFin requests a
-GitHub device code, shows you the verification URL and one-time code, waits for
-authorization, then saves the resulting GitHub token locally for later Copilot
-token exchange.
-
-You can still provide the token directly in non-interactive shells:
+Save a provider credential and optionally pin it as the default model:
 
 ```bash
-terrafin-agent models auth login-github-copilot \
-  --token ghu_your_token_here \
-  --set-default \
-  --yes
-```
-
-The generic provider form is also available:
-
-```bash
-terrafin-agent models auth login --provider github-copilot --method device --set-default
-terrafin-agent models auth login --provider google
+terrafin-agent models auth login --provider google --set-default
 terrafin-agent models auth login --provider openai
 ```
 
-For GitHub Copilot, `--method auto` is the default on the generic command. That
-means:
+Without `--token`, TerraFin prompts for the credential on an interactive TTY.
+Pass `--token` in CI or headless scripts.
 
-- with `--token`, TerraFin saves the token directly
-- without `--token`, TerraFin runs the device-login flow
-
-The device-login flow requires an interactive TTY. Use the token path in CI or
-headless scripts.
-
-TerraFin stores the GitHub login token in `.terrafin/agent-models.json`, then
-exchanges it server-side for a short-lived Copilot API token when runtime
-requests execute. The exchanged Copilot token cache remains separate in
-`.terrafin/credentials/github-copilot.token.json`.
+No provider supports device login; `--method device` is rejected.
 
 ## Running server note
 

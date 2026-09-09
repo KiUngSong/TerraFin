@@ -77,10 +77,10 @@ def test_list_light_metadata_reads_payloads_without_building_contexts(tmp_path) 
     )
 
     runtime_model = {
-        "modelRef": "github-copilot/gpt-4o",
-        "providerId": "github-copilot",
-        "providerLabel": "GitHub Copilot",
-        "modelId": "gpt-4o",
+        "modelRef": "google/gemini-3.1-pro-preview",
+        "providerId": "google",
+        "providerLabel": "Google AI Studio",
+        "modelId": "gemini-3.1-pro-preview",
     }
 
     store.create(

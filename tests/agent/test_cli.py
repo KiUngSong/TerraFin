@@ -85,11 +85,11 @@ def test_cli_models_list_all_reports_featured_models(monkeypatch, tmp_path) -> N
 
     payload = agent_cli._models_list_payload(include_models=True)
     assert payload["current"]["modelRef"] == "openai/gpt-4.1-mini"
-    assert any(provider["providerId"] == "github-copilot" for provider in payload["providers"])
+    assert any(provider["providerId"] == "google" for provider in payload["providers"])
     assert any(
-        model["modelRef"] == "github-copilot/gpt-4o"
+        model["modelRef"] == "google/gemini-3.1-pro-preview"
         for provider in payload["providers"]
-        if provider["providerId"] == "github-copilot"
+        if provider["providerId"] == "google"
         for model in provider["models"]
     )
 
@@ -108,7 +108,7 @@ def test_cli_models_list_all_human_output_is_table(monkeypatch, capsys, tmp_path
     assert "Auth" in captured.out
     assert "Local" in captured.out
     assert "openai/gpt-4.1-mini" in captured.out
-    assert "github-copilot/gpt-4o" in captured.out
+    assert "google/gemini-3.1-pro-preview" in captured.out
     assert not captured.out.lstrip().startswith("{")
 
 
@@ -124,16 +124,18 @@ def test_cli_models_use_persists_default_model(monkeypatch, capsys, tmp_path) ->
     assert saved["defaultModelRef"] == "google/gemini-3.1-pro-preview"
 
 
-def test_cli_models_auth_login_github_copilot_saves_token_and_default(monkeypatch, capsys, tmp_path) -> None:
+def test_cli_models_auth_login_saves_token_and_default(monkeypatch, capsys, tmp_path) -> None:
     monkeypatch.setenv("TERRAFIN_AGENT_MODELS_PATH", str(tmp_path / "agent-models.json"))
 
     exit_code = agent_cli.main(
         [
             "models",
             "auth",
-            "login-github-copilot",
+            "login",
+            "--provider",
+            "google",
             "--token",
-            "ghu_saved_token",
+            "AIza_saved_token",
             "--set-default",
             "--yes",
         ]
@@ -142,48 +144,18 @@ def test_cli_models_auth_login_github_copilot_saves_token_and_default(monkeypatc
     captured = capsys.readouterr()
     saved = json.loads((tmp_path / "agent-models.json").read_text(encoding="utf-8"))
     assert exit_code == 0
-    assert "Saved GitHub Copilot credentials (token)." in captured.out
-    assert "Default model: github-copilot/gpt-4o" in captured.out
-    assert saved["auth"]["github-copilot"]["authMode"] == "token"
-    assert saved["auth"]["github-copilot"]["githubToken"] == "ghu_saved_token"
-    assert saved["defaultModelRef"] == "github-copilot/gpt-4o"
+    assert "Saved Google AI Studio credentials (token)." in captured.out
+    assert "Default model: google/gemini-3.1-pro-preview" in captured.out
+    assert saved["auth"]["google"]["authMode"] == "token"
+    assert saved["auth"]["google"]["apiKey"] == "AIza_saved_token"
+    assert saved["defaultModelRef"] == "google/gemini-3.1-pro-preview"
 
 
-def test_cli_models_auth_login_github_copilot_device_flow(monkeypatch, capsys, tmp_path) -> None:
+def test_cli_models_auth_login_rejects_device_method(capsys, monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("TERRAFIN_AGENT_MODELS_PATH", str(tmp_path / "agent-models.json"))
-    monkeypatch.setattr(agent_cli, "request_github_copilot_device_code", lambda: type(
-        "DeviceCode",
-        (),
-        {
-            "device_code": "device-code-123",
-            "user_code": "ABCD-EFGH",
-            "interval_seconds": 5,
-            "expires_in_seconds": 900,
-            "authorization_url": "https://github.com/login/device?user_code=ABCD-EFGH",
-        },
-    )())
-    monkeypatch.setattr(
-        agent_cli,
-        "poll_github_copilot_device_access_token",
-        lambda *, device_code, interval_seconds, expires_in_seconds: "gho_device_token",
-    )
-    monkeypatch.setattr(agent_cli.sys.stdin, "isatty", lambda: True)
 
-    exit_code = agent_cli.main(
-        [
-            "models",
-            "auth",
-            "login-github-copilot",
-            "--set-default",
-            "--yes",
-        ]
-    )
+    exit_code = agent_cli.main(["models", "auth", "login", "--provider", "google", "--method", "device", "--yes"])
 
     captured = capsys.readouterr()
-    saved = json.loads((tmp_path / "agent-models.json").read_text(encoding="utf-8"))
-    assert exit_code == 0
-    assert "Saved GitHub Copilot credentials (device)." in captured.out
-    assert "Default model: github-copilot/gpt-4o" in captured.out
-    assert "Authorize GitHub Copilot" in captured.err
-    assert saved["auth"]["github-copilot"]["authMode"] == "device"
-    assert saved["auth"]["github-copilot"]["githubToken"] == "gho_device_token"
+    assert exit_code == 1
+    assert "does not support device login" in captured.err

@@ -55,7 +55,7 @@ terrafin-agent macro-focus "S&P 500" --view weekly
 terrafin-agent models list --all
 terrafin-agent models current
 terrafin-agent models use google/gemini-3.1-pro-preview
-terrafin-agent models auth login-github-copilot --set-default
+terrafin-agent models auth login --provider google --set-default
 ```
 
 ## Notebook: Explicit Bootstrap

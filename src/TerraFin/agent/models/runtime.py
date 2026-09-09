@@ -9,6 +9,7 @@ from TerraFin.env import ensure_runtime_env_loaded
 from ..contracts.conversation_state import RUNTIME_MODEL_METADATA_KEY
 from .management import DEFAULT_OPENAI_MODEL_REF, get_saved_default_model_ref
 
+
 if TYPE_CHECKING:
     from ..contracts.conversation import (
         TerraFinConversationMessage,
@@ -116,9 +117,7 @@ class TerraFinModelProviderRegistry:
             or not _PROVIDER_ID_RE.match(provider_id)
             or any(char.isspace() for char in model_id)
         ):
-            raise TerraFinModelConfigError(
-                "Hosted model refs must use the canonical 'provider/model' format."
-            )
+            raise TerraFinModelConfigError("Hosted model refs must use the canonical 'provider/model' format.")
         return provider_id, model_id
 
     def resolve_model_ref(self, model_ref: str) -> TerraFinRuntimeModel:
@@ -157,7 +156,19 @@ class TerraFinModelProviderRegistry:
             return self.resolve_model_ref(explicit)
         saved = get_saved_default_model_ref(env)
         if saved:
-            return self.resolve_model_ref(saved)
+            provider_id, model_id = self.parse_model_ref(saved)
+            # Only a missing provider gets the guidance below. A malformed ref and a
+            # bad model id carry their own remedy and must reach the caller intact.
+            try:
+                provider = self.get(provider_id)
+            except TerraFinModelConfigError as exc:
+                available = ", ".join(sorted(self._providers)) or "none"
+                raise TerraFinModelConfigError(
+                    f"Saved default model '{saved}' is no longer available ({exc}). "
+                    f"Pick another with 'terrafin-agent models use <provider/model>' "
+                    f"(available providers: {available})."
+                ) from exc
+            return provider.resolve_model(model_id)
         legacy_model = str(source.get("TERRAFIN_OPENAI_MODEL", "") or "").strip()
         return self.resolve_model_ref(f"openai/{legacy_model or DEFAULT_OPENAI_MODEL_REF.split('/', 1)[1]}")
 
@@ -182,7 +193,19 @@ class TerraFinProviderRoutedModelClient:
 
     def describe_runtime_status(self, *, session: "TerraFinAgentSession | None" = None) -> dict[str, Any]:
         runtime_model = self.describe_runtime_model(session=session)
-        provider = self.registry.get(runtime_model.provider_id)
+        try:
+            provider = self.registry.get(runtime_model.provider_id)
+        except TerraFinModelConfigError as exc:
+            # A session pins its model ref, so the provider can be gone by the time
+            # the session is reopened. That is an unconfigured runtime, not a crash.
+            return {
+                "runtimeModel": runtime_model.to_payload(),
+                "configured": False,
+                "message": (
+                    f"This session is pinned to '{runtime_model.model_ref}' ({exc}). "
+                    f"Start a new session on an available model."
+                ),
+            }
         try:
             getattr(provider, "config")
         except TerraFinModelConfigError as exc:

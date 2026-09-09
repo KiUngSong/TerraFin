@@ -95,15 +95,15 @@ def test_existing_session_runtime_model_tracks_current_default_model(tmp_path) -
     assert record.context.session.metadata["runtimeModel"]["modelRef"] == "openai/gpt-4.1-mini"
 
     runtime.default_runtime_model = TerraFinRuntimeModel(
-        model_ref="github-copilot/gpt-4o",
-        provider_id="github-copilot",
-        provider_label="GitHub Copilot",
-        model_id="gpt-4o",
+        model_ref="google/gemini-3.1-pro-preview",
+        provider_id="google",
+        provider_label="Google AI Studio",
+        model_id="gemini-3.1-pro-preview",
     )
 
     updated = runtime.get_session_record(context.session.session_id)
-    assert updated.context.session.metadata["runtimeModel"]["modelRef"] == "github-copilot/gpt-4o"
-    assert updated.metadata["runtimeModel"]["providerId"] == "github-copilot"
+    assert updated.context.session.metadata["runtimeModel"]["modelRef"] == "google/gemini-3.1-pro-preview"
+    assert updated.metadata["runtimeModel"]["providerId"] == "google"
 
 
 def test_delete_session_cascades_hidden_child_sessions(tmp_path) -> None:

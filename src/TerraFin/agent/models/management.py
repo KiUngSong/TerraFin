@@ -23,7 +23,7 @@ class TerraFinProviderCatalogEntry:
     auth_env_vars: tuple[str, ...]
     auth_field: str
     auth_prompt: str
-    auth_kind: Literal["api-key", "github-token"]
+    auth_kind: Literal["api-key"]
     supports_custom_model_ids: bool = True
     notes: str = ""
 
@@ -61,23 +61,6 @@ _PROVIDER_CATALOG: dict[str, TerraFinProviderCatalogEntry] = {
         auth_prompt="Gemini / Google AI Studio API key",
         auth_kind="api-key",
         notes="Canonical refs stay in the form provider/model.",
-    ),
-    "github-copilot": TerraFinProviderCatalogEntry(
-        provider_id="github-copilot",
-        provider_label="GitHub Copilot",
-        description="OpenAI-compatible GitHub Copilot chat models.",
-        default_model_ref="github-copilot/gpt-4o",
-        featured_model_refs=(
-            "github-copilot/gpt-4o",
-            "github-copilot/gpt-4.1",
-            "github-copilot/gpt-5",
-            "github-copilot/o4-mini",
-        ),
-        auth_env_vars=("COPILOT_GITHUB_TOKEN", "GH_TOKEN", "GITHUB_TOKEN"),
-        auth_field="githubToken",
-        auth_prompt="GitHub token with GitHub Copilot access",
-        auth_kind="github-token",
-        notes="TerraFin v1 supports the OpenAI-compatible Copilot model family only.",
     ),
 }
 

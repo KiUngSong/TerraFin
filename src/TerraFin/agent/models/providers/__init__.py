@@ -1,9 +1,3 @@
-from .github_copilot import (
-    TerraFinGithubCopilotConfig,
-    TerraFinGithubCopilotConfigError,
-    TerraFinGithubCopilotResponseError,
-    TerraFinGithubCopilotResponsesProvider,
-)
 from .google import (
     TerraFinGoogleModelConfig,
     TerraFinGoogleModelConfigError,
@@ -22,6 +16,7 @@ from .openai import (
     TerraFinOpenAIResponsesProvider,
 )
 
+
 __all__ = [
     "DEFAULT_OPENAI_BASE_URL",
     "DEFAULT_OPENAI_MAX_RETRIES",
@@ -36,8 +31,4 @@ __all__ = [
     "TerraFinGoogleModelConfigError",
     "TerraFinGoogleModelResponseError",
     "TerraFinGoogleResponsesProvider",
-    "TerraFinGithubCopilotConfig",
-    "TerraFinGithubCopilotConfigError",
-    "TerraFinGithubCopilotResponseError",
-    "TerraFinGithubCopilotResponsesProvider",
 ]

@@ -434,7 +434,7 @@ OpenAPI is available at `/openapi.json`.
 ## Managing hosted models
 
 The hosted runtime now has a small built-in model manager. Use it when you want
-OpenAI, Gemini, or GitHub Copilot without hand-editing env vars every time.
+OpenAI or Gemini without hand-editing env vars every time.
 
 This command family was inspired by OpenClaw's provider/model UX, but TerraFin
 implements and persists it through its own runtime and CLI layers. See
@@ -443,11 +443,11 @@ implements and persists it through its own runtime and CLI layers. See
 ```bash
 terrafin-agent models list --all
 terrafin-agent models current
-terrafin-agent models use github-copilot/gpt-4o
-terrafin-agent models auth login-github-copilot --set-default
+terrafin-agent models use google/gemini-3.1-pro-preview
+terrafin-agent models auth login --provider google --set-default
 ```
 
-`login-github-copilot` now runs a full GitHub device-login flow by default. For
+`models auth login` prompts for the credential on an interactive TTY. For
 non-interactive shells, pass `--token` instead.
 
 For the full model-management guide, read [models.md](./models.md).

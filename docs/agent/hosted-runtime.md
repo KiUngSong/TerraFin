@@ -38,7 +38,7 @@ Today the hosted runtime has:
 - a policy-enforcing runtime controller
 - a hosted tool adapter
 - a provider-agnostic hosted loop
-- a provider registry with OpenAI, Gemini, and GitHub Copilot adapters
+- a provider registry with OpenAI and Gemini adapters
 - Python, CLI, HTTP, notebook, and browser widget adapters
 - transcript-first local session history
 - hidden persona subagents (Buffett / Marks / Druckenmiller) reached by
@@ -122,7 +122,7 @@ for the full old → new mapping.
 | `src/TerraFin/agent/storage/transcript_store.py` | append-only transcript store, `sessions.json` index, transcript readers, archive/rewrite helpers |
 | `src/TerraFin/agent/storage/session_store.py` | non-transcript hosted state: tasks, approvals, audit, view context, transient conversation attachment |
 | `src/TerraFin/agent/models/runtime.py` | provider registry, runtime-model binding, canonical `provider/model` refs |
-| `src/TerraFin/agent/models/providers/*.py` | provider adapters for OpenAI, Gemini, and GitHub Copilot |
+| `src/TerraFin/agent/models/providers/*.py` | provider adapters for OpenAI and Gemini |
 | `src/TerraFin/agent/tools/adapter.py` | function-callable tool definitions and tool execution bridge |
 | `src/TerraFin/agent/service/client.py` | Python transport adapter (`TerraFinAgentClient`) |
 | `src/TerraFin/agent/cli/main.py` | CLI adapter (`terrafin-agent`) |
@@ -229,7 +229,6 @@ Current tests:
 - `tests/agent/test_transcript_store.py`
 - `tests/agent/test_openai_model.py`
 - `tests/agent/test_google_provider.py`
-- `tests/agent/test_github_copilot_provider.py`
 - `tests/agent/test_runtime_helpers.py`
 - `tests/agent/test_client.py`
 - `tests/agent/test_cli.py`
@@ -245,7 +244,6 @@ pytest tests/agent/test_runtime.py \
   tests/agent/test_transcript_store.py \
   tests/agent/test_openai_model.py \
   tests/agent/test_google_provider.py \
-  tests/agent/test_github_copilot_provider.py \
   tests/agent/test_runtime_helpers.py \
   tests/agent/test_client.py \
   tests/agent/test_cli.py \

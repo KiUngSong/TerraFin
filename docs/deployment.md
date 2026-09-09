@@ -90,8 +90,6 @@ At minimum, define:
 - Restart the server after changing saved model-manager state.
 - Sessions pin a resolved `provider/model` on creation, so new env changes do
   not silently rewrite existing sessions.
-- GitHub Copilot login stores the GitHub token locally, then exchanges it for a
-  short-lived Copilot API token at runtime.
 
 ## Formal Docs Hosting
 

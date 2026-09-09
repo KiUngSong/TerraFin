@@ -421,7 +421,7 @@ working, but new code should target the canonical paths below.
 | `agent/storage/session_store.py`                                     | non-transcript hosted state: tasks, approvals, audit, view context                            | `agent/session_store.py`                 |
 | `agent/models/management.py`                                         | saved model/auth state + CLI-facing provider catalog (`list_provider_catalog`)                | `agent/model_management.py`              |
 | `agent/models/runtime.py`                                            | provider registry, runtime-model binding, canonical `provider/model` refs                     | `agent/model_runtime.py`                 |
-| `agent/models/providers/*.py`                                        | provider adapters for OpenAI, Gemini, GitHub Copilot                                          | `agent/providers/*.py`                   |
+| `agent/models/providers/*.py`                                        | provider adapters for OpenAI and Gemini                                                       | `agent/providers/*.py`                   |
 | `agent/tools/adapter.py`, `execution.py`, `normalize.py`             | hosted tool adapter + structured tool execution outcomes                                      | `agent/tools.py`, `tool_execution.py`    |
 | `agent/guru/worker.py`                                               | hidden persona subagent runner, persona prompts, `_select_guru_worker_tools`                  | (re-exported via `agent/guru/__init__.py`) |
 | `agent/guru/memo.py`, `consult.py`, `feedback.py`                    | `GuruResearchMemo` schema, `consult_<persona>` glue, persona-fit feedback                     | —                                        |

@@ -115,7 +115,7 @@ Useful optional env vars:
 | `FRED_API_KEY` | Enable FRED-backed economic data |
 | `TERRAFIN_SEC_USER_AGENT` | Enable SEC EDGAR filings and guru 13F access |
 | `TERRAFIN_AGENT_MODEL_REF` | Choose the hosted model in `provider/model` format |
-| `OPENAI_API_KEY` / `GEMINI_API_KEY` / `COPILOT_GITHUB_TOKEN` | Provider credentials for TerraFin Agent |
+| `OPENAI_API_KEY` / `GEMINI_API_KEY` | Provider credentials for TerraFin Agent |
 
 ## Quick Examples
 
@@ -144,7 +144,7 @@ CLI:
 ```bash
 terrafin-agent snapshot AAPL
 terrafin-agent models list --all
-terrafin-agent models auth login-github-copilot --set-default
+terrafin-agent models auth login --provider google --set-default
 ```
 
 ## TerraFin Agent
@@ -168,8 +168,7 @@ stays in warning/info mode:
 - it does not accept chat input until provider credentials are valid
 
 Model management follows canonical `provider/model` refs such as
-`openai/gpt-4.1-mini`, `google/gemini-3.1-pro-preview`, or
-`github-copilot/gpt-4o`.
+`openai/gpt-4.1-mini` or `google/gemini-3.1-pro-preview`.
 
 The CLI model-management UX was inspired by OpenClaw. TerraFin's runtime
 binding, saved-state format, hosted session model, and widget integration are

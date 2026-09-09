@@ -15,10 +15,10 @@ def test_transcript_store_derives_summary_and_conversation_from_events(tmp_path)
         agent_name="terrafin-assistant",
         created_at=_ts(9),
         runtime_model={
-            "modelRef": "github-copilot/gpt-4o",
-            "providerId": "github-copilot",
-            "providerLabel": "GitHub Copilot",
-            "modelId": "gpt-4o",
+            "modelRef": "google/gemini-3.1-pro-preview",
+            "providerId": "google",
+            "providerLabel": "Google AI Studio",
+            "modelId": "gemini-3.1-pro-preview",
         },
         system_message=TerraFinConversationMessage(
             role="system",
@@ -51,7 +51,7 @@ def test_transcript_store_derives_summary_and_conversation_from_events(tmp_path)
     assert summary.last_message_preview == "AAPL looks stable."
     assert summary.message_count == 2
     assert summary.runtime_model is not None
-    assert summary.runtime_model["modelRef"] == "github-copilot/gpt-4o"
+    assert summary.runtime_model["modelRef"] == "google/gemini-3.1-pro-preview"
     assert [message.role for message in conversation.snapshot()] == [
         "system",
         "user",

@@ -59,7 +59,7 @@ state.
 
 | Variable | Purpose |
 |----------|---------|
-| `TERRAFIN_AGENT_MODEL_REF` | Canonical hosted model ref such as `openai/gpt-4.1` or `github-copilot/gpt-4o` |
+| `TERRAFIN_AGENT_MODEL_REF` | Canonical hosted model ref such as `openai/gpt-4.1` or `google/gemini-3.1-pro-preview` |
 | `TERRAFIN_AGENT_MODELS_PATH` | Override path for saved CLI model/auth state |
 | `TERRAFIN_AGENT_SESSION_DB_PATH` | Override path for hosted runtime task/approval/view-context state |
 | `TERRAFIN_AGENT_TRANSCRIPT_DIR` | Override root directory for hosted transcript JSONL history and `sessions.json` |
@@ -71,15 +71,6 @@ Provider credentials:
 |----------|-----------|
 | OpenAI | `OPENAI_API_KEY` |
 | Google Gemini | `GEMINI_API_KEY`, `GOOGLE_API_KEY` |
-| GitHub Copilot | `COPILOT_GITHUB_TOKEN`, `GH_TOKEN`, `GITHUB_TOKEN` |
-
-Copilot-specific tuning:
-
-| Variable | Purpose |
-|----------|---------|
-| `TERRAFIN_COPILOT_TIMEOUT_SECONDS` | Copilot request timeout |
-| `TERRAFIN_COPILOT_MAX_RETRIES` | Retry count for the Copilot transport |
-| `TERRAFIN_COPILOT_TOKEN_CACHE_PATH` | Override the exchanged Copilot API-token cache path |
 
 ## Recommended Local Setup
 

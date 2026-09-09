@@ -1,9 +1,8 @@
 import pytest
 
 from TerraFin.agent.definitions import TerraFinAgentDefinition
-from TerraFin.agent.model_management import set_saved_default_model_ref
-from TerraFin.agent.service.hosted import build_hosted_model_provider_registry, get_hosted_agent_loop, reset_hosted_agent_loop
 from TerraFin.agent.loop import TerraFinConversationMessage, TerraFinHostedConversation, TerraFinModelTurn
+from TerraFin.agent.model_management import set_saved_default_model_ref
 from TerraFin.agent.model_runtime import (
     TerraFinModelConfigError,
     TerraFinModelProviderRegistry,
@@ -11,6 +10,11 @@ from TerraFin.agent.model_runtime import (
     TerraFinRuntimeModel,
 )
 from TerraFin.agent.runtime import TerraFinAgentSession
+from TerraFin.agent.service.hosted import (
+    build_hosted_model_provider_registry,
+    get_hosted_agent_loop,
+    reset_hosted_agent_loop,
+)
 
 
 class _FakeProvider:
@@ -81,12 +85,48 @@ def test_provider_registry_maps_legacy_openai_env_to_canonical_ref() -> None:
 def test_provider_registry_reads_saved_default_model_ref_from_state(tmp_path) -> None:
     registry = build_hosted_model_provider_registry()
     env = {"TERRAFIN_AGENT_MODELS_PATH": str(tmp_path / "agent-models.json")}
-    set_saved_default_model_ref("github-copilot/gpt-4o", env)
+    set_saved_default_model_ref("google/gemini-3.1-pro-preview", env)
 
     resolved = registry.resolve_default_model_ref(env=env)
 
-    assert resolved.model_ref == "github-copilot/gpt-4o"
-    assert resolved.provider_id == "github-copilot"
+    assert resolved.model_ref == "google/gemini-3.1-pro-preview"
+    assert resolved.provider_id == "google"
+
+
+def test_a_saved_ref_that_is_not_a_removed_provider_keeps_its_own_error(tmp_path) -> None:
+    """Only a missing provider gets the "no longer available" guidance. A
+    malformed ref and a bad model id carry remedies of their own, and dressing
+    them as a removed provider sends the user to the wrong fix.
+    """
+    registry = build_hosted_model_provider_registry()
+
+    def _error_for(ref: str) -> str:
+        env = {"TERRAFIN_AGENT_MODELS_PATH": str(tmp_path / f"{abs(hash(ref))}.json")}
+        set_saved_default_model_ref(ref, env)
+        with pytest.raises(TerraFinModelConfigError) as excinfo:
+            registry.resolve_default_model_ref(env=env)
+        return str(excinfo.value)
+
+    malformed = _error_for("garbage")
+    assert "canonical 'provider/model' format" in malformed
+    assert "no longer available" not in malformed
+
+    bad_model = _error_for("google/totally-not-a-model")
+    assert "totally-not-a-model" in bad_model
+    assert "no longer available" not in bad_model
+
+
+def test_saved_default_ref_for_removed_provider_names_the_stale_ref(tmp_path) -> None:
+    registry = build_hosted_model_provider_registry()
+    env = {"TERRAFIN_AGENT_MODELS_PATH": str(tmp_path / "agent-models.json")}
+    set_saved_default_model_ref("github-copilot/gpt-4o", env)
+
+    with pytest.raises(TerraFinModelConfigError) as excinfo:
+        registry.resolve_default_model_ref(env=env)
+
+    message = str(excinfo.value)
+    assert "github-copilot/gpt-4o" in message
+    assert "terrafin-agent models use" in message
 
 
 def test_routed_model_client_pins_runtime_model_to_session_metadata() -> None:
@@ -128,12 +168,12 @@ def test_hosted_agent_loop_resyncs_saved_default_model_without_rebuild(monkeypat
         loop = get_hosted_agent_loop()
         assert loop.model_client.default_model.model_ref == "openai/gpt-4.1-mini"
 
-        set_saved_default_model_ref("github-copilot/gpt-4o", env)
+        set_saved_default_model_ref("google/gemini-3.1-pro-preview", env)
 
         loop = get_hosted_agent_loop()
-        assert loop.model_client.default_model.model_ref == "github-copilot/gpt-4o"
+        assert loop.model_client.default_model.model_ref == "google/gemini-3.1-pro-preview"
         assert loop.runtime.default_runtime_model is not None
-        assert loop.runtime.default_runtime_model.model_ref == "github-copilot/gpt-4o"
+        assert loop.runtime.default_runtime_model.model_ref == "google/gemini-3.1-pro-preview"
     finally:
         reset_hosted_agent_loop()
 

@@ -4,8 +4,8 @@ from pathlib import Path
 from TerraFin.agent.model_management import (
     build_provider_auth_status,
     get_saved_default_model_ref,
-    resolve_model_state_path,
     resolve_current_model_preference,
+    resolve_model_state_path,
     resolve_provider_secret,
     set_saved_default_model_ref,
     set_saved_provider_credentials,
@@ -16,11 +16,11 @@ from TerraFin.env import resolve_state_dir
 def test_saved_default_model_ref_round_trips_through_model_state(tmp_path) -> None:
     env = {"TERRAFIN_AGENT_MODELS_PATH": str(tmp_path / "agent-models.json")}
 
-    set_saved_default_model_ref("github-copilot/gpt-4o", env)
+    set_saved_default_model_ref("google/gemini-3.1-pro-preview", env)
 
-    assert get_saved_default_model_ref(env) == "github-copilot/gpt-4o"
+    assert get_saved_default_model_ref(env) == "google/gemini-3.1-pro-preview"
     payload = json.loads((tmp_path / "agent-models.json").read_text(encoding="utf-8"))
-    assert payload["defaultModelRef"] == "github-copilot/gpt-4o"
+    assert payload["defaultModelRef"] == "google/gemini-3.1-pro-preview"
 
 
 def test_shared_state_dir_defaults_to_repo_scoped_terrafin_dir() -> None:
@@ -54,7 +54,7 @@ def test_resolve_current_model_preference_migrates_legacy_repo_parent_state(tmp_
         json.dumps(
             {
                 "version": 1,
-                "defaultModelRef": "github-copilot/gpt-4o",
+                "defaultModelRef": "google/gemini-3.1-pro-preview",
                 "auth": {},
             }
         ),
@@ -69,11 +69,11 @@ def test_resolve_current_model_preference_migrates_legacy_repo_parent_state(tmp_
 
     current = resolve_current_model_preference()
 
-    assert current == {"modelRef": "github-copilot/gpt-4o", "source": "saved"}
+    assert current == {"modelRef": "google/gemini-3.1-pro-preview", "source": "saved"}
     migrated_path = repo_root / ".terrafin" / "agent-models.json"
     assert migrated_path.is_file()
     migrated = json.loads(migrated_path.read_text(encoding="utf-8"))
-    assert migrated["defaultModelRef"] == "github-copilot/gpt-4o"
+    assert migrated["defaultModelRef"] == "google/gemini-3.1-pro-preview"
 
 
 def test_provider_secret_prefers_env_over_saved_state(tmp_path) -> None:
@@ -91,10 +91,10 @@ def test_provider_secret_prefers_env_over_saved_state(tmp_path) -> None:
 
 def test_provider_auth_status_reports_saved_credentials(tmp_path) -> None:
     env = {"TERRAFIN_AGENT_MODELS_PATH": str(tmp_path / "agent-models.json")}
-    set_saved_provider_credentials("github-copilot", {"githubToken": "ghu_saved_token"}, env)
+    set_saved_provider_credentials("google", {"apiKey": "AIza_saved_token"}, env)
 
-    status = build_provider_auth_status("github-copilot", env)
+    status = build_provider_auth_status("google", env)
 
     assert status["configured"] is True
     assert status["source"] == "saved"
-    assert status["credentialHint"] == "ghu_...oken"
+    assert status["credentialHint"] == "AIza...oken"

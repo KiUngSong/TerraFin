@@ -6,8 +6,6 @@ from typing import Any
 
 from TerraFin.env import load_entrypoint_dotenv
 
-from ..service.client import TerraFinAgentClient
-from ..service.hosted import build_hosted_model_provider_registry
 from ..models.management import (
     build_provider_auth_status,
     get_provider_catalog,
@@ -18,10 +16,9 @@ from ..models.management import (
     set_saved_default_model_ref,
     set_saved_provider_credentials,
 )
-from ..models.providers.github_copilot import (
-    poll_github_copilot_device_access_token,
-    request_github_copilot_device_code,
-)
+from ..models.runtime import TerraFinModelConfigError
+from ..service.client import TerraFinAgentClient
+from ..service.hosted import build_hosted_model_provider_registry
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -172,18 +169,12 @@ def _build_parser() -> argparse.ArgumentParser:
         "--method",
         default="auto",
         choices=["auto", "token", "device"],
-        help="Auth method. GitHub Copilot supports device login; other providers use token/API-key auth.",
+        help="Auth method. Every provider uses token/API-key auth; no provider currently supports device login.",
     )
     models_auth_login_parser.add_argument("--token", default=None)
     models_auth_login_parser.add_argument("--set-default", action="store_true")
     models_auth_login_parser.add_argument("--model-ref", default=None)
     models_auth_login_parser.add_argument("--yes", action="store_true")
-
-    models_auth_copilot_parser = models_auth_subparsers.add_parser("login-github-copilot")
-    models_auth_copilot_parser.add_argument("--token", default=None)
-    models_auth_copilot_parser.add_argument("--set-default", action="store_true")
-    models_auth_copilot_parser.add_argument("--model-ref", default=None)
-    models_auth_copilot_parser.add_argument("--yes", action="store_true")
 
     return parser
 
@@ -318,7 +309,7 @@ def _format_models_output(args: argparse.Namespace, payload: dict[str, Any]) -> 
     if args.models_command == "auth":
         if args.models_auth_command == "status":
             return _format_models_auth_status_output(payload)
-        if args.models_auth_command in {"login", "login-github-copilot"}:
+        if args.models_auth_command == "login":
             return _format_models_auth_login_output(payload)
     return json.dumps(payload, indent=2, ensure_ascii=False)
 
@@ -339,15 +330,19 @@ def _confirm_overwrite(provider_label: str) -> None:
         raise RuntimeError("Cancelled.")
 
 
-def _require_tty(context: str) -> None:
-    if not sys.stdin.isatty():
-        raise RuntimeError(f"{context} requires an interactive TTY.")
-
-
 def _model_payload_from_ref(model_ref: str) -> dict[str, Any]:
     registry = build_hosted_model_provider_registry()
-    resolved = registry.resolve_model_ref(model_ref)
-    return resolved.to_payload()
+    provider_id, _model_id = registry.parse_model_ref(model_ref)
+    # Only a missing provider gets the guidance below. Parse errors and
+    # provider-internal errors carry their own remedy and must reach the user intact.
+    try:
+        registry.get(provider_id)
+    except TerraFinModelConfigError as exc:
+        available = ", ".join(sorted(provider.provider_id for provider in registry.list())) or "none"
+        raise RuntimeError(
+            f"Model ref '{model_ref}' is not available ({exc}). Available providers: {available}."
+        ) from exc
+    return registry.resolve_model_ref(model_ref).to_payload()
 
 
 def _models_list_payload(*, provider_filter: str | None = None, include_models: bool = False) -> dict[str, Any]:
@@ -431,28 +426,12 @@ def _models_auth_login_payload(
     normalized_method = str(method or "auto").strip().lower() or "auto"
     if normalized_method not in {"auto", "token", "device"}:
         raise RuntimeError(f"Unknown auth method: {normalized_method}")
-    if catalog.provider_id != "github-copilot" and normalized_method == "device":
+    # No provider supports device login; every catalog entry authenticates with a token.
+    if normalized_method == "device":
         raise RuntimeError(f"Provider '{catalog.provider_id}' does not support device login.")
-    if normalized_method == "device" and str(token or "").strip():
-        raise RuntimeError("--token cannot be combined with --method device.")
 
     auth_mode = "token"
-    if catalog.provider_id == "github-copilot" and normalized_method in {"auto", "device"} and not str(token or "").strip():
-        _require_tty("GitHub Copilot device login")
-        device = request_github_copilot_device_code()
-        print(
-            f"Authorize GitHub Copilot by visiting {device.authorization_url} and entering code {device.user_code}.",
-            file=sys.stderr,
-        )
-        print("Waiting for GitHub authorization...", file=sys.stderr)
-        secret = poll_github_copilot_device_access_token(
-            device_code=device.device_code,
-            interval_seconds=device.interval_seconds,
-            expires_in_seconds=device.expires_in_seconds,
-        )
-        auth_mode = "device"
-    else:
-        secret = str(token or "").strip() or _prompt_secret(catalog.auth_prompt)
+    secret = str(token or "").strip() or _prompt_secret(catalog.auth_prompt)
     if not secret:
         raise RuntimeError(f"{catalog.auth_prompt} cannot be empty.")
     state_path = set_saved_provider_credentials(
@@ -562,15 +541,6 @@ def main(argv: list[str] | None = None) -> int:
                     payload = _models_auth_login_payload(
                         provider_id=get_provider_catalog(args.provider).provider_id,
                         method=args.method,
-                        token=args.token,
-                        set_default=args.set_default,
-                        model_ref=args.model_ref,
-                        yes=args.yes,
-                    )
-                elif args.models_auth_command == "login-github-copilot":
-                    payload = _models_auth_login_payload(
-                        provider_id="github-copilot",
-                        method="device" if not str(args.token or "").strip() else "token",
                         token=args.token,
                         set_default=args.set_default,
                         model_ref=args.model_ref,

@@ -57,7 +57,6 @@ def _probe_agent() -> dict[str, Any]:
             ("OpenAI", ("OPENAI_API_KEY",)),
             ("Anthropic", ("ANTHROPIC_API_KEY",)),
             ("Gemini", ("GEMINI_API_KEY", "GOOGLE_API_KEY")),
-            ("GitHub Copilot", ("COPILOT_GITHUB_TOKEN", "GH_TOKEN", "GITHUB_TOKEN")),
         ]
     else:
         env_groups = [(c.provider_label, c.auth_env_vars) for c in list_provider_catalog()]
@@ -151,8 +150,9 @@ async def _probe_private_data() -> dict[str, Any]:
 
     headers = {access_key: access_value} if access_key and access_value else {}
     try:
+        from datetime import datetime, timedelta, timezone
+
         import httpx
-        from datetime import datetime, timezone, timedelta
 
         async with httpx.AsyncClient(timeout=_PROBE_TIMEOUT) as client:
             r = await client.get(f"{endpoint.rstrip('/')}/series/fear-greed/current", headers=headers)

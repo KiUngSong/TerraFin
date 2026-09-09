@@ -195,7 +195,7 @@ const LOCAL_SETUP_MESSAGE = `${AGENT_UI_NAME} needs a local hosted model setup b
 
 To use it locally:
 - choose a hosted model with TERRAFIN_AGENT_MODEL_REF
-- add provider credentials such as OPENAI_API_KEY, GEMINI_API_KEY, or COPILOT_GITHUB_TOKEN
+- add provider credentials such as OPENAI_API_KEY or GEMINI_API_KEY
 - restart TerraFin after saving the model or credentials`
 ;
 

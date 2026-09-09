@@ -13,11 +13,11 @@ TerraFin's agent surface has three separate jobs:
 
 !!! note "Attribution Boundary"
     TerraFin's model-management layer borrows some UX and naming ideas from
-    OpenClaw, especially canonical `provider/model` refs, the `models ...`
-    command family, and the GitHub Copilot login flow. TerraFin's hosted
-    runtime, financial capability layer, session/task model, widget, and API
-    wiring are TerraFin-specific unless a page says otherwise. The hosted
-    runtime's orchestrator-agent-with-persona-subagents architecture also
+    OpenClaw, especially canonical `provider/model` refs and the `models ...`
+    command family. TerraFin's hosted runtime, financial capability layer,
+    session/task model, widget, and API wiring are TerraFin-specific unless a
+    page says otherwise. The hosted runtime's
+    orchestrator-agent-with-persona-subagents architecture also
     borrows the high-level idea of explicit analyst-role separation from
     `ai-hedge-fund`, while keeping TerraFin's shared capability layer
     instead of per-guru Python modules. See the architecture diagrams in

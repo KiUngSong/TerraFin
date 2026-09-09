@@ -1,6 +1,15 @@
 """Agent-facing client, service, and task helpers for TerraFin."""
 
-from .service.client import TerraFinAgentClient
+from .cli.tasks import (
+    calendar_scan,
+    compare_assets,
+    macro_context,
+    market_snapshot,
+    open_chart,
+    portfolio_context,
+    stock_fundamentals,
+    ticker_brief,
+)
 from .contracts.definitions import (
     DEFAULT_HOSTED_AGENT_DESCRIPTION,
     DEFAULT_HOSTED_AGENT_NAME,
@@ -13,6 +22,27 @@ from .guru import (
     GuruResearchMemo,
     GuruRoutePlan,
     run_guru_consult,
+)
+from .models.providers import (
+    TerraFinGoogleModelConfig,
+    TerraFinGoogleModelConfigError,
+    TerraFinGoogleModelResponseError,
+    TerraFinGoogleResponsesProvider,
+    TerraFinOpenAIResponsesProvider,
+)
+from .models.providers.openai import (
+    TerraFinOpenAIConfigError,
+    TerraFinOpenAIModelConfig,
+    TerraFinOpenAIResponseError,
+    TerraFinOpenAIResponsesModelClient,
+)
+from .models.runtime import (
+    TerraFinModelConfigError,
+    TerraFinModelProvider,
+    TerraFinModelProviderRegistry,
+    TerraFinModelResponseError,
+    TerraFinProviderRoutedModelClient,
+    TerraFinRuntimeModel,
 )
 from .runtime import (
     TerraFinAgentApprovalRequiredError,
@@ -36,32 +66,8 @@ from .runtime import (
     build_default_system_prompt,
     create_agent_context,
 )
-from .models.runtime import (
-    TerraFinModelConfigError,
-    TerraFinModelProvider,
-    TerraFinModelProviderRegistry,
-    TerraFinModelResponseError,
-    TerraFinProviderRoutedModelClient,
-    TerraFinRuntimeModel,
-)
-from .models.providers.openai import (
-    TerraFinOpenAIConfigError,
-    TerraFinOpenAIModelConfig,
-    TerraFinOpenAIResponseError,
-    TerraFinOpenAIResponsesModelClient,
-)
-from .models.providers import (
-    TerraFinGithubCopilotConfig,
-    TerraFinGithubCopilotConfigError,
-    TerraFinGithubCopilotResponseError,
-    TerraFinGithubCopilotResponsesProvider,
-    TerraFinGoogleModelConfig,
-    TerraFinGoogleModelConfigError,
-    TerraFinGoogleModelResponseError,
-    TerraFinGoogleResponsesProvider,
-    TerraFinOpenAIResponsesProvider,
-)
 from .service import TerraFinAgentService
+from .service.client import TerraFinAgentClient
 from .service.client_helpers import TerraFinRuntimeSessionClient, ask_agent, create_runtime_session
 from .storage import (
     HostedSessionIndexEntry,
@@ -74,16 +80,6 @@ from .storage import (
     TerraFinHostedPermissionEvent,
     TerraFinHostedSessionRecord,
     TerraFinHostedViewContextRecord,
-)
-from .cli.tasks import (
-    calendar_scan,
-    compare_assets,
-    macro_context,
-    market_snapshot,
-    open_chart,
-    portfolio_context,
-    stock_fundamentals,
-    ticker_brief,
 )
 from .tools import (
     TerraFinHostedToolAdapter,
@@ -125,10 +121,6 @@ __all__ = [
     "TerraFinGoogleModelConfigError",
     "TerraFinGoogleModelResponseError",
     "TerraFinGoogleResponsesProvider",
-    "TerraFinGithubCopilotConfig",
-    "TerraFinGithubCopilotConfigError",
-    "TerraFinGithubCopilotResponseError",
-    "TerraFinGithubCopilotResponsesProvider",
     "TerraFinHostedToolAdapter",
     "TerraFinToolDefinition",
     "TerraFinToolInvocationResult",

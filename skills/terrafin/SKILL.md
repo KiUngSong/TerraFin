@@ -83,8 +83,8 @@ Optional, unlocks additional capabilities:
 Required only for the **hosted TerraFin Agent runtime** (conversational
 UI at `/agent/*`, not the stateless `/agent/api/*` routes):
 
-- `TERRAFIN_AGENT_MODEL_REF` — e.g. `openai:gpt-4.1`, `gemini:gemini-2.5-pro`, `copilot:gpt-4.1`.
-- One of `OPENAI_API_KEY`, `GEMINI_API_KEY`, `COPILOT_GITHUB_TOKEN` — must match the provider in `TERRAFIN_AGENT_MODEL_REF`.
+- `TERRAFIN_AGENT_MODEL_REF` — `provider/model`, e.g. `openai/gpt-4.1` or `google/gemini-2.5-pro`.
+- One of `OPENAI_API_KEY`, `GEMINI_API_KEY` — must match the provider in `TERRAFIN_AGENT_MODEL_REF`.
 
 See [.env.example](../../.env.example) and [docs/configuration.md](../../docs/configuration.md) for the full list (MongoDB watchlist, private-access data source, host/port overrides, etc.).
 
