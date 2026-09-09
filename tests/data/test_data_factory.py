@@ -186,7 +186,10 @@ def test_get_recent_history_uses_custom_market_indicator_progressive_hook(monkey
     def _forbid_fallback(_key: str):
         raise AssertionError("fallback market-data loader should not run")
 
-    def _stub_recent(_key: str, *, period: str = "3y") -> HistoryChunk:
+    seen: dict[str, object] = {}
+
+    def _stub_recent(_key: str, *, period: str = "3y", force_refresh: bool = False) -> HistoryChunk:
+        seen["force_refresh"] = force_refresh
         frame = TimeSeriesDataFrame(
             pd.DataFrame(
                 {
@@ -216,6 +219,14 @@ def test_get_recent_history_uses_custom_market_indicator_progressive_hook(monkey
     assert chunk.frame.name == "Vol Regime"
     assert chunk.frame.chart_meta["zones"] == market_indicator_module.VOL_REGIME_ZONES
     assert chunk.has_older is True
+    assert seen["force_refresh"] is False
+
+    DataFactory().get_recent_history("Vol Regime", period="3y", force_refresh=True)
+
+    # The registry path must forward the flag, not merely accept it: a caller
+    # that believes it forced a refresh and silently gets cached data is the
+    # failure the flag exists to prevent.
+    assert seen["force_refresh"] is True
 
 
 def test_get_full_history_backfill_uses_custom_market_indicator_progressive_hook(monkeypatch) -> None:
@@ -261,7 +272,7 @@ def test_get_recent_history_uses_fear_greed_progressive_hook(monkeypatch) -> Non
     def _forbid_fallback(_key: str):
         raise AssertionError("fallback market-data loader should not run")
 
-    def _stub_recent(_key: str, *, period: str = "3y") -> HistoryChunk:
+    def _stub_recent(_key: str, *, period: str = "3y", force_refresh: bool = False) -> HistoryChunk:
         frame = TimeSeriesDataFrame(
             pd.DataFrame(
                 {
@@ -297,7 +308,7 @@ def test_get_recent_history_uses_cape_progressive_hook(monkeypatch) -> None:
     def _forbid_fallback(_key: str):
         raise AssertionError("fallback market-data loader should not run")
 
-    def _stub_recent(_key: str, *, period: str = "3y") -> HistoryChunk:
+    def _stub_recent(_key: str, *, period: str = "3y", force_refresh: bool = False) -> HistoryChunk:
         frame = TimeSeriesDataFrame(
             pd.DataFrame(
                 {
@@ -333,7 +344,7 @@ def test_get_recent_history_uses_net_breadth_progressive_hook(monkeypatch) -> No
     def _forbid_fallback(_key: str):
         raise AssertionError("fallback market-data loader should not run")
 
-    def _stub_recent(_key: str, *, period: str = "3y") -> HistoryChunk:
+    def _stub_recent(_key: str, *, period: str = "3y", force_refresh: bool = False) -> HistoryChunk:
         frame = TimeSeriesDataFrame(
             pd.DataFrame(
                 {

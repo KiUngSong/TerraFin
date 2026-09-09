@@ -80,7 +80,7 @@ def test_dispersion_index_in_market_registry():
 
 
 def test_vol_regime_recent_history_uses_progressive_yfinance_seed(monkeypatch) -> None:
-    def _stub_recent_history(ticker: str, *, period: str = "3y") -> HistoryChunk:
+    def _stub_recent_history(ticker: str, *, period: str = "3y", force_refresh: bool = False) -> HistoryChunk:
         assert ticker == "^VIX"
         assert period == "5y"
         frame = TimeSeriesDataFrame(
@@ -113,7 +113,7 @@ def test_vol_regime_recent_history_uses_progressive_yfinance_seed(monkeypatch) -
 
 
 def test_vvix_vix_ratio_recent_history_uses_progressive_yfinance_seed(monkeypatch) -> None:
-    def _stub_recent_history(ticker: str, *, period: str = "3y") -> HistoryChunk:
+    def _stub_recent_history(ticker: str, *, period: str = "3y", force_refresh: bool = False) -> HistoryChunk:
         assert period == "3y"
         base = 20.0 if ticker == "^VIX" else 100.0
         frame = TimeSeriesDataFrame(

@@ -144,10 +144,12 @@ def _min_date(*values: str | None) -> str | None:
     return min(dates).strftime("%Y-%m-%d")
 
 
-def _vol_regime_recent_history(_key: str, *, period: str = "3y") -> HistoryChunk:
+def _vol_regime_recent_history(_key: str, *, period: str = "3y",
+                               force_refresh: bool = False) -> HistoryChunk:
     # The percentile-rank calculation needs lookback before the visible 3Y seed.
     base_period = "5y" if period == "3y" else period
-    base_chunk = get_yf_recent_history("^VIX", period=base_period)
+    base_chunk = get_yf_recent_history("^VIX", period=base_period,
+                                       force_refresh=force_refresh)
     full_frame = _compute_vol_regime_frame(base_chunk.frame)
     recent_frame = _slice_recent_timeseries(full_frame, period)
     loaded_start, loaded_end = _frame_bounds(recent_frame)
@@ -180,9 +182,12 @@ def _vol_regime_full_history_backfill(_key: str, *, loaded_start: str | None = N
     )
 
 
-def _vvix_vix_ratio_recent_history(_key: str, *, period: str = "3y") -> HistoryChunk:
-    vvix_chunk = get_yf_recent_history("^VVIX", period=period)
-    vix_chunk = get_yf_recent_history("^VIX", period=period)
+def _vvix_vix_ratio_recent_history(_key: str, *, period: str = "3y",
+                                   force_refresh: bool = False) -> HistoryChunk:
+    vvix_chunk = get_yf_recent_history("^VVIX", period=period,
+                                       force_refresh=force_refresh)
+    vix_chunk = get_yf_recent_history("^VIX", period=period,
+                                      force_refresh=force_refresh)
     frame = _compute_vvix_vix_ratio_frame(vvix_chunk.frame, vix_chunk.frame)
     loaded_start, loaded_end = _frame_bounds(frame)
     has_older = vvix_chunk.has_older or vix_chunk.has_older
@@ -230,11 +235,13 @@ def _private_frame(key: str):
     return get_private_series_frame(PRIVATE_SERIES[key])
 
 
-def _private_recent(key: str, period: str) -> HistoryChunk:
+def _private_recent(key: str, period: str, force_refresh: bool = False) -> HistoryChunk:
     from TerraFin.data.providers.private_access import PRIVATE_SERIES
     from TerraFin.data.providers.private_access.series import get_private_series_recent_history
 
-    return get_private_series_recent_history(PRIVATE_SERIES[key], period=period)
+    return get_private_series_recent_history(
+        PRIVATE_SERIES[key], period=period, force_refresh=force_refresh
+    )
 
 
 def _private_backfill(key: str, loaded_start: str | None) -> HistoryChunk:
@@ -248,8 +255,61 @@ def _fetch_fear_greed(_key: str):
     return _private_frame("fear_greed")
 
 
+def _drop_non_session_rows(chunk, label: str):
+    """Strip rows dated to a day the US equity market did not trade.
+
+    The upstream panel occasionally stamps a value on a market holiday, and a
+    holiday has no advancers and no decliners — the row is vendor filler, not an
+    observation. Consumers that look a value up by session date silently get the
+    wrong day's number from it.
+
+    Scoped to breadth on purpose: this is NOT safe for every private series.
+    `cape` is monthly, so its dates are not sessions at all and a session filter
+    would empty it.
+    """
+    import logging
+    from dataclasses import replace
+
+    _log = logging.getLogger(__name__)
+    # Callers pass either a HistoryChunk or a bare TimeSeriesDataFrame
+    # (_fetch_net_breadth hands over _private_frame's frame). Reading `.frame`
+    # off a DataFrame yields None and would silently skip the filter on that
+    # path, which is a live one behind the "Net Breadth" get_data entry.
+    is_chunk = hasattr(chunk, "frame")
+    frame = chunk.frame if is_chunk else chunk
+    if frame is None or "time" not in getattr(frame, "columns", []):
+        return chunk
+    try:
+        from datetime import date as _date
+
+        from TerraFin.data.providers.market.sessions import is_session
+
+        df = frame.copy()
+        keep = df["time"].astype(str).str[:10].map(
+            lambda s: is_session(_date.fromisoformat(s), "^GSPC")
+        )
+        if bool(keep.all()):
+            return chunk
+        dropped = list(df.loc[~keep, "time"].astype(str).str[:10])
+        _log.warning("%s: dropping %d non-session row(s): %s",
+                     label, len(dropped), dropped[-5:])
+        kept = df[keep]
+        if not is_chunk:
+            return kept
+        # Recompute the bounds too. Leaving them alone reports the dropped
+        # phantom as the series' loaded_end, which is serialised as `loadedEnd`
+        # and read back as the as-of date — turning a bad row into a bad
+        # timestamp, which is harder to notice than the row was.
+        lo, hi = _frame_bounds(kept)
+        return replace(chunk, frame=kept, loaded_start=lo, loaded_end=hi)
+    except Exception as exc:  # noqa: BLE001 — a calendar outage must not empty
+        # the series; leaving the rows in is the prior behaviour.
+        _log.debug("%s: session filter unavailable (%s)", label, exc)
+        return chunk
+
+
 def _fetch_net_breadth(_key: str):
-    return _private_frame("net_breadth")
+    return _drop_non_session_rows(_private_frame("net_breadth"), "net_breadth")
 
 
 def _fetch_cape(_key: str):
@@ -260,32 +320,38 @@ def _fetch_trailing_forward_pe(_key: str):
     return _private_frame("trailing_forward_pe")
 
 
-def _fear_greed_recent_history(_key: str, *, period: str = "3y") -> HistoryChunk:
-    return _private_recent("fear_greed", period)
+def _fear_greed_recent_history(_key: str, *, period: str = "3y",
+                          force_refresh: bool = False) -> HistoryChunk:
+    return _private_recent("fear_greed", period, force_refresh)
 
 
 def _fear_greed_full_history_backfill(_key: str, *, loaded_start: str | None = None) -> HistoryChunk:
     return _private_backfill("fear_greed", loaded_start)
 
 
-def _net_breadth_recent_history(_key: str, *, period: str = "3y") -> HistoryChunk:
-    return _private_recent("net_breadth", period)
+def _net_breadth_recent_history(_key: str, *, period: str = "3y",
+                          force_refresh: bool = False) -> HistoryChunk:
+    return _drop_non_session_rows(_private_recent("net_breadth", period, force_refresh),
+                                  "net_breadth recent")
 
 
 def _net_breadth_full_history_backfill(_key: str, *, loaded_start: str | None = None) -> HistoryChunk:
-    return _private_backfill("net_breadth", loaded_start)
+    return _drop_non_session_rows(_private_backfill("net_breadth", loaded_start),
+                                  "net_breadth backfill")
 
 
-def _cape_recent_history(_key: str, *, period: str = "3y") -> HistoryChunk:
-    return _private_recent("cape", period)
+def _cape_recent_history(_key: str, *, period: str = "3y",
+                          force_refresh: bool = False) -> HistoryChunk:
+    return _private_recent("cape", period, force_refresh)
 
 
 def _cape_full_history_backfill(_key: str, *, loaded_start: str | None = None) -> HistoryChunk:
     return _private_backfill("cape", loaded_start)
 
 
-def _trailing_forward_pe_recent_history(_key: str, *, period: str = "3y") -> HistoryChunk:
-    return _private_recent("trailing_forward_pe", period)
+def _trailing_forward_pe_recent_history(_key: str, *, period: str = "3y",
+                          force_refresh: bool = False) -> HistoryChunk:
+    return _private_recent("trailing_forward_pe", period, force_refresh)
 
 
 def _trailing_forward_pe_full_history_backfill(_key: str, *, loaded_start: str | None = None) -> HistoryChunk:
@@ -296,8 +362,9 @@ def _fetch_dspx(_key: str):
     return _private_frame("dspx")
 
 
-def _dspx_recent_history(_key: str, *, period: str = "3y") -> HistoryChunk:
-    return _private_recent("dspx", period)
+def _dspx_recent_history(_key: str, *, period: str = "3y",
+                          force_refresh: bool = False) -> HistoryChunk:
+    return _private_recent("dspx", period, force_refresh)
 
 
 def _dspx_full_history_backfill(_key: str, *, loaded_start: str | None = None) -> HistoryChunk:
@@ -321,7 +388,11 @@ def _fetch_spx_gex(_key: str) -> TimeSeriesDataFrame:
     return _spx_gex_frame()
 
 
-def _spx_gex_recent_history(_key: str, *, period: str = "3y") -> HistoryChunk:
+def _spx_gex_recent_history(_key: str, *, period: str = "3y",
+                            force_refresh: bool = False) -> HistoryChunk:  # noqa: ARG001
+    # Accepts the flag so DataFactory can pass it uniformly. Not honoured:
+    # this series comes from get_spx_gex_history(), which exposes no refresh
+    # control of its own.
     frame = _spx_gex_frame()
     recent = _slice_recent_timeseries(frame, period)
     loaded_start, loaded_end = _frame_bounds(recent)

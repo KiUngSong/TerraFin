@@ -20,6 +20,46 @@ class PrivateSeriesSpec:
     current_cache_namespace: str | None = None
     history_cache_key: str = "history"
     current_cache_key: str = "current"
+    # Opt in only for series whose every observation is a US equity SESSION.
+    # The vendor occasionally stamps a value on a market holiday, and such a
+    # row is filler: a closed market has no observation. Rows like that reach
+    # consumers that look a value up by date and hand them the wrong day.
+    # MUST stay False for anything not daily-session-shaped — `cape` is
+    # monthly, so its dates are not sessions and this would empty it.
+    session_dated: bool = False
+
+
+def _drop_non_session_records(records: list[dict], display_name: str) -> list[dict]:
+    """Filter vendor rows dated to a day the US equity market did not trade.
+
+    Applied at ingest so the stored artifact is clean, not just what one reader
+    happens to filter. A calendar outage leaves the rows in rather than emptying
+    the series: storing as received beats storing nothing, and read-time
+    filtering still applies.
+    """
+    import logging
+    from datetime import date as _date
+
+    log = logging.getLogger(__name__)
+    try:
+        from TerraFin.data.providers.market.sessions import is_session
+    except Exception as exc:  # noqa: BLE001
+        log.warning("%s: session filter unavailable (%s) — storing as received",
+                    display_name, exc)
+        return records
+
+    kept, dropped = [], []
+    for rec in records:
+        day = str(rec.get("time", ""))[:10]
+        try:
+            ok = is_session(_date.fromisoformat(day), "^GSPC")
+        except Exception:  # noqa: BLE001 — an unparseable date is not ours to judge
+            ok = True
+        (kept if ok else dropped).append(rec if ok else day)
+    if dropped:
+        log.warning("%s: dropped %d non-session row(s) at ingest: %s",
+                    display_name, len(dropped), dropped[-5:])
+    return kept
 
 
 def _build_frame(records: list[dict], display_name: str) -> TimeSeriesDataFrame:
@@ -79,12 +119,14 @@ def get_private_series_current(spec: PrivateSeriesSpec, *, force_refresh: bool =
     return _snapshot_from_payload(payload, spec)
 
 
-def get_private_series_frame(spec: PrivateSeriesSpec) -> TimeSeriesDataFrame:
-    return get_private_series_history(spec)
+def get_private_series_frame(spec: PrivateSeriesSpec, *,
+                             force_refresh: bool = False) -> TimeSeriesDataFrame:
+    return get_private_series_history(spec, force_refresh=force_refresh)
 
 
-def get_private_series_recent_history(spec: PrivateSeriesSpec, *, period: str = "3y") -> HistoryChunk:
-    full_frame = get_private_series_frame(spec)
+def get_private_series_recent_history(spec: PrivateSeriesSpec, *, period: str = "3y",
+                                      force_refresh: bool = False) -> HistoryChunk:
+    full_frame = get_private_series_frame(spec, force_refresh=force_refresh)
     recent_frame = _slice_recent_timeseries(full_frame, period)
     loaded_start, loaded_end = _frame_bounds(recent_frame)
     has_older = len(recent_frame) < len(full_frame)
@@ -174,6 +216,12 @@ def _fetch_series_history_runtime(spec: PrivateSeriesSpec) -> list[dict]:
     records = list(active_client.fetch_series_history(spec.key))
     if not records:
         raise ValueError(f"No {spec.display_name} history returned from private source.")
+    if spec.session_dated:
+        records = _drop_non_session_records(records, spec.display_name)
+        if not records:
+            raise ValueError(
+                f"No {spec.display_name} history left after dropping non-session rows."
+            )
     return records
 
 

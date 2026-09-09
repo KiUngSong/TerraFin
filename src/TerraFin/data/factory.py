@@ -224,9 +224,10 @@ class DataFactory:
         layer (CacheManager.get_payload) so the upstream is re-fetched even
         when the artifact is fresh by TTL. The on-disk artifact is preserved
         on fetch failure — the next non-force caller still sees the prior
-        value. Currently only the yfinance-backed path honors the flag;
-        composite/private indicators (Vol Regime, VVIX/VIX, Fear & Greed,
-        CAPE, SPX GEX, Dispersion Index, Net Breadth) ignore it.
+        value. Every registered indicator now accepts the flag and the
+        yfinance-backed, private-series and yfinance-derived (Vol Regime,
+        VVIX/VIX) paths honour it. SPX GEX accepts and ignores it: its
+        upstream helper exposes no refresh control.
 
         Exception semantics:
         * ``force_refresh=False`` (default): swallow upstream fetch errors
@@ -239,7 +240,8 @@ class DataFactory:
         if name in MARKET_INDICATOR_REGISTRY:
             indicator = MARKET_INDICATOR_REGISTRY[name]
             if indicator.get_recent_history is not None:
-                chunk = indicator.get_recent_history(indicator.key, period=period)
+                chunk = indicator.get_recent_history(indicator.key, period=period,
+                                                     force_refresh=force_refresh)
                 chunk.frame.name = name.split(":", 1)[-1]
                 return chunk
         if self._is_economic_indicator(name):
