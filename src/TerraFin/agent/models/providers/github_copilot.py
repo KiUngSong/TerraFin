@@ -21,6 +21,8 @@ from ...conversation import (
     iter_tool_use_blocks,
 )
 from ...definitions import TerraFinAgentDefinition
+from ...runtime.session import TerraFinAgentSession
+from ...tools import TerraFinToolDefinition
 from ..management import resolve_provider_secret
 from ..runtime import (
     TerraFinModelConfigError,
@@ -28,8 +30,6 @@ from ..runtime import (
     TerraFinModelResponseError,
     TerraFinRuntimeModel,
 )
-from ...runtime.session import TerraFinAgentSession
-from ...tools import TerraFinToolDefinition
 
 
 DEFAULT_COPILOT_MODEL = "gpt-4o"
@@ -122,7 +122,7 @@ def request_github_copilot_device_code(
     session: requests.Session | None = None,
     timeout_seconds: float = DEFAULT_COPILOT_TIMEOUT_SECONDS,
     scope: str = DEFAULT_GITHUB_DEVICE_SCOPE,
-) -> TerraFinGithubDeviceCode:
+) -> "TerraFinGithubDeviceCode":
     client = session or requests.Session()
     response = client.post(
         GITHUB_DEVICE_CODE_URL,

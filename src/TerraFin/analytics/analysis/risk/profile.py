@@ -179,7 +179,7 @@ def run_risk_profile(
     prices: pd.Series,
     *,
     benchmark_prices: pd.Series | None = None,
-) -> RiskProfileResult:
+) -> "RiskProfileResult":
     """Compute a full risk profile from a price series."""
     warnings: list[str] = []
 

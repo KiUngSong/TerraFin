@@ -1,7 +1,5 @@
 """The turn claim must serialise real contention and never wedge a session."""
 
-from __future__ import annotations
-
 import os
 import stat
 from datetime import UTC, datetime

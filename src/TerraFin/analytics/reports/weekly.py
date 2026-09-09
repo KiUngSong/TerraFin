@@ -286,7 +286,7 @@ def _days_until(date_str: str, as_of: date) -> int | None:
     return (target - as_of).days
 
 
-def _build_ticker(item: dict, as_of: date) -> TickerReport:
+def _build_ticker(item: dict, as_of: date) -> "TickerReport":
     sym = item["symbol"]
     name = item.get("name") or sym
     records = _fetch_market(sym, as_of)

@@ -670,7 +670,7 @@ _watchlist_service: WatchlistService | None = None
 
 
 
-def get_watchlist_service() -> WatchlistService:
+def get_watchlist_service() -> "WatchlistService":
     global _watchlist_service
     if _watchlist_service is None:
         _watchlist_service = WatchlistService(_load_watchlist_mongo_config())

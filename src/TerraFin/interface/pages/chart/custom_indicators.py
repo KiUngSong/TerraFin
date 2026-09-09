@@ -100,7 +100,7 @@ def _load_default_specs() -> list[dict]:
 DEFAULT_SPECS: list[dict] = _load_default_specs()
 
 
-def _parse_spec(raw) -> IndicatorSpec:
+def _parse_spec(raw) -> "IndicatorSpec":
     """Validate one raw spec dict; raises ValueError on any contract violation."""
     if not isinstance(raw, dict):
         raise ValueError(f"spec must be a dict, got {type(raw).__name__}")

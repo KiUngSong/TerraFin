@@ -401,7 +401,7 @@ class DataFactory:
 _DEFAULT_FACTORY: DataFactory | None = None
 
 
-def get_data_factory() -> DataFactory:
+def get_data_factory() -> "DataFactory":
     """Return the process-wide DataFactory singleton, lazy-initialized."""
     global _DEFAULT_FACTORY
     if _DEFAULT_FACTORY is None:

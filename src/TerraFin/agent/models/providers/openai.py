@@ -7,6 +7,7 @@ from openai import OpenAI
 
 from TerraFin.env import ensure_runtime_env_loaded
 
+from ...contracts.model_client import TerraFinHostedModelClient
 from ...conversation import (
     TerraFinConversationMessage,
     TerraFinHostedConversation,
@@ -14,7 +15,8 @@ from ...conversation import (
 )
 from ...conversation_state import get_provider_state
 from ...definitions import TerraFinAgentDefinition
-from ...contracts.model_client import TerraFinHostedModelClient
+from ...runtime.session import TerraFinAgentSession
+from ...tools import TerraFinToolDefinition
 from ..management import resolve_provider_secret
 from ..runtime import (
     TerraFinModelConfigError,
@@ -22,8 +24,6 @@ from ..runtime import (
     TerraFinModelResponseError,
     TerraFinRuntimeModel,
 )
-from ...runtime.session import TerraFinAgentSession
-from ...tools import TerraFinToolDefinition
 from .openai_compatible import OpenAICompatibleResponsesRunner
 
 

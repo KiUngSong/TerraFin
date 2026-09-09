@@ -52,7 +52,6 @@ from TerraFin.agent.models import (
     PatternScanResponse,
     PatternsResponse,
     PortfolioResponse,
-    RelativeStrengthResponse,
     ResolveResponse,
 )
 from TerraFin.agent.models.providers.openai import TerraFinOpenAIConfigError, TerraFinOpenAIResponseError
@@ -1016,22 +1015,6 @@ def create_agent_data_router() -> APIRouter:
         try:
             return PatternScanResponse(
                 **service.pattern_scan(group=group, tickers=tickers, severity_min=severity_min, limit=limit)
-            )
-        except Exception as exc:
-            _raise_http_error(exc)
-
-    @router.get(f"{AGENT_API_PREFIX}/relative-strength", response_model=RelativeStrengthResponse)
-    def api_agent_relative_strength(
-        ticker: str | None = Query(default=None, description="Omit for the top-N leaderboard"),
-        universe: str = Query(
-            default="sp500",
-            pattern="^(sp500|nasdaq100|kospi200|sp500\\+kospi200|sp500\\+nasdaq100\\+kospi200|watchlist)$",
-        ),
-        top_n: int = Query(default=20, ge=1, le=100),
-    ):
-        try:
-            return RelativeStrengthResponse(
-                **service.relative_strength(ticker, universe=universe, top_n=top_n)
             )
         except Exception as exc:
             _raise_http_error(exc)

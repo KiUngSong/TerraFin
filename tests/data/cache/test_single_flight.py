@@ -1,7 +1,5 @@
 """Single-flight semantics for CacheManager.get_payload."""
 
-from __future__ import annotations
-
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor

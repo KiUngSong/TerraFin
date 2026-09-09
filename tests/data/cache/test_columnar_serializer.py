@@ -1,7 +1,5 @@
 """Round-trip tests for the columnar time-series serializer."""
 
-from __future__ import annotations
-
 import json
 from datetime import UTC, datetime
 from pathlib import Path

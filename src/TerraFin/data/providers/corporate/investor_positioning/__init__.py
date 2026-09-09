@@ -32,7 +32,7 @@ class InvestorPositioningCapability:
     message: str | None = None
 
 
-def get_investor_positioning_capability() -> InvestorPositioningCapability:
+def get_investor_positioning_capability() -> "InvestorPositioningCapability":
     enabled = sec_edgar_is_configured()
     return InvestorPositioningCapability(
         enabled=enabled,

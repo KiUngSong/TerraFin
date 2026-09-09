@@ -20,7 +20,7 @@ def _manifest_asset_path(build_dir: Path, asset_path: str) -> Path:
     return build_dir / normalized
 
 
-def resolve_frontend_build_paths(build_dir: Path) -> FrontendBuildPaths:
+def resolve_frontend_build_paths(build_dir: Path) -> "FrontendBuildPaths":
     return FrontendBuildPaths(
         build_dir=build_dir,
         index_html=build_dir / "index.html",
@@ -29,7 +29,7 @@ def resolve_frontend_build_paths(build_dir: Path) -> FrontendBuildPaths:
     )
 
 
-def validate_frontend_build(build_dir: Path) -> FrontendBuildPaths:
+def validate_frontend_build(build_dir: Path) -> "FrontendBuildPaths":
     paths = resolve_frontend_build_paths(build_dir)
     missing = [
         path.name

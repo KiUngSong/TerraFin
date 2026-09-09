@@ -155,7 +155,7 @@ _SUFFIX_EXCHANGE: tuple[tuple[str, ExchangeSchedule], ...] = (
 )
 
 
-def resolve_exchange(ticker: str) -> ExchangeSchedule:
+def resolve_exchange(ticker: str) -> "ExchangeSchedule":
     """Map a yfinance ticker to its primary exchange schedule.
 
     Heuristics:

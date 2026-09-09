@@ -55,7 +55,7 @@ class GuruPersona:
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
-def _parse_persona(raw: dict[str, Any]) -> GuruPersona:
+def _parse_persona(raw: dict[str, Any]) -> "GuruPersona":
     framework_raw = raw.get("decision_framework", {})
     return GuruPersona(
         name=raw["name"],
@@ -128,7 +128,7 @@ def _personas_directory() -> Path:
     return Path(__file__).parent
 
 
-def build_default_persona_registry() -> PersonaRegistry:
+def build_default_persona_registry() -> "PersonaRegistry":
     """Scan the personas directory for YAML files and load all of them."""
     directory = _personas_directory()
     registry = PersonaRegistry()

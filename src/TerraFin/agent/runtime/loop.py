@@ -303,52 +303,70 @@ class TerraFinHostedAgentLoop:
 
             record_tool_call_history(conversation, turn.tool_calls)
             self._persist_conversation_runtime_state(session_id, conversation)
-            for tool_call in turn.tool_calls:
-                total_tool_calls += 1
-                if total_tool_calls > self.max_tool_calls:
-                    raise RuntimeError(
-                        f"Hosted TerraFin agent loop exceeded max_tool_calls={self.max_tool_calls} "
-                        f"for session '{session_id}'."
-                    )
-                fingerprint = _tool_call_fingerprint(tool_call)
-                tool_call_fingerprint_counts[fingerprint] = (
-                    tool_call_fingerprint_counts.get(fingerprint, 0) + 1
+            # Where this batch's results begin. A model client may mint
+            # positional call ids that repeat across steps, so answered-ness
+            # has to be judged here, not against the whole conversation.
+            batch_start = len(conversation.messages)
+            try:
+                for tool_call in turn.tool_calls:
+                    total_tool_calls += 1
+                    if total_tool_calls > self.max_tool_calls:
+                        raise RuntimeError(
+                            f"Hosted TerraFin agent loop exceeded max_tool_calls={self.max_tool_calls} "
+                            f"for session '{session_id}'."
+                        )
+                    fingerprint = _tool_call_fingerprint(tool_call)
+                    tool_call_fingerprint_counts[fingerprint] = tool_call_fingerprint_counts.get(fingerprint, 0) + 1
+                    if tool_call_fingerprint_counts[fingerprint] > 2:
+                        # LLM is wedged — calling the same tool with the same args
+                        # repeatedly. Short-circuit with a synthetic error nudging
+                        # the model to pivot or answer with what it already has,
+                        # instead of burning all max_steps on dead repeats.
+                        outcome = self.tool_execution_engine.build_loop_guard_outcome(
+                            tool_call,
+                            count=tool_call_fingerprint_counts[fingerprint],
+                        )
+                    else:
+                        outcome = self.tool_execution_engine.execute(session_id, tool_call)
+                    if outcome.kind == "fatal_error":
+                        assert outcome.error is not None
+                        raise outcome.error
+                    assert outcome.invocation is not None
+                    assert outcome.message is not None
+                    invocation = outcome.invocation
+                    tool_results.append(invocation)
+                    self._append_conversation_message(conversation, outcome.message, added=added)
+                    if outcome.kind == "retryable_error":
+                        fallback_required = recovery_tracker.record(outcome.fingerprint)
+                        if not fallback_required:
+                            continue
+                        fallback_message = self._build_recoverable_tool_error_message(invocation)
+                        self._append_conversation_message(conversation, fallback_message, added=added)
+                        final_message = fallback_message
+                        self._persist_conversation_runtime_state(session_id, conversation)
+                        return TerraFinHostedRunResult(
+                            session_id=session_id,
+                            agent_name=conversation.agent_name,
+                            final_message=final_message,
+                            messages_added=tuple(added),
+                            tool_results=tuple(tool_results),
+                            steps=step,
+                        )
+            except BaseException as exc:
+                # One guard for the whole batch, not one per `raise`: the
+                # `tool_use` message covers every call in it and is already
+                # persisted, so any exit but a normal finish — a tool, an append,
+                # the budget, an interrupt — leaves calls unanswered, which the
+                # client reads as an interrupted turn.
+                self._close_unresolved_tool_calls(
+                    conversation,
+                    turn.tool_calls,
+                    since=batch_start,
+                    stopped_on=tool_call.call_id,
+                    error=exc,
+                    added=added,
                 )
-                if tool_call_fingerprint_counts[fingerprint] > 2:
-                    # LLM is wedged — calling the same tool with the same args
-                    # repeatedly. Short-circuit with a synthetic error nudging
-                    # the model to pivot or answer with what it already has,
-                    # instead of burning all max_steps on dead repeats.
-                    outcome = self.tool_execution_engine.build_loop_guard_outcome(
-                        tool_call,
-                        count=tool_call_fingerprint_counts[fingerprint],
-                    )
-                else:
-                    outcome = self.tool_execution_engine.execute(session_id, tool_call)
-                if outcome.kind == "fatal_error":
-                    assert outcome.error is not None
-                    raise outcome.error
-                assert outcome.invocation is not None
-                assert outcome.message is not None
-                invocation = outcome.invocation
-                tool_results.append(invocation)
-                self._append_conversation_message(conversation, outcome.message, added=added)
-                if outcome.kind == "retryable_error":
-                    fallback_required = recovery_tracker.record(outcome.fingerprint)
-                    if not fallback_required:
-                        continue
-                    fallback_message = self._build_recoverable_tool_error_message(invocation)
-                    self._append_conversation_message(conversation, fallback_message, added=added)
-                    final_message = fallback_message
-                    self._persist_conversation_runtime_state(session_id, conversation)
-                    return TerraFinHostedRunResult(
-                        session_id=session_id,
-                        agent_name=conversation.agent_name,
-                        final_message=final_message,
-                        messages_added=tuple(added),
-                        tool_results=tuple(tool_results),
-                        steps=step,
-                    )
+                raise
             self._persist_conversation_runtime_state(session_id, conversation)
 
         if recovery_tracker.recoverable_error_rounds > 0:
@@ -408,6 +426,49 @@ class TerraFinHostedAgentLoop:
             metadata=dict(message.metadata),
             blocks=(make_text_block(message.content),) if message.content else (),
         )
+
+    def _close_unresolved_tool_calls(
+        self,
+        conversation: TerraFinHostedConversation,
+        tool_calls: tuple[TerraFinToolCall, ...],
+        *,
+        since: int,
+        stopped_on: str,
+        error: BaseException,
+        added: list[TerraFinConversationMessage] | None = None,
+    ) -> None:
+        """Give every call in the batch its result before the run aborts.
+
+        Answered-ness is read from the conversation from `since` on, never from
+        a set kept alongside it: an append that half-succeeds leaves the message
+        in the conversation, and a second result for the same call would reach
+        the model as two contradictory answers. The bound matters as much — call
+        ids are not guaranteed unique across steps, and an earlier turn's answer
+        must not mark this call answered.
+
+        Best effort by construction: this runs while another exception is
+        propagating, so an append that fails here is dropped rather than
+        allowed to replace the cause and re-open the gap being closed.
+        """
+        answered = {message.tool_call_id for message in conversation.messages[since:] if message.role == "tool"}
+        cause = f"{type(error).__name__}: {error}"
+        for tool_call in tool_calls:
+            if tool_call.call_id in answered:
+                continue
+            reason = (
+                cause
+                if tool_call.call_id == stopped_on
+                else f"Never executed: the turn stopped on another call in this batch ({cause})."
+            )
+            message = self.tool_execution_engine.build_unresolved_result_message(
+                tool_call,
+                reason=reason,
+            )
+            try:
+                self._append_conversation_message(conversation, message, added=added)
+            except Exception:
+                continue
+            answered.add(tool_call.call_id)
 
     def _append_conversation_message(
         self,

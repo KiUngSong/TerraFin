@@ -101,7 +101,7 @@ def _validate_guru_memo_arguments(
     *,
     guru_name: str,
     arguments: Mapping[str, Any],
-) -> GuruResearchMemo:
+) -> "GuruResearchMemo":
     payload = dict(arguments)
     payload["guru"] = guru_name
     return GuruResearchMemo.model_validate(payload)

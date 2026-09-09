@@ -304,13 +304,6 @@ class PatternScanResponse(_PermissiveResponse):
     matched: int | None = None
 
 
-class RelativeStrengthResponse(_PermissiveResponse):
-    universe: str | None = None
-    universeSize: int | None = None
-    ranked: int | None = None
-    ticker: str | None = None
-
-
 class MarketBreadthResponse(_PermissiveResponse):
     pass
 

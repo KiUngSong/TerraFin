@@ -248,7 +248,7 @@ def run_fundamental_screen(
     income: pd.DataFrame | None = None,
     balance: pd.DataFrame | None = None,
     cashflow: pd.DataFrame | None = None,
-) -> FundamentalScreenResult:
+) -> "FundamentalScreenResult":
     """Compute fundamental quality and moat metrics from financial statements."""
     warnings: list[str] = []
     empty = pd.DataFrame()

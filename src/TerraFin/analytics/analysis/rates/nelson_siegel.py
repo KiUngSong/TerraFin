@@ -128,7 +128,7 @@ def fit(
     maturities: list[float],
     yields: list[float],
     tau_bounds: tuple[float, float] = (0.1, 30.0),
-) -> NelsonSiegelCurve:
+) -> "NelsonSiegelCurve":
     """Fit a Nelson-Siegel curve to observed yield data.
 
     Args:

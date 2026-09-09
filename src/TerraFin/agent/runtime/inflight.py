@@ -19,8 +19,6 @@ is why it beats a pid file — but there is no breaker for a holder that is
 alive and wedged.
 """
 
-from __future__ import annotations
-
 import errno
 import fcntl
 import hashlib

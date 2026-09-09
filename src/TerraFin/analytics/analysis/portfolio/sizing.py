@@ -143,7 +143,7 @@ def size_book(
     per_name_cap: float = 0.20,
     sector_cap: float = 0.40,
     vol_bounds: tuple[float, float] = (0.6, 1.1),
-) -> SizedBook:
+) -> "SizedBook":
     """Size a long-only book — each name sized on its OWN merits, NOT normalized to
     a fixed gross.
 

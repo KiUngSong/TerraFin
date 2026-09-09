@@ -107,28 +107,6 @@ HOSTED_TOOL_CONTRACTS: dict[str, dict[str, Any]] = {
         ),
         "response_model": "PatternScanResponse",
     },
-    "relative_strength": {
-        "input_schema": _object_schema(
-            properties={
-                "ticker": {"type": "string", "minLength": 1},
-                "universe": {
-                    "type": "string",
-                    "enum": [
-                        "sp500",
-                        "nasdaq100",
-                        "kospi200",
-                        "sp500+kospi200",
-                        "sp500+nasdaq100+kospi200",
-                        "watchlist",
-                    ],
-                    "default": "sp500",
-                },
-                "top_n": {"type": "integer", "minimum": 1, "maximum": 100, "default": 20},
-            },
-            required=[],
-        ),
-        "response_model": "RelativeStrengthResponse",
-    },
     "patterns": {
         "input_schema": _object_schema(
             properties={
@@ -570,10 +548,11 @@ def validate_tool_arguments(
     Returns `(problems, arguments_to_dispatch)`. `problems` is a list of
     human-readable strings, empty when the arguments are acceptable. The second
     element is the dict the caller should actually dispatch: integral floats are
-    narrowed to `int` for integer-typed fields, because accepting `20.0` without
-    narrowing it only moves the failure downstream — `relative_strength(top_n=20.0)`
-    reaches `ordered[:top_n]` and raises `TypeError: slice indices must be
-    integers`, which no error classifier recognises, so the whole run aborts.
+    narrowed to `int` for integer-typed fields, because accepting `200.0` without
+    narrowing it only moves the failure downstream — `pattern_scan(limit=200.0)`
+    reaches `matched[:limit]` once the matches outnumber the limit and raises
+    `TypeError: slice indices must be integers`, which no error classifier
+    recognises, so the whole run aborts.
 
     Unknown tools validate vacuously — an unregistered tool is a different error,
     reported elsewhere. Callers must pass the *capability* name: task variants are

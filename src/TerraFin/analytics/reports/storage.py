@@ -44,7 +44,7 @@ def _md_path(as_of: str) -> Path:
     return REPORT_DIR / f"{as_of}.md"
 
 
-def save_report(as_of: date, markdown: str, is_sample: bool, universe: list[str]) -> StoredReport:
+def save_report(as_of: date, markdown: str, is_sample: bool, universe: list[str]) -> "StoredReport":
     REPORT_DIR.mkdir(parents=True, exist_ok=True)
     record = StoredReport(
         as_of=as_of.isoformat(),

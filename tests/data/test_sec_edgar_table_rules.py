@@ -12,8 +12,6 @@ before committing. The test is dumb (byte-compare against the expected
 file) so every change lands as a reviewable snapshot update.
 """
 
-from __future__ import annotations
-
 import json
 import os
 from pathlib import Path
@@ -23,6 +21,7 @@ import pytest
 from TerraFin.data.providers.corporate.filings.sec_edgar.parser import (
     _rebuild_table_markdown,
 )
+
 
 FIXTURES_DIR = Path(__file__).resolve().parent / "fixtures" / "sec_edgar_tables"
 MANIFEST = FIXTURES_DIR / "manifest.jsonl"
@@ -54,7 +53,9 @@ def test_table_rebuild_matches_snapshot(entry: dict) -> None:
     produced = _rebuild_table_markdown(html) or ""
 
     if os.environ.get("REGEN") == "1":
-        expected_path.write_text(produced + ("\n" if produced and not produced.endswith("\n") else ""), encoding="utf-8")
+        expected_path.write_text(
+            produced + ("\n" if produced and not produced.endswith("\n") else ""), encoding="utf-8"
+        )
         return
 
     if not expected_path.exists():

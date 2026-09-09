@@ -1,7 +1,5 @@
 """LRU size estimator + eviction for frozen payloads."""
 
-from __future__ import annotations
-
 import pandas as pd
 
 from TerraFin.data.cache import manager as manager_module

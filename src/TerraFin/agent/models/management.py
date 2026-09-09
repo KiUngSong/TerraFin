@@ -86,7 +86,7 @@ def list_provider_catalog() -> tuple[TerraFinProviderCatalogEntry, ...]:
     return tuple(_PROVIDER_CATALOG.values())
 
 
-def get_provider_catalog(provider_id: str) -> TerraFinProviderCatalogEntry:
+def get_provider_catalog(provider_id: str) -> "TerraFinProviderCatalogEntry":
     normalized = str(provider_id or "").strip().lower()
     try:
         return _PROVIDER_CATALOG[normalized]

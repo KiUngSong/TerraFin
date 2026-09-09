@@ -315,7 +315,7 @@ def lppl(
     window_step: int = _WINDOW_STEP,
     max_iter: int = 45,
     seed: int | None = 42,
-) -> LPPLResult:
+) -> "LPPLResult":
     """Run LPPL analysis with a chart fit plus multi-window confidence scan.
 
     Default behavior follows TerraFin's calibrated debug profile:

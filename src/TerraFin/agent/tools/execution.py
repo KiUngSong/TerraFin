@@ -107,6 +107,39 @@ class ToolExecutionEngine:
             ]
         )
 
+    def build_unresolved_result_message(
+        self,
+        tool_call: TerraFinToolCall,
+        *,
+        reason: str,
+    ) -> TerraFinConversationMessage:
+        """Tool result for a call the run never resolved.
+
+        A persisted `tool_use` with no `tool_result` is what the client reports
+        as an interrupted turn, so a run that aborts still owes every call in
+        the batch a result — the one that raised and the ones never reached.
+        """
+        invocation = TerraFinToolInvocationResult(
+            tool_name=tool_call.tool_name,
+            capability_name=tool_call.tool_name,
+            session_id="",
+            execution_mode="invoke",
+            payload={
+                "accepted": False,
+                "error": {
+                    "code": "tool_call_unresolved",
+                    "message": reason,
+                    "retryable": False,
+                },
+            },
+            task=None,
+            is_error=True,
+            retryable=False,
+            error_code="tool_call_unresolved",
+            error_message=reason,
+        )
+        return self._build_tool_result_message(tool_call=tool_call, invocation=invocation)
+
     def build_loop_guard_outcome(
         self,
         tool_call: TerraFinToolCall,

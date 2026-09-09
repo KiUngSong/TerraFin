@@ -35,10 +35,6 @@ def _public_roles(messages):
     return [message.role for message in messages if not is_internal_only_message(message)]
 
 
-
-
-
-
 def _loop(model_client, *, max_steps: int = 8, service: _FakeService | None = None) -> TerraFinHostedAgentLoop:
     service = service or _FakeService()
     registry = build_default_capability_registry(service, chart_opener=_fake_chart_opener)
@@ -80,7 +76,9 @@ class _SnapshotThenSummarizeModel:
         last_tool = next((message for message in reversed(messages) if message.role == "tool"), None)
         if last_tool is None:
             return TerraFinModelTurn(
-                assistant_message=TerraFinConversationMessage(role="assistant", content="I'll pull the latest snapshot."),
+                assistant_message=TerraFinConversationMessage(
+                    role="assistant", content="I'll pull the latest snapshot."
+                ),
                 tool_calls=(
                     TerraFinToolCall(
                         call_id="call-1",
@@ -178,7 +176,9 @@ class _CacheClobberingSnapshotThenSummarizeModel:
         last_tool = next((message for message in reversed(messages) if message.role == "tool"), None)
         if last_tool is None:
             return TerraFinModelTurn(
-                assistant_message=TerraFinConversationMessage(role="assistant", content="I'll pull the latest snapshot."),
+                assistant_message=TerraFinConversationMessage(
+                    role="assistant", content="I'll pull the latest snapshot."
+                ),
                 tool_calls=(
                     TerraFinToolCall(
                         call_id="call-1",
@@ -265,6 +265,86 @@ class _StubbornToolErrorModel:
         )
 
 
+class _FatalToolErrorService(_FakeService):
+    def market_snapshot(self, name: str, *, depth: str = "auto", view: str = "daily") -> dict[str, object]:
+        # Unclassifiable on purpose: `_classify_tool_error` matches no branch
+        # for TypeError, which is the path that re-raises out of the loop.
+        raise TypeError("Cannot pass DataFrame to 'pandas.array'")
+
+
+class _TwoCallBatchModel:
+    def complete(self, *, messages, tools, **kwargs):
+        _ = messages, tools, kwargs
+        return TerraFinModelTurn(
+            tool_calls=(
+                TerraFinToolCall(call_id="fatal", tool_name="market_snapshot", arguments={"name": "Crude Oil"}),
+                TerraFinToolCall(call_id="never-reached", tool_name="market_snapshot", arguments={"name": "SPY"}),
+            ),
+            stop_reason="tool_calls",
+        )
+
+
+class _OneGoodThenFatalService(_FakeService):
+    def market_snapshot(self, name: str, *, depth: str = "auto", view: str = "daily") -> dict[str, object]:
+        if name == "Crude Oil":
+            raise TypeError("Cannot pass DataFrame to 'pandas.array'")
+        return super().market_snapshot(name, depth=depth, view=view)
+
+
+class _GoodThenFatalBatchModel:
+    def complete(self, *, messages, tools, **kwargs):
+        _ = messages, tools, kwargs
+        return TerraFinModelTurn(
+            tool_calls=(
+                TerraFinToolCall(call_id="good", tool_name="market_snapshot", arguments={"name": "SPY"}),
+                TerraFinToolCall(call_id="fatal", tool_name="market_snapshot", arguments={"name": "Crude Oil"}),
+            ),
+            stop_reason="tool_calls",
+        )
+
+
+class _RepeatedCallIdModel:
+    """A provider that mints positional call ids, so step 2 reuses step 1's."""
+
+    def complete(self, *, messages, tools, **kwargs):
+        _ = tools, kwargs
+        answered_once = any(message.role == "tool" for message in messages)
+        return TerraFinModelTurn(
+            tool_calls=(
+                TerraFinToolCall(
+                    call_id="positional-call:0",
+                    tool_name="market_snapshot",
+                    arguments={"name": "Crude Oil" if answered_once else "SPY"},
+                ),
+            ),
+            stop_reason="tool_calls",
+        )
+
+
+class _TransientOnRetryService(_FakeService):
+    """First attempt looks like a bad name; the repaired retry hits an outage."""
+
+    def market_snapshot(self, name: str, *, depth: str = "auto", view: str = "daily") -> dict[str, object]:
+        from TerraFin.data.providers.market.yfinance import TransientMarketDataError
+
+        if name == "Crude Oil":
+            raise LookupError("No data found for 'Crude Oil'")
+        if name == "CRUDE OIL":
+            raise TransientMarketDataError("upstream rate limited")
+        return super().market_snapshot(name, depth=depth, view=view)
+
+
+class _CrudeOilModel:
+    def complete(self, *, messages, tools, **kwargs):
+        _ = messages, tools, kwargs
+        return TerraFinModelTurn(
+            tool_calls=(
+                TerraFinToolCall(call_id="oil", tool_name="market_snapshot", arguments={"name": "Crude Oil"}),
+            ),
+            stop_reason="tool_calls",
+        )
+
+
 class _GuruRouterModel:
     def complete(self, *, agent, messages, tools, **kwargs):
         _ = kwargs
@@ -304,7 +384,9 @@ class _GuruRouterModel:
                             "key_evidence": ["Cycle position and downside compensation are not obviously generous."],
                             "risks": ["Consensus may already price in too much optimism."],
                             "open_questions": ["How much downside protection is implied by current valuation inputs?"],
-                            "citations": ["DCF context highlights current assumptions rather than clear distress pricing."],
+                            "citations": [
+                                "DCF context highlights current assumptions rather than clear distress pricing."
+                            ],
                         },
                     ),
                 ),
@@ -380,9 +462,14 @@ class _RetryingMalformedGuruMemoModel:
                             "stance": "neutral",
                             "confidence": 74,
                             "thesis": "The cycle does not justify aggressive optimism because investors are not being paid much for the risk they are taking.",
-                            "key_evidence": ["Investor psychology looks more eager than fearful.", "Risk premiums do not look especially generous."],
+                            "key_evidence": [
+                                "Investor psychology looks more eager than fearful.",
+                                "Risk premiums do not look especially generous.",
+                            ],
                             "risks": ["Markets can stay richer for longer than caution feels comfortable."],
-                            "open_questions": ["What would cause compensation for risk to widen materially from here?"],
+                            "open_questions": [
+                                "What would cause compensation for risk to widen materially from here?"
+                            ],
                             "citations": ["SPY snapshot", "QQQ snapshot"],
                         },
                     ),
@@ -490,9 +577,80 @@ def test_loop_guard_short_circuits_identical_tool_calls() -> None:
         loop.submit_user_message(conversation.session_id, "loop on me")
 
     # Guard fires on the 3rd call → only the first 2 actually execute.
-    assert call_count["market_snapshot"] == 2, (
-        f"expected 2 real executions, got {call_count['market_snapshot']}"
-    )
+    assert call_count["market_snapshot"] == 2, f"expected 2 real executions, got {call_count['market_snapshot']}"
+
+
+def test_a_raising_tool_still_leaves_every_tool_call_answered() -> None:
+    """The tool_use message is persisted for the whole batch before any call
+    runs, so a raise must not leave a call without its result: the client reads
+    an unanswered call as an interrupted turn and refuses the next message."""
+    loop = _loop(_TwoCallBatchModel(), service=_FatalToolErrorService())
+    conversation = loop.create_session(DEFAULT_HOSTED_AGENT_NAME, session_id="loop:fatal-batch")
+
+    with pytest.raises(TypeError, match="Cannot pass DataFrame"):
+        loop.submit_user_message(conversation.session_id, "how is crude oil doing")
+
+    messages = loop.get_conversation(conversation.session_id).snapshot()
+    results = {message.tool_call_id: message for message in messages if message.role == "tool"}
+    # "never-reached" too: the raise aborts the batch before it executes.
+    assert set(results) == {"fatal", "never-reached"}
+    assert all(message.metadata["errorCode"] == "tool_call_unresolved" for message in results.values())
+    # The call that never ran must not be reported as having failed itself —
+    # the model reads these results on the next turn.
+    assert "Cannot pass DataFrame" in json.loads(results["fatal"].content)["payload"]["error"]["message"]
+    assert json.loads(results["never-reached"].content)["payload"]["error"]["message"].startswith("Never executed:")
+
+
+def test_an_already_answered_call_is_not_answered_twice_when_a_later_call_raises() -> None:
+    """Two results for one call reach the model as contradictory answers, so
+    the abort path must read what the conversation already holds rather than
+    trust a set kept alongside it."""
+    loop = _loop(_GoodThenFatalBatchModel(), service=_OneGoodThenFatalService())
+    conversation = loop.create_session(DEFAULT_HOSTED_AGENT_NAME, session_id="loop:no-double-answer")
+
+    with pytest.raises(TypeError, match="Cannot pass DataFrame"):
+        loop.submit_user_message(conversation.session_id, "compare SPY and crude oil")
+
+    messages = loop.get_conversation(conversation.session_id).snapshot()
+    answered = [message.tool_call_id for message in messages if message.role == "tool"]
+    assert answered == ["good", "fatal"], f"expected one result per call, got {answered}"
+    good = next(message for message in messages if message.tool_call_id == "good")
+    assert good.metadata["isError"] is False
+
+
+def test_a_call_id_reused_from_an_earlier_step_still_gets_its_own_result() -> None:
+    """Call ids are not unique across steps for every provider, so an earlier
+    step's answer must not make this step's call look answered."""
+    loop = _loop(_RepeatedCallIdModel(), max_steps=4, service=_OneGoodThenFatalService())
+    conversation = loop.create_session(DEFAULT_HOSTED_AGENT_NAME, session_id="loop:reused-call-id")
+
+    with pytest.raises(TypeError, match="Cannot pass DataFrame"):
+        loop.submit_user_message(conversation.session_id, "SPY first, then crude oil")
+
+    messages = loop.get_conversation(conversation.session_id).snapshot()
+    results = [message for message in messages if message.role == "tool"]
+    # One per requested call, even though both carry the same id.
+    assert [message.tool_call_id for message in results] == ["positional-call:0"] * 2
+    assert [message.metadata["errorCode"] for message in results] == [None, "tool_call_unresolved"]
+
+
+def test_an_outage_on_the_repaired_retry_is_not_reported_as_a_bad_symbol() -> None:
+    """The retry's own error outranks the first attempt's when it must surface:
+    an upstream outage reported as an unresolvable name sends the model back to
+    the same dead provider."""
+    from TerraFin.data.providers.market.yfinance import TransientMarketDataError
+
+    loop = _loop(_CrudeOilModel(), max_steps=2, service=_TransientOnRetryService())
+    conversation = loop.create_session(DEFAULT_HOSTED_AGENT_NAME, session_id="loop:transient-on-retry")
+
+    with pytest.raises(TransientMarketDataError, match="rate limited"):
+        loop.submit_user_message(conversation.session_id, "how is crude oil")
+
+    # The turn still owes the call a result — the invariant holds on this path too.
+    messages = loop.get_conversation(conversation.session_id).snapshot()
+    results = [message for message in messages if message.role == "tool"]
+    assert [message.tool_call_id for message in results] == ["oil"]
+    assert "rate limited" in json.loads(results[0].content)["payload"]["error"]["message"]
 
 
 def test_submit_user_message_keeps_recoverable_tool_errors_inside_the_loop_until_model_recovers() -> None:
@@ -621,12 +779,26 @@ def test_buffett_broad_market_prompt_disallows_treating_indices_like_businesses(
 
     assert "Broad index ETFs are market containers, not operating businesses." in prompt
     assert "Do not force company-style moat, owner earnings, or DCF logic onto SPY, QQQ, DIA, VT" in prompt
-    assert "Do not treat SPY, QQQ, DIA, or VT like standalone operating businesses with moats and owner earnings." in prompt
-    assert "use market_snapshot, market_data, risk_profile, valuation, and economic rather than free-form macro_focus guesses." in prompt
-    assert "Use economic with canonical names such as Federal Funds Effective Rate, Treasury-10Y, M2, or SOMA" in prompt
-    assert "Do not call company_info, earnings, financials, or fundamental_screen on SPY, QQQ, DIA, VT, or similar benchmark ETFs." in prompt
+    assert (
+        "Do not treat SPY, QQQ, DIA, or VT like standalone operating businesses with moats and owner earnings."
+        in prompt
+    )
+    assert (
+        "use market_snapshot, market_data, risk_profile, valuation, and economic rather than free-form macro_focus guesses."
+        in prompt
+    )
+    assert (
+        "Use economic with canonical names such as Federal Funds Effective Rate, Treasury-10Y, M2, or SOMA" in prompt
+    )
+    assert (
+        "Do not call company_info, earnings, financials, or fundamental_screen on SPY, QQQ, DIA, VT, or similar benchmark ETFs."
+        in prompt
+    )
     assert "Prefer a compact 2-4 tool plan" in prompt
-    assert "`submit_guru_research_memo` must include: stance, confidence, thesis, key_evidence, risks, open_questions, citations." in prompt
+    assert (
+        "`submit_guru_research_memo` must include: stance, confidence, thesis, key_evidence, risks, open_questions, citations."
+        in prompt
+    )
     assert "Do not use `resolve` for broad-market questions." in prompt
     assert "The final thesis must explicitly reflect native concepts from this investor's worldview" in prompt
     assert "Open the thesis with one unmistakable worldview sentence" in prompt
@@ -717,7 +889,11 @@ def test_persona_fit_feedback_accepts_marks_cycle_psychology_memo() -> None:
             stance="bearish",
             confidence=72,
             thesis="The pendulum looks closer to optimism than fear, and the real issue is whether investors are being paid enough for the risk they are taking.",
-            key_evidence=["Psychology looks more eager than fearful.", "Risk premiums do not look generous.", "This feels closer to second-level caution than a precise forecast."],
+            key_evidence=[
+                "Psychology looks more eager than fearful.",
+                "Risk premiums do not look generous.",
+                "This feels closer to second-level caution than a precise forecast.",
+            ],
             risks=[],
             open_questions=[],
             citations=[],
@@ -927,9 +1103,7 @@ def test_consult_tools_exposed_only_to_default_assistant_not_to_personas() -> No
 
 def test_consult_tools_carry_contract_descriptions_that_guide_persona_choice() -> None:
     loop = _loop_with_gurus(_DirectAnswerModel())
-    tools_by_name = {
-        tool.name: tool for tool in loop.tool_adapter.list_tools_for_agent(DEFAULT_HOSTED_AGENT_NAME)
-    }
+    tools_by_name = {tool.name: tool for tool in loop.tool_adapter.list_tools_for_agent(DEFAULT_HOSTED_AGENT_NAME)}
 
     buffett = tools_by_name["consult_warren_buffett"]
     assert "business" in buffett.description.lower() and "moat" in buffett.description.lower()
@@ -1065,11 +1239,7 @@ def test_persona_fit_broad_market_check_runs_on_user_message_under_consult_route
     )
     # Must return non-None feedback — that's what triggers the in-turn retry.
     assert feedback is not None
-    assert (
-        "technical" in feedback.lower()
-        or "signature" in feedback.lower()
-        or "buffett" in feedback.lower()
-    )
+    assert "technical" in feedback.lower() or "signature" in feedback.lower() or "buffett" in feedback.lower()
 
 
 def test_submit_user_message_no_longer_pre_intercepts_with_guru_router() -> None:

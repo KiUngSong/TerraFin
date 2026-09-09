@@ -1,6 +1,6 @@
 """Trend conditions — moving-average crosses, Minervini template."""
 
-from ._base import Signal, resample, sma, spy_trend_ok
+from ._base import Signal, sma, venue_trend_ok, week_ending, weekly_bars
 from ._base import closes as _closes
 
 
@@ -25,11 +25,16 @@ def _ma_cross_grid(ticker: str, ohlc) -> list[Signal]:
     for p in _DAILY_MA_PERIODS:
         out.extend(_bar_ma_cross(ticker, ohlc, period=p, label=f"MA{p}", horizon="day"))
     try:
-        weekly = resample(ohlc, "W")
-    except ValueError:
+        # `weekly_bars`, not `resample(ohlc, "W")`: W-FRI and the partial
+        # trailing week dropped. A provisional week's close flips these crosses
+        # mid-week, and with per-week dedup downstream the first (wrong) state
+        # would suppress the week's real one.
+        weekly = weekly_bars(ohlc, ticker)
+    except (ValueError, KeyError):
         return out
+    week = week_ending(weekly)
     for p in _WEEKLY_MA_PERIODS:
-        out.extend(_bar_ma_cross(ticker, weekly, period=p, label=f"MA{p}W", horizon="week"))
+        out.extend(_bar_ma_cross(ticker, weekly, period=p, label=f"MA{p}W", horizon="week", week=week))
     return out
 
 
@@ -52,6 +57,7 @@ def _bar_ma_cross(
     label: str,
     horizon: str,
     min_gap_pct: float = 0.5,
+    week: str | None = None,
 ) -> list[Signal]:
     cs = _closes(ohlc)
     if len(cs) < period + 1:
@@ -71,8 +77,15 @@ def _bar_ma_cross(
             name=f"{label}_{'GOLDEN' if cur_side == 1 else 'DEATH'}_CROSS",
             ticker=ticker,
             severity="medium",
-            message=(f"{period}-{horizon} MA {kind} cross (close {cs[-1]:.2f} vs MA {mas[-1]:.2f}, gap {gap_pct:+.2f}%)."),
-            snapshot={"close": cs[-1], "ma": mas[-1], "gap_pct": gap_pct},
+            message=(
+                f"{period}-{horizon} MA {kind} cross (close {cs[-1]:.2f} vs MA {mas[-1]:.2f}, gap {gap_pct:+.2f}%)."
+            ),
+            snapshot={
+                "close": cs[-1],
+                "ma": mas[-1],
+                "gap_pct": gap_pct,
+                **({"week_ending": week} if week else {}),
+            },
         )
     ]
 
@@ -95,20 +108,21 @@ def _template_pass(cs: list[float]) -> bool | None:
     sma50 = sum(cs[-50:]) / 50
     sma150 = sum(cs[-150:]) / 150
     sma200 = sum(cs[-200:]) / 200
-    sma200_21_ago = sum(cs[-221:-21]) / 200    # 200-MA ~1 month ago
-    sma200_63_ago = sum(cs[-263:-63]) / 200    # 200-MA ~3 months ago
+    sma200_21_ago = sum(cs[-221:-21]) / 200  # 200-MA ~1 month ago
+    sma200_63_ago = sum(cs[-263:-63]) / 200  # 200-MA ~3 months ago
     low_52w = min(cs[-252:])
     high_52w = max(cs[-252:])
     if low_52w <= 0:
         return None
     return (
-        c > sma50                              # 5: price above 50-MA
-        and c > sma150 and c > sma200          # 1: price above 150- AND 200-MA (explicit)
-        and sma50 > sma150 > sma200            # 2+4: 50>150>200 MA stacking
-        and sma200 > sma200_21_ago             # 3a: 200-MA rising over ~1 month
-        and sma200_21_ago > sma200_63_ago      # 3b: sustained — rising the prior 2 months too
-        and c >= low_52w * 1.30                # 6: >=30% above 52w low
-        and c >= high_52w * 0.75               # 7: within 25% of 52w high
+        c > sma50  # 5: price above 50-MA
+        and c > sma150
+        and c > sma200  # 1: price above 150- AND 200-MA (explicit)
+        and sma50 > sma150 > sma200  # 2+4: 50>150>200 MA stacking
+        and sma200 > sma200_21_ago  # 3a: 200-MA rising over ~1 month
+        and sma200_21_ago > sma200_63_ago  # 3b: sustained — rising the prior 2 months too
+        and c >= low_52w * 1.30  # 6: >=30% above 52w low
+        and c >= high_52w * 0.75  # 7: within 25% of 52w high
     )
 
 
@@ -131,11 +145,11 @@ def _minervini_template(ticker: str, ohlc) -> list[Signal]:
     # Only fire on transition false → true (regime entry).
     if not (cur is True and prev is False):
         return []
-    # Bullish-entry signals get a SPY regime gate. Bear-period backtest
+    # Bullish-entry signals get their own market's regime gate. Bear-period backtest
     # (GFC, COVID, 2022) showed all three negative-edge for Minervini —
     # the template flips green in counter-trend rallies, then dies. Only
-    # fire when the broad market is itself in primary uptrend.
-    if spy_trend_ok(50) is False:
+    # fire when that market is itself in primary uptrend.
+    if venue_trend_ok(ticker, 50) is False:
         return []
     return [
         Signal(

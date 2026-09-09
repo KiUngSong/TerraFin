@@ -141,7 +141,7 @@ class SimilarityPool:
         }
 
 
-def get_pool(universe: str) -> SimilarityPool:
+def get_pool(universe: str) -> "SimilarityPool":
     """Return a pool with full price history loaded, using the process-level TTL cache.
 
     Watchlist pools are never cached (they change per-request).

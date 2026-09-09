@@ -215,7 +215,7 @@ def test_complete_uses_previous_response_id_and_tool_outputs_on_followup() -> No
     ]
 
 
-def _responses(count: int) -> _FakeClient:
+def _responses(count: int) -> "_FakeClient":
     return _FakeClient(
         [
             _FakeResponse({"id": f"resp_new{i}", "output": [], "output_text": "Done."})

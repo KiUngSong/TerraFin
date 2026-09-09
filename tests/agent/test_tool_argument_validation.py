@@ -47,40 +47,42 @@ def test_enum_violation_is_reported() -> None:
 
 
 def test_numeric_bounds_are_enforced() -> None:
-    assert _problems("relative_strength", {"top_n": 101})
-    assert _problems("relative_strength", {"top_n": 0})
-    assert _problems("relative_strength", {"top_n": 50}) == []
+    assert _problems("pattern_scan", {"limit": 1001})
+    assert _problems("pattern_scan", {"limit": 0})
+    assert _problems("pattern_scan", {"limit": 200}) == []
 
 
 def test_integral_floats_are_narrowed_not_merely_accepted() -> None:
-    """Models routinely emit 20.0 for an integer field; 20.5 is a real error.
+    """Models routinely emit 200.0 for an integer field; 200.5 is a real error.
 
-    Accepting 20.0 without narrowing it to `int` only relocates the failure:
-    `relative_strength` reaches `ordered[:top_n]` and raises `TypeError: slice
-    indices must be integers`, which no classifier recognises, so the run aborts
-    instead of returning a tool error. The narrowed value is the contract.
+    Accepting 200.0 without narrowing it to `int` only relocates the failure:
+    once the matches outnumber the limit the handler reaches `matched[:limit]`
+    and raises `TypeError: slice indices must be integers`, which no classifier
+    recognises, so the run aborts instead of returning a tool error. Worse for
+    being conditional — it depends on how many matches the scan found. The
+    narrowed value is the contract.
     """
 
-    problems, normalized = validate_tool_arguments("relative_strength", {"top_n": 20.0})
+    problems, normalized = validate_tool_arguments("pattern_scan", {"limit": 200.0})
     assert problems == []
-    assert normalized["top_n"] == 20
-    assert isinstance(normalized["top_n"], int)
+    assert normalized["limit"] == 200
+    assert isinstance(normalized["limit"], int)
 
-    assert _problems("relative_strength", {"top_n": 20.5})
+    assert _problems("pattern_scan", {"limit": 200.5})
 
 
 def test_narrowing_leaves_other_arguments_untouched() -> None:
     _, normalized = validate_tool_arguments(
-        "relative_strength", {"top_n": 20.0, "universe": "sp500", "period": "6mo"}
+        "pattern_scan", {"limit": 200.0, "severity_min": "medium", "period": "6mo"}
     )
 
-    assert normalized == {"top_n": 20, "universe": "sp500", "period": "6mo"}
+    assert normalized == {"limit": 200, "severity_min": "medium", "period": "6mo"}
 
 
 def test_booleans_are_not_integers_or_strings() -> None:
     """bool is an int subclass in Python; JSON booleans are neither."""
 
-    assert _problems("relative_strength", {"top_n": True})
+    assert _problems("pattern_scan", {"limit": True})
     assert _problems("valuation", {"ticker": True})
 
 
@@ -139,7 +141,7 @@ def test_unknown_tool_validates_vacuously() -> None:
     assert _problems("not_a_tool", {"anything": 1}) == []
 
 
-@pytest.mark.parametrize("tool_name", ["consensus", "news", "pattern_scan", "relative_strength"])
+@pytest.mark.parametrize("tool_name", ["consensus", "news", "pattern_scan"])
 def test_unknown_arguments_are_rejected_for_every_recent_tool(tool_name: str) -> None:
     problems = _problems(tool_name, {"definitely_not_a_field": 1})
 

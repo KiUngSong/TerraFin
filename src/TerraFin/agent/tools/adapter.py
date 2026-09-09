@@ -132,8 +132,52 @@ class TerraFinHostedToolAdapter:
                 },
             }
         except Exception as exc:
+            retry_error: Exception | None = None
             retried_arguments = self._repair_retryable_arguments(tool, resolved_arguments, exc)
+            if retried_arguments is not None:
+                # A repaired retry runs under the same guard as the first
+                # attempt: an exception escaping `run_tool` leaves the model's
+                # tool call with no result and kills the whole turn. A retry
+                # that fails again is classified from the original error.
+                try:
+                    if tool.name == "current_view_context":
+                        payload = self.runtime.read_linked_view_context(
+                            session_id,
+                            view_context_id=_optional_string(retried_arguments.get("viewContextId")),
+                        )
+                    elif tool.execution_mode == "task":
+                        task = self.runtime.start_task(
+                            session_id,
+                            tool.capability_name,
+                            **retried_arguments,
+                        )
+                        payload = {
+                            "accepted": True,
+                            "taskId": task.task_id,
+                            "status": task.status,
+                        }
+                    else:
+                        payload = self.runtime.invoke(
+                            session_id, tool.capability_name, **retried_arguments
+                        )
+                except Exception as exc_retry:
+                    # Kept for `detail` below: the classification comes from the
+                    # original error, so this is the only place the retry's own
+                    # failure stays visible.
+                    retry_error = exc_retry
+                    retried_arguments = None
             if retried_arguments is None:
+                if retry_error is not None:
+                    # A retry that fails for a reason of its own outranks the
+                    # first attempt: an upstream outage must not be reported as
+                    # the bad symbol the first error looked like. Only where the
+                    # retry's error is classified and must surface — an
+                    # unclassifiable one still yields the original verdict.
+                    retry_disposition = self._classify_tool_error(
+                        tool, resolved_arguments, retry_error
+                    )
+                    if retry_disposition is not None and retry_disposition.expose_to_user:
+                        raise retry_error
                 disposition = self._classify_tool_error(tool, resolved_arguments, exc)
                 if disposition is None or disposition.expose_to_user:
                     raise
@@ -147,7 +191,7 @@ class TerraFinHostedToolAdapter:
                         "error": {
                             "code": disposition.code,
                             "message": disposition.message,
-                            "detail": str(exc),
+                            "detail": str(exc) if retry_error is None else f"{exc} | retry: {retry_error}",
                             "retryable": disposition.retryable,
                             "modelHint": disposition.model_hint,
                         },
@@ -158,20 +202,6 @@ class TerraFinHostedToolAdapter:
                     error_code=disposition.code,
                     error_message=disposition.message,
                 )
-            if tool.name == "current_view_context":
-                payload = self.runtime.read_linked_view_context(
-                    session_id,
-                    view_context_id=_optional_string(retried_arguments.get("viewContextId")),
-                )
-            elif tool.execution_mode == "task":
-                task = self.runtime.start_task(session_id, tool.capability_name, **retried_arguments)
-                payload = {
-                    "accepted": True,
-                    "taskId": task.task_id,
-                    "status": task.status,
-                }
-            else:
-                payload = self.runtime.invoke(session_id, tool.capability_name, **retried_arguments)
         return TerraFinToolInvocationResult(
             tool_name=tool.name,
             capability_name=tool.capability_name,

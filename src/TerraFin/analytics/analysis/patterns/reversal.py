@@ -2,7 +2,10 @@
 
 from ._base import (
     Signal,
+    bar_date,
     swing_pivots,
+    week_ending,
+    weekly_bars,
     wilder_rsi,
 )
 from ._base import (
@@ -13,6 +16,7 @@ from ._base import (
 def evaluate(ticker: str, ohlc) -> list[Signal]:
     out: list[Signal] = []
     out.extend(_rsi_divergence(ticker, ohlc))
+    out.extend(_weekly_rsi_divergence(ticker, ohlc))
     return out
 
 
@@ -25,8 +29,11 @@ def _rsi_divergence(
     *,
     rsi_period: int = 14,
     half_window: int = 3,
-    rsi_high: float = 60.0,
-    rsi_low: float = 40.0,
+    rsi_high: float = 70.0,
+    rsi_low: float = 30.0,
+    name_prefix: str = "",
+    severity: str = "medium",
+    snapshot_extra: dict | None = None,
 ) -> list[Signal]:
     cs = _closes(ohlc)
     if len(cs) < rsi_period + half_window * 4 + 5:
@@ -53,9 +60,9 @@ def _rsi_divergence(
             if r_highs[-2].price >= rsi_high:
                 return [
                     Signal(
-                        name="RSI_BEAR_DIVERGENCE",
+                        name=f"{name_prefix}RSI_BEAR_DIVERGENCE",
                         ticker=ticker,
-                        severity="medium",
+                        severity=severity,
                         message=(
                             f"RSI bearish divergence "
                             f"(price HH {p_highs[-1].price:.2f}, RSI lower-high "
@@ -64,6 +71,8 @@ def _rsi_divergence(
                         snapshot={
                             "price_high": p_highs[-1].price,
                             "rsi_high": r_highs[-1].price,
+                            "trigger_bar": bar_date(ohlc, rsi_offset + p_highs[-1].bar_index),
+                            **(snapshot_extra or {}),
                         },
                     )
                 ]
@@ -72,9 +81,9 @@ def _rsi_divergence(
             if r_lows[-2].price <= rsi_low:
                 return [
                     Signal(
-                        name="RSI_BULL_DIVERGENCE",
+                        name=f"{name_prefix}RSI_BULL_DIVERGENCE",
                         ticker=ticker,
-                        severity="medium",
+                        severity=severity,
                         message=(
                             f"RSI bullish divergence "
                             f"(price LL {p_lows[-1].price:.2f}, RSI higher-low "
@@ -83,7 +92,36 @@ def _rsi_divergence(
                         snapshot={
                             "price_low": p_lows[-1].price,
                             "rsi_low": r_lows[-1].price,
+                            "trigger_bar": bar_date(ohlc, rsi_offset + p_lows[-1].bar_index),
+                            **(snapshot_extra or {}),
                         },
                     )
                 ]
     return []
+
+
+def _weekly_rsi_divergence(ticker: str, ohlc) -> list[Signal]:
+    """Same divergence rule on weekly bars.
+
+    Severity is `high`, not the daily `medium`: a divergence that takes months
+    of weekly pivots to form is rare and is the class of signal worth pushing
+    for a name the user has not curated.
+    """
+    try:
+        weekly = weekly_bars(ohlc, ticker)
+    except Exception:
+        return []
+    # Looser bounds than the daily 70/30: weekly RSI(14) rarely reaches either
+    # extreme, and at 30 the bull side never fired on any name tested.
+    # `week_ending` is what keys the weekly dedup. Without it these fall back to
+    # the run date's ISO week, which double-ships on the KRX schedule and then
+    # swallows the following week.
+    return _rsi_divergence(
+        ticker,
+        weekly,
+        rsi_high=60.0,
+        rsi_low=40.0,
+        name_prefix="WEEKLY_",
+        severity="high",
+        snapshot_extra={"week_ending": week_ending(weekly)},
+    )

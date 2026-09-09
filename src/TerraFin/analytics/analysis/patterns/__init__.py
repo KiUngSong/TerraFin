@@ -33,7 +33,8 @@ the package-level ``evaluate`` aggregates them.
 from TerraFin.data.contracts.dataframes import TimeSeriesDataFrame
 
 from . import breakout, reversal, trend
-from ._base import Severity, Signal, _OHLCV_CACHE_KEY
+from ._base import _OHLCV_CACHE_KEY, Severity, Signal
+from .catalog import PATTERN_TIMEFRAMES, signal_key
 
 
 _ACTIVE_SCHOOLS = (trend, breakout, reversal)
@@ -69,4 +70,4 @@ def evaluate(ticker: str, ohlc: TimeSeriesDataFrame) -> list[Signal]:
     return out
 
 
-__all__ = ["Signal", "Severity", "evaluate"]
+__all__ = ["PATTERN_TIMEFRAMES", "Signal", "Severity", "evaluate", "signal_key"]

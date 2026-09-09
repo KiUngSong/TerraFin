@@ -333,52 +333,6 @@ def build_default_capability_registry(
                 response_model_name="PatternScanResponse",
             ),
             TerraFinCapability(
-                name="relative_strength",
-                description=(
-                    "Rank a universe by price momentum, or locate one ticker "
-                    "inside that ranking. Use it to SOURCE leadership names, or "
-                    "to answer 'is this name actually strong relative to the "
-                    "market?' with a number instead of a chart impression.\n"
-                    "\n"
-                    "Returns per symbol: `rsRating` (IBD-style 1-99 percentile "
-                    "of a weighted 3/6/9/12-month price blend, most recent "
-                    "quarter double-weighted) and `momentum12m1` (plain 12-1 "
-                    "momentum: trailing 12-month return skipping the last "
-                    "month). Minervini's trend template wants rsRating >= 70.\n"
-                    "\n"
-                    "Omit `ticker` for the top-`top_n` leaderboard. Pass "
-                    "`ticker` to get just that name's rating and rank; a ticker "
-                    "outside the universe is ranked alongside it rather than "
-                    "rejected.\n"
-                    "\n"
-                    "IMPORTANT — ratings are only comparable within one "
-                    "`universe`, because the percentile is computed across that "
-                    "set. Names with fewer than ~253 trading days of history are "
-                    "omitted from the ranking and reported in `warnings`; "
-                    "`ranked` vs `universeSize` shows the coverage.\n"
-                    "\n"
-                    "`momentum12m1` is a FRACTION, not a percent: 0.34 means "
-                    "+34%.\n"
-                    "\n"
-                    "COST: one price history fetch per universe member (sp500 is "
-                    "501, nasdaq100 101, kospi200 199). Cache reads run 8-way "
-                    "concurrently, but cold downloads are serialised by a "
-                    "process-wide lock, so a cold sp500 run takes minutes and "
-                    "slows other price requests — prefer "
-                    "`start_relative_strength_task`. Results are memoised for 5 "
-                    "minutes. 'watchlist' is the smallest universe, but it falls "
-                    "back to a bundled sample list when no watchlist store is "
-                    "configured, so treat a tiny `universeSize` as a signal that "
-                    "the percentile is not meaningful."
-                ),
-                handler=resolved_service.relative_strength,
-                focus_extractor=_focus_from_input_keys("ticker"),
-                backgroundable=True,
-                summary="IBD-style relative-strength rating and rank across a universe.",
-                http_route_path="/agent/api/relative-strength",
-                response_model_name="RelativeStrengthResponse",
-            ),
-            TerraFinCapability(
                 name="market_snapshot",
                 description=(
                     "Fetch a compact market snapshot for a single asset. "

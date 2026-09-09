@@ -189,7 +189,7 @@ def _load_cache_config(source: Mapping[str, str]) -> CacheConfig:
     return CacheConfig(intervals=intervals)
 
 
-def load_terrafin_config(env: Mapping[str, str] | None = None) -> TerraFinConfig:
+def load_terrafin_config(env: Mapping[str, str] | None = None) -> "TerraFinConfig":
     source = get_environment(env)
     return TerraFinConfig(
         runtime=_load_runtime_config(source),

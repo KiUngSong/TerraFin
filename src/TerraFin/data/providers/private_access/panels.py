@@ -14,7 +14,11 @@ from TerraFin.data.providers.economic.macro_calendar import get_macro_events_all
 from TerraFin.data.providers.economic.macro_values import enrich_macro_events_all
 from TerraFin.data.providers.private_access.client import PrivateAccessClient
 from TerraFin.data.providers.private_access.config import load_private_access_config
-from TerraFin.data.providers.private_access.fallbacks import get_calendar_fallback, get_market_breadth_fallback, get_top_companies_fallback
+from TerraFin.data.providers.private_access.fallbacks import (
+    get_calendar_fallback,
+    get_market_breadth_fallback,
+    get_top_companies_fallback,
+)
 from TerraFin.data.providers.private_access.models import (
     CalendarEvent,
     CalendarResponse,
@@ -73,7 +77,10 @@ def _load_calendar_panel() -> list[dict]:
 
 
 def _load_top_companies_panel() -> list[dict]:
-    payload = _client().fetch_panel("top-companies?top_k=50")
+    # No `top_k`: this panel feeds the dashboard and the agent, which want the
+    # whole ranked snapshot. The EOD scan reads Mongo directly and applies its
+    # own `_TOP_N`.
+    payload = _client().fetch_panel("top-companies")
     response = TopCompaniesResponse.model_validate(payload)
     return [company.model_dump(exclude_none=True) for company in response.companies]
 

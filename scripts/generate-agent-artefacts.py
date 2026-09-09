@@ -155,7 +155,6 @@ USAGE_CATEGORIES: list[tuple[str, set[str]]] = [
             "patterns",
             "pattern_scan",
             "similarity_search",
-            "relative_strength",
         },
     ),
     (

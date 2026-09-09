@@ -137,7 +137,7 @@ def create_runtime_session(
     system_prompt: str | None = None,
     metadata: dict[str, Any] | None = None,
     **client_kwargs: Any,
-) -> TerraFinRuntimeSessionClient:
+) -> "TerraFinRuntimeSessionClient":
     agent_client = _client(client, **client_kwargs)
     session = agent_client.runtime_create_session(
         agent_name,

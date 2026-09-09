@@ -88,7 +88,7 @@ def build_guru_agent_definitions(
 def build_default_agent_definition_registry(
     *,
     include_gurus: bool = False,
-) -> TerraFinAgentDefinitionRegistry:
+) -> "TerraFinAgentDefinitionRegistry":
     registry = TerraFinAgentDefinitionRegistry(
         [
             TerraFinAgentDefinition(

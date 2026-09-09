@@ -90,7 +90,7 @@ def black_litterman(
     view_confidences: list[float] | None = None,
     risk_aversion: float = 2.5,
     tau: float = 0.05,
-) -> BLOutput:
+) -> "BLOutput":
     """Run the Black-Litterman model.
 
     Args:

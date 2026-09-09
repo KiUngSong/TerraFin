@@ -11,8 +11,6 @@ Drift is a sign that someone added or changed a capability without running
 the generator — the agent surfaces would otherwise diverge silently.
 """
 
-from __future__ import annotations
-
 import subprocess
 import sys
 from pathlib import Path

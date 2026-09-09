@@ -30,6 +30,19 @@ class Signal:
     snapshot: dict = field(default_factory=dict)
 
 
+def bar_date(frame: pd.DataFrame, index: int) -> str | None:
+    """ISO date of one bar, or None when the frame carries no usable time.
+
+    Positional, and resolved through `_ensure_dt_index`: a `TimeSeriesDataFrame`
+    keeps time as a column under a `RangeIndex`, so reading `frame.index`
+    directly would yield an integer on every production frame.
+    """
+    try:
+        return _ensure_dt_index(frame).index[index].date().isoformat()
+    except (IndexError, AttributeError, TypeError, ValueError):
+        return None
+
+
 # ─── OHLC column accessors ───────────────────────────────────────────────────
 #
 # All columns are lowercase per the TimeSeriesDataFrame contract — the
@@ -186,7 +199,7 @@ def entered_extreme(series: list[float], *, threshold: float, low: bool, lookbac
     if lookback < 1 or len(series) <= lookback:
         return False
     now = series[-1]
-    window = series[-(lookback + 1):]
+    window = series[-(lookback + 1) :]
     if now != now or any(v != v for v in window):  # NaN-safe: NaN != NaN
         return False
     if low:
@@ -237,26 +250,35 @@ def _ensure_dt_index(df: pd.DataFrame) -> pd.DataFrame:
     raise ValueError("OHLC frame needs DatetimeIndex or 'time' column for resampling.")
 
 
-_SPY_REGIME_CACHE: dict = {"date": None, "ok": None}
-_SPY_REGIME_LOCK = threading.Lock()
+# Each market's own broad index: a name is gated on the market it trades in.
+# KOSPI and KOSDAQ are separate reads — their close-vs-SMA50 verdicts disagree
+# on roughly a fifth of sessions, so one cannot stand in for the other.
+_KOSPI_INDEX = "^KS11"
+_KOSDAQ_INDEX = "^KQ11"
+
+# symbol -> (calendar date, above its SMA)
+_REGIME_CACHE: dict[str, tuple[object, bool]] = {}
+_REGIME_LOCK = threading.Lock()
 
 
-def spy_trend_ok(period: int = 50) -> bool | None:
-    """SPY close > N-day SMA — used as a regime gate by bullish-entry detectors.
+def index_trend_ok(symbol: str, period: int = 50) -> bool | None:
+    """Index close > N-day SMA — the regime read a bullish-entry gate uses.
 
-    Cached per calendar day to avoid hammering the data pipeline on every
-    detector call. Returns ``None`` if SPY data isn't available.
+    Cached per symbol per calendar day to avoid hammering the data pipeline on
+    every detector call. Returns ``None`` when the index is unavailable, which
+    a caller must treat as "unknown" rather than "bad regime".
     """
     from datetime import date as _date
 
     today = _date.today()
-    with _SPY_REGIME_LOCK:
-        if _SPY_REGIME_CACHE["date"] == today and _SPY_REGIME_CACHE["ok"] is not None:
-            return _SPY_REGIME_CACHE["ok"]
+    with _REGIME_LOCK:
+        cached = _REGIME_CACHE.get(symbol)
+        if cached is not None and cached[0] == today:
+            return cached[1]
     try:
         from TerraFin.data import get_data_factory
 
-        df = get_data_factory().get_market_data("SPY")
+        df = get_data_factory().get_market_data(symbol)
         cs = closes(df)
         if len(cs) < period + 1:
             return None
@@ -264,10 +286,85 @@ def spy_trend_ok(period: int = 50) -> bool | None:
         ok = bool(cs[-1] > ma)
     except Exception:
         return None
-    with _SPY_REGIME_LOCK:
-        _SPY_REGIME_CACHE["date"] = today
-        _SPY_REGIME_CACHE["ok"] = ok
+    with _REGIME_LOCK:
+        _REGIME_CACHE[symbol] = (today, ok)
     return ok
+
+
+def spy_trend_ok(period: int = 50) -> bool | None:
+    """SPY's regime read. See `index_trend_ok`."""
+    return index_trend_ok("SPY", period)
+
+
+def venue_trend_ok(ticker: str, period: int = 50) -> bool | None:
+    """The regime read for the market `ticker` trades in.
+
+    A KRX name is gated on its own board, not on SPY: gating it on a US index
+    measures the wrong market, and dropping the gate entirely restores exactly
+    the ungated configuration the bear-period backtests found negative-edge.
+    A bare 6-digit code carries no board, so it reads KOSPI.
+    """
+    if is_krx_ticker(ticker):
+        board = _KOSDAQ_INDEX if ticker.strip().upper().endswith(".KQ") else _KOSPI_INDEX
+        return index_trend_ok(board, period)
+    return index_trend_ok("SPY", period)
+
+
+def week_ending(weekly: pd.DataFrame) -> str | None:
+    """ISO date of the last completed weekly bar, for dedup keying.
+
+    A weekly signal must be unique per DATA week, not per run day: the EOD
+    weekly pass runs Mon-Fri, and on KRX Friday's run already sees its own
+    completed week while Mon-Thu still see the previous one. Keying on the run
+    date therefore both duplicates a week and collides two different weeks.
+    """
+    try:
+        return weekly.index[-1].date().isoformat()
+    except (IndexError, AttributeError):
+        return None
+
+
+def is_krx_ticker(ticker: str) -> bool:
+    """6-digit code, bare or with a Yahoo .KS/.KQ suffix."""
+    t = (ticker or "").strip()
+    if t.isdigit() and len(t) == 6:
+        return True
+    core, _, suffix = t.partition(".")
+    # Suffix compared case-insensitively so this agrees with DataFactory's
+    # `is_krx_venue`, which uppercases before comparing.
+    return suffix.upper() in ("KS", "KQ") and core.isdigit() and len(core) == 6
+
+
+def weekly_bars(ohlc: pd.DataFrame, ticker: str = "") -> pd.DataFrame:
+    """W-FRI bars with a genuinely partial trailing week dropped.
+
+    A week that has not reached its Friday sums only the elapsed days, so its
+    volume understates and its close is not a weekly close. Keeping it makes a
+    weekly signal depend on which weekday the scan runs.
+
+    Completeness is judged against the SESSION calendar, not the Friday label. A
+    holiday Friday looked partial on every run — KRX 2025-10-03, with the next
+    week closed for Chuseok — and because the following observed bar belongs to a
+    later week, that week never became the last bar and its signals were lost
+    outright. Without a calendar answer, fall back to the date comparison.
+    """
+    weekly = resample(ohlc, "W-FRI")
+    try:
+        last_daily = _ensure_dt_index(ohlc).index[-1].date()
+        if not len(weekly):
+            return weekly
+        # Compare calendar dates: tz-safe if the market-data index ever becomes
+        # tz-aware, where a naive/aware comparison would raise and skip the drop.
+        label = weekly.index[-1].date()
+        if label > last_daily:
+            from TerraFin.data.providers.market.sessions import last_session_on_or_before
+
+            final_session = last_session_on_or_before(label, ticker)
+            if final_session is None or last_daily < final_session:
+                weekly = weekly.iloc[:-1]
+    except (IndexError, AttributeError, KeyError, ImportError):
+        pass
+    return weekly
 
 
 def resample(ohlc: pd.DataFrame, rule: str) -> pd.DataFrame:

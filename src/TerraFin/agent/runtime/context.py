@@ -85,7 +85,7 @@ def create_agent_context(
     task_registry: TerraFinTaskRegistry | None = None,
     chart_opener: Callable[..., dict[str, Any]] | None = None,
     metadata: Mapping[str, Any] | None = None,
-) -> TerraFinAgentContext:
+) -> "TerraFinAgentContext":
     from ..service import TerraFinAgentService
 
     resolved_service = service or TerraFinAgentService()

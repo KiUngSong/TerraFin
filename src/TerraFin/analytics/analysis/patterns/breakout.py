@@ -3,10 +3,11 @@ and the VCP base detector (Minervini)."""
 
 from ._base import (
     Signal,
-    resample,
     sma,
-    spy_trend_ok,
     swing_pivots,
+    venue_trend_ok,
+    week_ending,
+    weekly_bars,
 )
 from ._base import (
     closes as _closes,
@@ -21,6 +22,7 @@ def evaluate(ticker: str, ohlc) -> list[Signal]:
     out.extend(_fifty_two_week_new_high(ticker, ohlc))
     out.extend(_fifty_two_week_new_low(ticker, ohlc))
     out.extend(_weekly_volume_dryup_signal(ticker, ohlc))
+    out.extend(_weekly_new_extreme(ticker, ohlc))
     return out
 
 
@@ -33,7 +35,8 @@ def fifty_two_week_high_status(ohlc, *, proximity: float = 0.98) -> dict | None:
     Shared math core (single source of truth) behind both the gated
     `_fifty_two_week_new_high` monitoring signal and callers that want raw
     facts for any region/instrument (KR names, ETFs). The gated signal keys on
-    SPY's trend, which would wrongly suppress non-US names.
+    the trend of the index the name trades under, so it carries a regime
+    opinion this one deliberately does not.
 
     Returns None when fewer than 252 daily bars exist, so a "52-week" stat is
     never computed off a short window (e.g. a recently-listed ETF). Otherwise:
@@ -55,9 +58,7 @@ def fifty_two_week_high_status(ohlc, *, proximity: float = 0.98) -> dict | None:
     new_high = cs[-1] >= high_252 and cs[-2] < high_252
     prev_high = max(cs[-253:-1]) if len(cs) >= 253 else high_252
     prev_ratio = (cs[-2] / prev_high) if prev_high > 0 else None
-    entered_proximity = (
-        ratio >= proximity and prev_ratio is not None and prev_ratio < proximity
-    )
+    entered_proximity = ratio >= proximity and prev_ratio is not None and prev_ratio < proximity
     return {
         "high_252": high_252,
         "ratio": ratio,
@@ -79,10 +80,12 @@ def _fifty_two_week_new_high(ticker: str, ohlc) -> list[Signal]:
     high_252 = st["high_252"]
     sma50 = st["sma50"]
     if st["new_high"] and st["above_50dma"]:
-        # SPY regime gate — bear-period backtest showed 52W_NEW_HIGH at
+        # Regime gate — bear-period backtest showed 52W_NEW_HIGH at
         # -7.27% (GFC) and -8.18% (COVID) edge; counter-trend pops chase
-        # the high then die. Suppress when SPY itself isn't trending up.
-        if spy_trend_ok(50) is False:
+        # the high then die. Suppress when the name's own market isn't
+        # trending up: KOSPI or KOSDAQ for a KRX name, SPY otherwise. An
+        # unavailable index reads unknown and never suppresses.
+        if venue_trend_ok(ticker, 50) is False:
             return []
         return [
             Signal(
@@ -112,10 +115,7 @@ def _fifty_two_week_new_low(ticker: str, ohlc) -> list[Signal]:
                 name="52W_NEW_LOW",
                 ticker=ticker,
                 severity="high",
-                message=(
-                    f"New 52-week low (close {cs[-1]:.2f} ≤ {low_252:.2f}, "
-                    f"below 50DMA {sma50:.2f})."
-                ),
+                message=(f"New 52-week low (close {cs[-1]:.2f} ≤ {low_252:.2f}, below 50DMA {sma50:.2f})."),
                 snapshot={"close": cs[-1], "low_252": low_252, "sma50": sma50},
             )
         ]
@@ -184,6 +184,7 @@ def detect_vcp(
 def detect_weekly_volume_dryup(
     ohlc,
     *,
+    ticker: str = "",
     recent_weeks: int = 4,
     base_weeks: int = 12,
     ratio: float = 0.6,
@@ -205,23 +206,9 @@ def detect_weekly_volume_dryup(
     Returns the metrics dict when the constructive dry-up holds, else None.
     """
     try:
-        weekly = resample(ohlc, "W-FRI")
+        weekly = weekly_bars(ohlc, ticker)
     except Exception:
         return None
-    # Drop a PARTIAL trailing week: if the daily data doesn't reach that week's
-    # ending Friday, the last weekly bar sums only the elapsed days and
-    # understates volume → a spurious dry-up that would fire on an early-week
-    # run but not on a Friday run. Make the signal independent of run weekday.
-    try:
-        from ._base import _ensure_dt_index
-        # Compare calendar DATES (.date()), which is tz-safe — a future switch to
-        # a tz-aware market-data index must not silently skip the drop via a
-        # tz-naive/aware comparison error.
-        last_daily = _ensure_dt_index(ohlc).index[-1].date()
-        if len(weekly) and weekly.index[-1].date() > last_daily:
-            weekly = weekly.iloc[:-1]
-    except (IndexError, AttributeError, KeyError):
-        pass
     cs = _closes(weekly)
     vs = _volumes(weekly)
     need = recent_weeks + base_weeks
@@ -252,11 +239,12 @@ def detect_weekly_volume_dryup(
         "ratio": round(vol_ratio, 3),
         "recent_weeks": recent_weeks,
         "base_weeks": base_weeks,
+        "week_ending": week_ending(weekly),
     }
 
 
 def _weekly_volume_dryup_signal(ticker: str, ohlc) -> list[Signal]:
-    d = detect_weekly_volume_dryup(ohlc)
+    d = detect_weekly_volume_dryup(ohlc, ticker=ticker)
     if d is None:
         return []
     return [
@@ -269,6 +257,89 @@ def _weekly_volume_dryup_signal(ticker: str, ohlc) -> list[Signal]:
                 f"{d['base_weeks']}-week average while holding an uptrend — "
                 f"supply contraction in a maturing base."
             ),
-            snapshot={"ratio": d["ratio"], "recent_avg": d["recent_avg"], "base_avg": d["base_avg"]},
+            snapshot={
+                "ratio": d["ratio"],
+                "recent_avg": d["recent_avg"],
+                "base_avg": d["base_avg"],
+                "week_ending": d.get("week_ending"),
+            },
         )
     ]
+
+
+# ─── Weekly 52-week new high / low ───────────────────────────────────────────
+
+
+def _weekly_new_extreme(ticker: str, ohlc, *, lookback: int = 52, trend_sma: int = 10) -> list[Signal]:
+    """52-week extreme confirmed by a WEEKLY close, not an intraweek touch.
+
+    Same anchor effect as the daily pair, but a week has to close at the
+    extreme, so intraweek spikes that reverse by Friday never fire. That is
+    what makes it worth pushing for names the user has not curated.
+    """
+    try:
+        weekly = weekly_bars(ohlc, ticker)
+    except Exception:
+        return []
+    cs = _closes(weekly)
+    if len(cs) < lookback + trend_sma + 1:
+        return []
+    trend = sum(cs[-trend_sma:]) / trend_sma
+    window = cs[-lookback:]
+    high, low = max(window), min(window)
+
+    # `cs[-2] < high` against the SAME window is the daily signal's `new_high`
+    # test (`fifty_two_week_high_status`). Comparing cs[-2] to its own trailing
+    # window instead reads as "cs[-2] was not its own max", which is false
+    # throughout any steady advance — the detector then never fires on the case
+    # it exists for. The comparison must stay STRICT: `<=` would re-fire every
+    # week a flat close ties the 52-week max.
+    #
+    # The trend test below is implied by the extreme test — a close that is the
+    # max of the last 52 weeks is necessarily at or above the mean of the last
+    # 10 — and is kept only so the emitted message's "above the N-week MA"
+    # claim is explicit rather than inferred.
+    if cs[-1] >= high and cs[-2] < high and cs[-1] > trend:
+        # Regime gate on the name's own market, as the daily signal uses.
+        # Gating a KRX name on a US index measures the wrong market; leaving
+        # it ungated is the configuration the bear-period backtest condemned.
+        if venue_trend_ok(ticker, 50) is False:
+            return []
+        return [
+            Signal(
+                name="WEEKLY_NEW_HIGH",
+                ticker=ticker,
+                severity="high",
+                message=(
+                    f"Weekly close at a {lookback}-week high "
+                    f"({cs[-1]:.2f} ≥ {high:.2f}, above the {trend_sma}-week MA {trend:.2f})."
+                ),
+                snapshot={
+                    "close": cs[-1],
+                    "high": high,
+                    "trend_sma": trend,
+                    "lookback": lookback,
+                    "week_ending": week_ending(weekly),
+                },
+            )
+        ]
+    if cs[-1] <= low and cs[-2] > low and cs[-1] < trend:
+        return [
+            Signal(
+                name="WEEKLY_NEW_LOW",
+                ticker=ticker,
+                severity="high",
+                message=(
+                    f"Weekly close at a {lookback}-week low "
+                    f"({cs[-1]:.2f} ≤ {low:.2f}, below the {trend_sma}-week MA {trend:.2f})."
+                ),
+                snapshot={
+                    "close": cs[-1],
+                    "low": low,
+                    "trend_sma": trend,
+                    "lookback": lookback,
+                    "week_ending": week_ending(weekly),
+                },
+            )
+        ]
+    return []
