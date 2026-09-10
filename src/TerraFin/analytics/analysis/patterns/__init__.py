@@ -24,7 +24,7 @@ Split by methodology so a new pattern lands in an obvious file:
 
 - ``trend``     — MA crosses, Minervini template
 - ``breakout``  — 52-week high/low, weekly volume dry-up
-- ``reversal``  — RSI/price divergence
+- ``meanrev``   — RSI crossing into overbought / oversold
 
 Each school module exposes ``evaluate(ticker, ohlc) -> list[Signal]``;
 the package-level ``evaluate`` aggregates them.
@@ -32,12 +32,12 @@ the package-level ``evaluate`` aggregates them.
 
 from TerraFin.data.contracts.dataframes import TimeSeriesDataFrame
 
-from . import breakout, reversal, trend
+from . import breakout, meanrev, trend
 from ._base import _OHLCV_CACHE_KEY, Severity, Signal
 from .catalog import PATTERN_TIMEFRAMES, signal_key
 
 
-_ACTIVE_SCHOOLS = (trend, breakout, reversal)
+_ACTIVE_SCHOOLS = (trend, breakout, meanrev)
 
 
 def _preload_ohlcv(ohlc) -> None:

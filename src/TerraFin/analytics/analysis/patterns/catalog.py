@@ -33,11 +33,11 @@ PATTERN_TIMEFRAMES: dict[str, str] = {
     "WEEKLY_VOLUME_DRYUP": "weekly",
     "WEEKLY_NEW_HIGH": "weekly",
     "WEEKLY_NEW_LOW": "weekly",
-    "WEEKLY_RSI_BULL_DIVERGENCE": "weekly",
-    "WEEKLY_RSI_BEAR_DIVERGENCE": "weekly",
-    # Reversal
-    "RSI_BULL_DIVERGENCE": "daily",
-    "RSI_BEAR_DIVERGENCE": "daily",
+    # Mean reversion — RSI crossing into an extreme
+    "RSI_OVERBOUGHT": "daily",
+    "RSI_OVERSOLD": "daily",
+    "WEEKLY_RSI_OVERBOUGHT": "weekly",
+    "WEEKLY_RSI_OVERSOLD": "weekly",
 }
 
 
@@ -45,8 +45,8 @@ def signal_key(signal: Signal) -> str | None:
     """What identifies one finding across every bar it re-fires on.
 
     The trigger bar wins: it names the exact bar the finding is about, so a
-    divergence that re-confirms on three consecutive weekly bars off one pivot
-    stays a single finding. `week_ending` is next, naming the data week the fire
+    detector that re-confirms the same event on several later bars stays a
+    single finding. `week_ending` is next, naming the data week the fire
     belongs to. Both are facts the detector put in the snapshot.
 
     The week only keys a pattern this map calls weekly. A daily pattern that

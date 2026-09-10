@@ -23,15 +23,13 @@ def _sig(name="WEEKLY_NEW_HIGH", ticker="NVDA", **snapshot):
 
 
 def test_trigger_bar_outranks_the_data_week():
-    """A divergence re-confirms on three consecutive weekly bars off one pivot.
-
-    Keyed on `week_ending` that is three findings; keyed on the pivot bar it is
-    one, which is what it is.
+    """A weekly signal carries both fields. The trigger bar names the exact bar
+    the finding is about, so re-reports across later weeks stay one finding.
     """
     keys = {
         signal_key(
             _sig(
-                name="WEEKLY_RSI_BULL_DIVERGENCE",
+                name="WEEKLY_RSI_OVERSOLD",
                 trigger_bar="2026-08-21",
                 week_ending=week,
             )
@@ -67,7 +65,7 @@ def _emittable_pattern_names() -> set[str]:
         if f.name in ("__init__.py", "_base.py", "catalog.py"):
             continue
         names |= set(re.findall(r'name="([A-Z0-9_]+)"', f.read_text()))
-    # The MA-cross grid and the divergence pair build their names by f-string,
+    # The MA-cross grid and the RSI extreme pair build their names by f-string,
     # so expand them from the lists that drive those loops.
     from TerraFin.analytics.analysis.patterns import trend
 
@@ -76,7 +74,7 @@ def _emittable_pattern_names() -> set[str]:
     for p in trend._WEEKLY_MA_PERIODS:
         names |= {f"MA{p}W_GOLDEN_CROSS", f"MA{p}W_DEATH_CROSS"}
     for prefix in ("", "WEEKLY_"):
-        names |= {f"{prefix}RSI_BULL_DIVERGENCE", f"{prefix}RSI_BEAR_DIVERGENCE"}
+        names |= {f"{prefix}RSI_OVERBOUGHT", f"{prefix}RSI_OVERSOLD"}
     return names
 
 
@@ -102,8 +100,8 @@ def test_declared_timeframes_are_pinned():
         "WEEKLY_VOLUME_DRYUP",
         "WEEKLY_NEW_HIGH",
         "WEEKLY_NEW_LOW",
-        "WEEKLY_RSI_BULL_DIVERGENCE",
-        "WEEKLY_RSI_BEAR_DIVERGENCE",
+        "WEEKLY_RSI_OVERBOUGHT",
+        "WEEKLY_RSI_OVERSOLD",
     }
     assert set(PATTERN_TIMEFRAMES.values()) == {"daily", "weekly"}
 
@@ -137,19 +135,20 @@ def test_a_real_detector_emits_a_trigger_bar_on_a_production_frame():
     import numpy as np
     import pandas as pd
 
-    from TerraFin.analytics.analysis.patterns import reversal
+    from TerraFin.analytics.analysis.patterns import meanrev
 
-    def seg(a, b, n):
-        # Exclusive of the start: a duplicated joint is never strictly extreme,
-        # so `swing_pivots` would confirm no pivot at the turn.
-        return list(np.linspace(a, b, n + 1))[1:]
+    # A zigzag that leaves RSI(14) mid-range, then four down bars: RSI crosses
+    # below 30 on the last one. Too short for a weekly RSI, so only daily fires.
+    closes, price = [], 100.0
+    for i in range(20):
+        price *= 1.01 if i % 2 == 0 else 0.99
+        closes.append(price)
+    tail = closes[-1]
+    closes.extend(tail * 0.98**k for k in range(1, 5))
 
-    # Crash, bounce, then a lower price low on weaker momentum — a bull
-    # divergence whose pivot lands inside the fire window.
-    closes = [100.0] + seg(100, 100.5, 39) + seg(100.5, 55, 25) + seg(55, 80, 15) + seg(80, 52, 30) + seg(52, 62, 5)
     frame = pd.DataFrame(
         {
-            "time": pd.date_range("2020-01-01", periods=len(closes), freq="B"),
+            "time": pd.date_range("2020-01-06", periods=len(closes), freq="B"),
             "open": closes,
             "high": np.array(closes) * 1.01,
             "low": np.array(closes) * 0.99,
@@ -162,7 +161,7 @@ def test_a_real_detector_emits_a_trigger_bar_on_a_production_frame():
     # Pinned to the pair, not to "some ISO string": the weekly branch keys off
     # `week_ending`, which never touches `bar_date`, so a substituted weekly
     # emission would satisfy a looser assertion with the bug reinstated.
-    keyed = [(s.name, signal_key(s)) for s in reversal.evaluate("AAA", frame)]
-    assert keyed == [("RSI_BULL_DIVERGENCE", "2020-06-02")], (
-        "if the series stopped producing this pivot, adjust the fixture, not the assertion"
+    keyed = [(s.name, signal_key(s)) for s in meanrev.evaluate("AAA", frame)]
+    assert keyed == [("RSI_OVERSOLD", "2020-02-06")], (
+        "if the series stopped crossing here, adjust the fixture, not the assertion"
     )

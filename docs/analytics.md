@@ -186,7 +186,7 @@ Modules are split by methodology so a new pattern lands in an obvious file.
 | `breakout` | Bollinger / Donchian (50, weekly 52) breakout, BB squeeze release, swing-pivot break, Darvas box, NR7 / Inside Bar, Keltner channel, 52-week high proximity, Wyckoff Spring / Upthrust |
 | `meanrev` | RSI overbought / oversold, Connors RSI(2) dip in uptrend |
 | `momentum` | MACD signal-line cross, Coppock curve (monthly) |
-| `reversal` | Bull / bear engulfing at extreme, RSI ↔ price divergence |
+| `meanrev` | RSI(14) crossing into overbought / oversold, daily and weekly |
 | `volume` | Capitulation bottom (Wyckoff selling climax), OBV divergence, Chaikin Money Flow, Money Flow Index |
 
 ### Public API

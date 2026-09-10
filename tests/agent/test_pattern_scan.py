@@ -23,7 +23,7 @@ def _stub_scan_inputs(monkeypatch):
         # emits "low", so a stub must not invent one.
         return [
             Signal(name="MA20_GOLDEN_CROSS", ticker=ticker, severity="medium", message="stub medium"),
-            Signal(name="RSI_BEAR_DIVERGENCE", ticker=ticker, severity="medium", message="stub medium 2"),
+            Signal(name="RSI_OVERSOLD", ticker=ticker, severity="medium", message="stub medium 2"),
             Signal(name="52W_NEW_HIGH", ticker=ticker, severity="high", message="stub high"),
         ]
 

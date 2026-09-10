@@ -479,15 +479,14 @@ Parameters:
 Patterns evaluated per symbol:
 
 - close-vs-MA cross grid — `MA20/60/120/200_{GOLDEN,DEATH}_CROSS` (daily) and `MA20/60/120W_{GOLDEN,DEATH}_CROSS` (weekly)
-- `52W_NEW_HIGH`, `52W_NEW_LOW`, `WEEKLY_NEW_HIGH`, `WEEKLY_NEW_LOW`, `MINERVINI_TEMPLATE`, `RSI_BULL_DIVERGENCE`, `RSI_BEAR_DIVERGENCE`, their `WEEKLY_` counterparts, `WEEKLY_VOLUME_DRYUP`
+- `52W_NEW_HIGH`, `52W_NEW_LOW`, `WEEKLY_NEW_HIGH`, `WEEKLY_NEW_LOW`, `MINERVINI_TEMPLATE`, `RSI_OVERBOUGHT` and `RSI_OVERSOLD` with their `WEEKLY_` counterparts, `WEEKLY_VOLUME_DRYUP`
 
 Severity, as the catalogue actually emits it:
 
 - no pattern emits `low`, so `severity_min="low"` and `"medium"` return the same set
-- `"high"` narrows to exactly `52W_NEW_HIGH`, `52W_NEW_LOW`, `WEEKLY_NEW_HIGH`, `WEEKLY_NEW_LOW`, `MINERVINI_TEMPLATE`, `WEEKLY_RSI_BULL_DIVERGENCE`, `WEEKLY_RSI_BEAR_DIVERGENCE`
-- a weekly divergence re-fires for about three consecutive weekly bars, so `"high"` is not a one-shot bucket
+- `"high"` narrows to exactly `52W_NEW_HIGH`, `52W_NEW_LOW`, `WEEKLY_NEW_HIGH`, `WEEKLY_NEW_LOW`, `MINERVINI_TEMPLATE`, `WEEKLY_RSI_OVERBOUGHT`, `WEEKLY_RSI_OVERSOLD`
 
-A cross fires only on the bar where the close flips sides, so expect roughly 1–2 signals per symbol — not a flood.
+Expect roughly 1–2 signals per symbol per scan — not a flood.
 
 Coverage fields — check these before concluding "nothing is triggering":
 

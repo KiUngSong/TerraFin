@@ -1,4 +1,4 @@
-"""Weekly-timeframe patterns: `WEEKLY_NEW_HIGH/LOW` and weekly RSI divergence.
+"""Weekly-timeframe patterns: `WEEKLY_NEW_HIGH/LOW` and the weekly RSI extreme.
 
 The first version of `_weekly_new_extreme` compared `cs[-2]` to its OWN trailing
 window, which is true throughout any steady advance — so the detector never
@@ -10,7 +10,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from TerraFin.analytics.analysis.patterns import breakout, reversal
+from TerraFin.analytics.analysis.patterns import breakout, meanrev
 from TerraFin.analytics.analysis.patterns._base import is_krx_ticker, weekly_bars
 
 
@@ -26,6 +26,25 @@ def _frame(closes, *, start="2020-01-01", volume=1e6):
             "volume": [volume] * len(closes),
         }
     ).set_index("time")
+
+
+def _prod_frame(closes, *, start="2020-01-06", volume=1e6):
+    """The shape the monitor passes: `time` is a COLUMN under a `RangeIndex`.
+
+    A frame indexed by time makes `bar_date` succeed for the wrong reason, so
+    anything asserting `trigger_bar` has to use this one.
+    """
+    closes = list(closes)
+    return pd.DataFrame(
+        {
+            "time": pd.date_range(start, periods=len(closes), freq="B"),
+            "open": closes,
+            "high": np.array(closes) * 1.01,
+            "low": np.array(closes) * 0.99,
+            "close": closes,
+            "volume": [volume] * len(closes),
+        }
+    )
 
 
 def _ramp(a, b, n):
@@ -215,16 +234,39 @@ def test_is_krx_ticker():
     assert not is_krx_ticker("")
 
 
-# ── weekly RSI divergence ────────────────────────────────────────────────────
+# ── weekly RSI extreme ───────────────────────────────────────────────────────
 
 
-def test_weekly_rsi_delegates_with_weekly_bars_and_looser_bounds(monkeypatch):
-    """The weekly pass must reuse the daily rule, on weekly bars, at 60/40.
+def _rsi_series(step, n):
+    """A zigzag that leaves RSI(14) mid-range, then `n` bars of `step` drift.
 
-    Weekly RSI(14) rarely reaches 30/70 — at 30 the bull side never fired on
-    any real series tested — so the weekly call loosens the bounds while daily
-    keeps the 70/30 that was asked for.
+    `n` picks how far past the threshold the last bar lands, so the same
+    builder gives both the crossing bar and the bar after it.
     """
+    out, price = [], 100.0
+    for i in range(20):
+        price *= 1.01 if i % 2 == 0 else 0.99
+        out.append(price)
+    tail = out[-1]
+    out.extend(tail * step**k for k in range(1, n + 1))
+    return out
+
+
+def _weekly_prod_frame(weekly_closes, *, start="2020-01-06"):
+    """Five identical daily bars per week, so each weekly close is the input."""
+    return _prod_frame([c for c in weekly_closes for _ in range(5)], start=start)
+
+
+# RSI(14) on `_rsi_series`: 68.75 → 72.36 at 5 up bars, 31.40 → 28.01 at 4 down
+# bars. One bar further and the previous bar is already in the zone.
+_CROSS_UP = 1.02, 5
+_PARKED_UP = 1.02, 6
+_CROSS_DOWN = 0.98, 4
+_PARKED_DOWN = 0.98, 5
+
+
+def test_weekly_rsi_delegates_with_weekly_bars(monkeypatch):
+    """The weekly pass reuses the daily rule, on weekly bars, at high severity."""
     captured = {}
 
     def spy(ticker, ohlc, **kwargs):
@@ -233,27 +275,15 @@ def test_weekly_rsi_delegates_with_weekly_bars_and_looser_bounds(monkeypatch):
         captured.update(kwargs)
         return []
 
-    monkeypatch.setattr(reversal, "_rsi_divergence", spy)
+    monkeypatch.setattr(meanrev, "_rsi_extreme", spy)
     daily = _frame(_ramp(100, 300, 600))
-    reversal._weekly_rsi_divergence("AAA", daily)
+    meanrev._weekly_rsi_extreme("AAA", daily)
 
-    assert captured["rsi_high"] == 60.0
-    assert captured["rsi_low"] == 40.0
     assert captured["name_prefix"] == "WEEKLY_"
     assert captured["severity"] == "high"
     # It was handed weekly bars, not the daily frame.
     assert captured["rows"] == len(weekly_bars(daily))
     assert captured["rows"] < len(daily)
-
-
-def test_daily_rsi_keeps_its_own_thresholds():
-    import inspect
-
-    params = inspect.signature(reversal._rsi_divergence).parameters
-    assert params["rsi_high"].default == 70.0
-    assert params["rsi_low"].default == 30.0
-    assert params["name_prefix"].default == ""
-    assert params["severity"].default == "medium"
 
 
 def test_weekly_signals_carry_the_data_week_for_dedup():
@@ -278,7 +308,7 @@ def test_weekly_signals_carry_the_data_week_for_dedup():
 def test_flat_series_fires_nothing():
     flat = [100.0] * 700
     assert breakout._weekly_new_extreme("AAA", _frame(flat)) == []
-    assert reversal._weekly_rsi_divergence("AAA", _frame(flat)) == []
+    assert meanrev._weekly_rsi_extreme("AAA", _frame(flat)) == []
 
 
 def test_every_weekly_pattern_emits_week_ending():
@@ -297,59 +327,69 @@ def test_every_weekly_pattern_emits_week_ending():
             assert signal.snapshot.get("week_ending"), signal.name
 
 
-def test_weekly_rsi_snapshot_extra_reaches_the_signal(monkeypatch):
-    """`_weekly_rsi_divergence` must inject `week_ending` into the snapshot.
+def test_weekly_rsi_snapshot_extra_reaches_the_signal():
+    """A real fire: `_weekly_rsi_extreme` injects the data week into the
+    snapshot, and the prefix and severity survive to the emitted Signal."""
+    frame = _weekly_prod_frame(_rsi_series(*_CROSS_UP))
+    fired = meanrev._weekly_rsi_extreme("AAA", frame)
 
-    Asserted through the delegation contract because the divergence fire
-    conditions are not reachable from a synthetic series.
-    """
-    captured = {}
-
-    def spy(ticker, ohlc, **kwargs):
-        captured.update(kwargs)
-        return []
-
-    monkeypatch.setattr(reversal, "_rsi_divergence", spy)
-    daily = _frame(_ramp(100, 300, 600))
-    reversal._weekly_rsi_divergence("AAA", daily)
-
-    extra = captured.get("snapshot_extra") or {}
-    assert extra.get("week_ending") == weekly_bars(daily).index[-1].date().isoformat()
+    assert [x.name for x in fired] == ["WEEKLY_RSI_OVERBOUGHT"]
+    assert fired[0].severity == "high"
+    assert fired[0].snapshot["week_ending"] == weekly_bars(frame, "AAA").index[-1].date().isoformat()
 
 
-def _divergence_fixture(n: int = 49):
-    """A damped sine on a rising drift, which produces the pivot pair the
-    divergence rule needs. Fires at n=49; the fire window is narrow, so the
-    length matters."""
-    import math
-
-    return [100 + 0.6 * i + 25 * (0.995**i) * math.sin(2 * math.pi * i / 20) for i in range(n)]
-
-
-def test_rsi_divergence_emits_the_prefix_severity_and_snapshot_extra():
-    """A real fire, not a spy: the prefix, severity and merged snapshot all
-    have to survive to the emitted Signal."""
-    fired = reversal._rsi_divergence(
+def test_rsi_extreme_emits_the_prefix_severity_and_snapshot_extra():
+    """The caller-supplied prefix, severity and extra all reach the Signal, and
+    the rule's own snapshot fields survive the merge."""
+    fired = meanrev._rsi_extreme(
         "AAA",
-        _frame(_divergence_fixture()),
-        rsi_high=60.0,
-        rsi_low=40.0,
+        _prod_frame(_rsi_series(*_CROSS_UP)),
         name_prefix="WEEKLY_",
         severity="high",
         snapshot_extra={"week_ending": "2026-09-04"},
     )
-    assert [x.name for x in fired] == ["WEEKLY_RSI_BEAR_DIVERGENCE"]
+    assert [x.name for x in fired] == ["WEEKLY_RSI_OVERBOUGHT"]
     assert fired[0].severity == "high"
     assert fired[0].snapshot["week_ending"] == "2026-09-04"
-    # The rule's own fields survive the merge.
-    assert "rsi_high" in fired[0].snapshot
+    assert "rsi" in fired[0].snapshot
 
 
-def test_rsi_divergence_defaults_emit_no_prefix_and_medium():
-    fired = reversal._rsi_divergence("AAA", _frame(_divergence_fixture()), rsi_high=60.0, rsi_low=40.0)
-    assert [x.name for x in fired] == ["RSI_BEAR_DIVERGENCE"]
+def test_rsi_extreme_defaults_emit_no_prefix_and_medium():
+    fired = meanrev._rsi_extreme("AAA", _prod_frame(_rsi_series(*_CROSS_UP)))
+    assert [x.name for x in fired] == ["RSI_OVERBOUGHT"]
     assert fired[0].severity == "medium"
     assert "week_ending" not in fired[0].snapshot
+
+
+def test_rsi_extreme_fires_on_the_bar_it_crosses_each_threshold():
+    up = _prod_frame(_rsi_series(*_CROSS_UP))
+    down = _prod_frame(_rsi_series(*_CROSS_DOWN))
+
+    fired_up = meanrev._rsi_extreme("AAA", up)
+    assert [x.name for x in fired_up] == ["RSI_OVERBOUGHT"]
+    assert fired_up[0].snapshot["rsi"] >= meanrev.OVERBOUGHT
+    assert fired_up[0].snapshot["rsi_prev"] < meanrev.OVERBOUGHT
+
+    fired_down = meanrev._rsi_extreme("AAA", down)
+    assert [x.name for x in fired_down] == ["RSI_OVERSOLD"]
+    assert fired_down[0].snapshot["rsi"] <= meanrev.OVERSOLD
+    assert fired_down[0].snapshot["rsi_prev"] > meanrev.OVERSOLD
+
+
+def test_rsi_already_in_the_zone_on_the_previous_bar_does_not_refire():
+    """`lookback=1`: a name parked past the threshold fires once, on the
+    crossing, not on every bar it stays there."""
+    for step, n in (_PARKED_UP, _PARKED_DOWN):
+        frame = _prod_frame(_rsi_series(step, n))
+        assert meanrev._rsi_extreme("AAA", frame) == [], (step, n)
+
+
+def test_the_trigger_bar_is_the_crossing_bar():
+    """Read off `frame.index` instead of the `time` column and this is None on
+    every production frame, which silently unkeys the dedup."""
+    frame = _prod_frame(_rsi_series(*_CROSS_UP))
+    fired = meanrev._rsi_extreme("AAA", frame)
+    assert fired[0].snapshot["trigger_bar"] == frame["time"].iloc[-1].date().isoformat()
 
 
 def test_weekly_volume_dryup_carries_the_data_week():
@@ -534,15 +574,15 @@ def test_holiday_week_survives_end_to_end_through_a_detector():
         ("breakout", lambda m: m._weekly_new_extreme("005930.KS", _krx_frame())),
         ("breakout", lambda m: m._weekly_volume_dryup_signal("005930.KS", _krx_frame())),
         ("breakout", lambda m: m.detect_weekly_volume_dryup(_krx_frame(), ticker="005930.KS")),
-        ("reversal", lambda m: m._weekly_rsi_divergence("005930.KS", _krx_frame())),
+        ("meanrev", lambda m: m._weekly_rsi_extreme("005930.KS", _krx_frame())),
         ("trend", lambda m: m._ma_cross_grid("005930.KS", _krx_frame())),
     ],
 )
 def test_every_weekly_entry_point_forwards_the_ticker(monkeypatch, module_name, call):
     """`weekly_bars` needs the ticker to pick the right session calendar."""
-    from TerraFin.analytics.analysis.patterns import breakout, reversal, trend
+    from TerraFin.analytics.analysis.patterns import breakout, meanrev, trend
 
-    module = {"breakout": breakout, "reversal": reversal, "trend": trend}[module_name]
+    module = {"breakout": breakout, "meanrev": meanrev, "trend": trend}[module_name]
     seen = []
     real = weekly_bars
 
@@ -557,31 +597,20 @@ def test_every_weekly_entry_point_forwards_the_ticker(monkeypatch, module_name, 
     assert all(t == "005930.KS" for t in seen), seen
 
 
-def _bull_divergence_fixture(n: int = 48):
-    """Mirror of `_divergence_fixture` tuned to fire the BULL branch.
-
-    The two branches build their snapshots independently, so the bear fixture
-    does not exercise the bull one.
-    """
-    import math
-
-    return [max(1.0, 200 - 0.5 * i + 20 * (0.995**i) * math.sin(2 * math.pi * i / 16)) for i in range(n)]
-
-
-def test_bull_branch_also_merges_snapshot_extra():
-    fired = reversal._rsi_divergence(
+def test_the_oversold_branch_also_merges_snapshot_extra():
+    """The two branches emit independently, so the overbought fixture does not
+    exercise this one."""
+    fired = meanrev._rsi_extreme(
         "AAA",
-        _frame(_bull_divergence_fixture()),
-        rsi_high=60.0,
-        rsi_low=40.0,
+        _prod_frame(_rsi_series(*_CROSS_DOWN)),
         name_prefix="WEEKLY_",
         severity="high",
         snapshot_extra={"week_ending": "2026-09-04"},
     )
-    assert [x.name for x in fired] == ["WEEKLY_RSI_BULL_DIVERGENCE"]
+    assert [x.name for x in fired] == ["WEEKLY_RSI_OVERSOLD"]
     assert fired[0].severity == "high"
     assert fired[0].snapshot["week_ending"] == "2026-09-04"
-    assert "rsi_low" in fired[0].snapshot
+    assert "rsi" in fired[0].snapshot
 
 
 def test_weekly_new_high_does_not_refire_while_the_close_ties_the_max():
@@ -625,15 +654,15 @@ def test_evaluate_emits_the_weekly_breakout_and_rsi_families():
     names = {s.name for s in evaluate("AAA", advance)}
     assert "WEEKLY_NEW_HIGH" in names
 
-    # The reversal school is asserted separately, via the delegation tests
-    # below — a natural weekly-RSI fire is not reachable from a ramp.
+    # A steady ramp never crosses into an RSI extreme, so the meanrev school is
+    # asserted separately by the wiring test below.
 
 
 def test_evaluate_reaches_the_weekly_rsi_leg(monkeypatch):
-    from TerraFin.analytics.analysis.patterns import evaluate, reversal
+    from TerraFin.analytics.analysis.patterns import evaluate, meanrev
 
     called = []
-    monkeypatch.setattr(reversal, "_weekly_rsi_divergence", lambda t, o: called.append(t) or [])
+    monkeypatch.setattr(meanrev, "_weekly_rsi_extreme", lambda t, o: called.append(t) or [])
     evaluate("AAA", _frame(_ramp(100, 200, 400)))
     assert called == ["AAA"]
 
