@@ -14,6 +14,7 @@ from threading import Event, RLock, Thread
 from typing import TYPE_CHECKING, Any, Mapping
 from uuid import uuid4
 
+
 if TYPE_CHECKING:
     from ..service import TerraFinAgentService
 
@@ -33,7 +34,7 @@ from ..storage.session_store import (
     TerraFinHostedSessionRecord,
     TerraFinHostedViewContextRecord,
 )
-from ..storage.transcript_store import HostedTranscriptStore
+from ..storage.transcript_store import HostedTranscriptStore, session_tag
 from .async_tasks import _AsyncTaskHandle
 from .capability import TerraFinCapability, TerraFinCapabilityRegistry, build_default_capability_registry
 from .context import TerraFinAgentContext, create_agent_context
@@ -272,6 +273,8 @@ class TerraFinHostedAgentRuntime:
                 session_id=session.session_id,
                 agent_name=definition.name,
                 created_at=record.created_at,
+                origin=session_tag(session.metadata, "origin"),
+                parent_session_id=session_tag(session.metadata, "parentSessionId"),
                 runtime_model=session.metadata.get(RUNTIME_MODEL_METADATA_KEY),
             )
         return context
@@ -536,6 +539,7 @@ class TerraFinHostedAgentRuntime:
         /,
         *,
         description: str | None = None,
+        origin_tool_call_id: str | None = None,
         **kwargs: Any,
     ) -> TerraFinTaskRecord:
         record = self.get_session_record(session_id)
@@ -561,6 +565,7 @@ class TerraFinHostedAgentRuntime:
             description=description or capability_name.replace("_", " "),
             session_id=session_id,
             input_payload=resolved_kwargs,
+            origin_tool_call_id=origin_tool_call_id,
         )
         self._index_task(task.task_id, session_id)
         self.session_store.persist(record)
@@ -765,37 +770,91 @@ class TerraFinHostedAgentRuntime:
 
         if cancel_event.is_set():
             record.context.task_registry.cancel(task_id, reason="Task cancelled before execution.")
-            self.session_store.persist(record)
+            self._persist_task_record(record)
             self._drop_task_handle(task_id)
             return
 
         task = record.context.task_registry.get(task_id)
         kwargs = dict(task.input_payload)
+
+        def _report_progress(stage: str) -> None:
+            # Best-effort mid-run progress: surfaces `task.progress.stage` to the
+            # widget AND renews the lease so a long-running task (deep_research
+            # can take minutes) is not re-claimed by another worker mid-flight.
+            # A progress-write failure must never fail the task itself.
+            try:
+                lease_expires_at = _utc_now() + timedelta(seconds=self.task_lease_seconds)
+                record.context.task_registry.record_progress(
+                    task_id,
+                    progress={"stage": stage},
+                    lease_expires_at=lease_expires_at,
+                )
+                self._persist_task_record(record)
+            except Exception:
+                pass
+
         try:
-            result = record.context.call(capability_name, **kwargs)
+            result = record.context.call(capability_name, progress_reporter=_report_progress, **kwargs)
         except Exception as exc:
             if cancel_event.is_set():
                 record.context.task_registry.cancel(task_id, reason="Cancellation requested.")
             else:
                 record.context.task_registry.fail(task_id, error=str(exc))
-            self.session_store.persist(record)
+            self._persist_task_record(record)
             self._drop_task_handle(task_id)
             return
 
         if cancel_event.is_set():
             record.context.task_registry.cancel(task_id, reason="Cancellation requested.")
-            self.session_store.persist(record)
+            self._persist_task_record(record)
             self._drop_task_handle(task_id)
             return
         latest_task = self.session_store.get(session_id).context.task_registry.get(task_id)
         if latest_task.status == "cancelled":
             record.context.task_registry.cancel(task_id, reason=latest_task.error or "Cancellation requested.")
-            self.session_store.persist(record)
+            self._persist_task_record(record)
             self._drop_task_handle(task_id)
             return
+        # Best-effort at-most-once delivery: only the worker that observes the
+        # task as non-terminal here records a pending-completion marker. This
+        # rides on the task layer's at-least-once semantics — a lease-expiry
+        # re-claim could still, rarely, double-run and double-deliver.
+        already_terminal = latest_task.status in {"completed", "failed"}
         record.context.task_registry.complete(task_id, result=result, progress={"state": "completed"})
-        self.session_store.persist(record)
+        self._persist_task_record(record)
+        if not already_terminal:
+            self._record_pending_completion(session_id, task=task, result=result)
         self._drop_task_handle(task_id)
+
+    def _record_pending_completion(
+        self,
+        session_id: str,
+        *,
+        task: TerraFinTaskRecord,
+        result: Mapping[str, Any] | None,
+    ) -> None:
+        # Deferred delivery: stash the completed task's report on the SESSION
+        # record so the next `submit_user_message` can drain it into the
+        # transcript. No model turn runs here. If the session was deleted or
+        # archived between task start and completion, drop the marker quietly.
+        marker = {
+            "taskId": task.task_id,
+            "originToolCallId": task.origin_tool_call_id,
+            "capabilityName": task.capability_name,
+            "inputPayload": dict(task.input_payload),
+            "result": None if result is None else dict(result),
+            "completedAt": _utc_now().isoformat(),
+        }
+        try:
+            self.session_store.append_pending_completion(session_id, marker=marker)
+        except KeyError:
+            return
+
+    def _persist_task_record(self, record: TerraFinHostedSessionRecord) -> None:
+        # Pending-completion markers live in a dedicated store table, isolated
+        # from the record payload, so persisting the whole record can no longer
+        # clobber a marker a sibling task wrote during this run.
+        self.session_store.persist(record)
 
     def _enforce_policy(
         self,

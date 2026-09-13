@@ -73,6 +73,22 @@ Transcript events are append-only and currently include:
 - `custom_title`
 - `compact_boundary`
 
+`session_header` carries `agentName`, plus `origin` and `parentSessionId` when
+the creator supplied them in session metadata:
+
+| `origin` | Who created the session |
+|---|---|
+| `dashboard` | a person typing in the browser widget |
+| `pipeline` | a batch stage calling the agent as an LLM |
+| `guru` | a hidden worker spawned by a turn; also carries `parentSessionId` |
+
+The names live in `agent/storage/transcript_store.py` (`SESSION_ORIGIN_*`).
+An absent `origin` means unknown, which covers the CLI and every transcript
+written before the field existed; an unrecognised one is recorded and logged at
+warning level. A corpus reader gets both fields from the file's first line, and
+`parentSessionId` is what makes a turn and its hidden workers one tree — the
+session record also holds them, but the idle sweep deletes it.
+
 `message` events now carry structured internal content blocks as well as the
 public `role/content` shape. In practice that means TerraFin can persist:
 
@@ -257,3 +273,67 @@ npm run build
 - [usage.md](./usage.md)
 - [architecture.md](./architecture.md)
 - [../interface.md](../interface.md)
+
+## Background-task completion delivery
+
+A `background_only` capability (today: `deep_research`) is never exposed to the
+model as a synchronous tool -- only `start_<cap>_task` is. The model kicks the
+task off and keeps talking; the result arrives later. "Later" needs machinery,
+because no model turn is running when the task finishes.
+
+The path, end to end:
+
+1. `runtime.start_task(..., origin_tool_call_id=...)` records which tool call
+   started the task, so a completion can be traced back to its request.
+2. The worker passes a `progress` reporter into the capability handler (injected
+   only for handlers that declare the parameter). Each call records
+   `task.progress.stage` **and renews the lease**, so a run taking minutes is not
+   re-claimed mid-flight by another worker.
+3. On completion the worker writes a marker to `hosted_pending_completions` -- a
+   dedicated table, not part of the session payload. That isolation matters: an
+   unrelated whole-record `persist()` would otherwise clobber a marker a sibling
+   task had just written. `(session_id, task_id)` is the primary key, so a
+   double-run collapses to one marker via `INSERT OR IGNORE`.
+4. On the user's next `submit_user_message`, the loop drains pending completions
+   BEFORE the model sees the turn, appending each as a `user`-role message
+   flagged `internalOnly`.
+
+Two details are load-bearing:
+
+- **Why a user-role message, not a synthesized tool_use/tool_result pair.** A
+  user message is forwarded verbatim by every provider adapter. OpenAI Responses
+  drops assistant/tool_use turns and sends only user messages plus
+  `function_call_output`; a fabricated `function_call_output` with no matching
+  server-side `function_call` is rejected with HTTP 400.
+- **Peek-then-clear.** A marker is deleted only AFTER its delivery message is
+  appended. A mid-drain failure leaves the marker intact for the next turn, so a
+  completion is never silently lost. Delivery is deduped twice: by the store's
+  primary key, and by scanning the transcript for an already-delivered `taskId`.
+
+Delivery is **at-most-once on a best-effort basis, not guaranteed**. It rides on
+the task layer's at-least-once semantics, so a lease-expiry re-claim can still,
+rarely, double-run and double-deliver.
+
+## Verification as a tool
+
+`verify_claims` is the one capability that checks rather than fetches. It exists
+because a gate that runs after generation can only delete a wrong number, never
+correct it -- so on its own it can only lower answer quality. Exposed as a tool,
+the same rules become an acceptance control the model iterates against: draft,
+verify, read the repair hint, resubmit.
+
+It is self-contained -- `source_text` in, verdicts out -- so it needs no session
+state and works identically in-process, over `/agent/api/verify-claims`, and from
+an external agent consuming `skills/terrafin/SKILL.md`.
+
+Grounding is per `(line item, period)`, never per table. A whole-table citation
+launders every figure inside it: the prose scan admits any number appearing in a
+verified quote, so net income passes as capital expenditure. `facts.py` exists to
+make the line item itself the thing that must match, and
+`tests/agent/test_deepresearch_facts.py` pins that difference.
+
+Multi-step arithmetic is expressed by NESTING a derivation inside an operand,
+with `avg` for a mean -- return on assets is
+`margin_pct(net_income, avg(assets_t, assets_t-1))`. Dividing by a literal `2` is
+rejected on purpose: the literal has no citation, and admitting uncited literals
+would open a hole big enough to drive any number through.

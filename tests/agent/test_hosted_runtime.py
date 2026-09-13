@@ -516,3 +516,51 @@ def test_transcript_first_runtime_ignores_legacy_blob_only_sessions(tmp_path) ->
     assert runtime.list_sessions() == ()
     with pytest.raises(KeyError):
         runtime.get_session_record(context.session.session_id)
+
+
+def _header(transcript_root: Path, session_id: str) -> dict:
+    import json
+
+    path = transcript_root / "sessions" / f"{session_id}.jsonl"
+    return json.loads(path.read_text(encoding="utf-8").splitlines()[0])["payload"]
+
+
+def test_the_transcript_header_records_who_started_the_session(tmp_path) -> None:
+    """A corpus reader has only the file. The session record carries `origin`
+    too, but the idle sweep deletes it, so the header is the copy that lasts.
+    """
+    root = tmp_path / "transcripts"
+    runtime = _runtime(transcript_root=root)
+
+    runtime.create_session(DEFAULT_HOSTED_AGENT_NAME, session_id="hosted:person", metadata={"origin": "dashboard"})
+    runtime.create_session(DEFAULT_HOSTED_AGENT_NAME, session_id="hosted:job", metadata={"origin": "pipeline"})
+    runtime.create_session(DEFAULT_HOSTED_AGENT_NAME, session_id="hosted:untagged")
+
+    assert _header(root, "hosted:person")["origin"] == "dashboard"
+    assert _header(root, "hosted:job")["origin"] == "pipeline"
+    assert "origin" not in _header(root, "hosted:untagged"), (
+        "an untagged caller must leave the field absent rather than claim an origin"
+    )
+
+
+def test_a_sub_session_header_names_the_conversation_that_spawned_it(tmp_path) -> None:
+    """Without this the guru worker's transcript is an orphan file: its parent
+    link lived only in the session record, which the idle sweep deletes.
+    """
+    root = tmp_path / "transcripts"
+    runtime = _runtime(
+        agent_registry=build_default_agent_definition_registry(include_gurus=True),
+        transcript_root=root,
+    )
+
+    runtime.create_session(DEFAULT_HOSTED_AGENT_NAME, session_id="hosted:parent", metadata={"origin": "dashboard"})
+    runtime.create_internal_session(
+        "warren-buffett",
+        session_id="hosted:worker",
+        metadata={"origin": "guru", "parentSessionId": "hosted:parent"},
+    )
+
+    worker = _header(root, "hosted:worker")
+    assert worker["origin"] == "guru"
+    assert worker["parentSessionId"] == "hosted:parent"
+    assert "parentSessionId" not in _header(root, "hosted:parent"), "a root conversation has no parent"

@@ -33,6 +33,32 @@ TranscriptEventType = Literal[
 ]
 
 
+# `session_header.origin`: a person in the widget, a batch stage calling the
+# agent as an LLM, or a hidden worker spawned by a turn. An untagged session
+# leaves the field absent, which reads as unknown.
+SESSION_ORIGIN_DASHBOARD = "dashboard"
+SESSION_ORIGIN_PIPELINE = "pipeline"
+SESSION_ORIGIN_GURU = "guru"
+KNOWN_SESSION_ORIGINS = frozenset(
+    {SESSION_ORIGIN_DASHBOARD, SESSION_ORIGIN_PIPELINE, SESSION_ORIGIN_GURU}
+)
+
+
+def session_tag(metadata: Mapping[str, Any] | None, key: str) -> str | None:
+    """Read one provenance tag out of session metadata. Unknown origins are
+    recorded, not dropped, so a fourth spelling is visible rather than silent."""
+    value = (metadata or {}).get(key)
+    if not isinstance(value, str) or not value:
+        return None
+    if key == "origin" and value not in KNOWN_SESSION_ORIGINS:
+        _logger.warning(
+            "Recording unknown session origin %r; known origins are %s",
+            value,
+            ", ".join(sorted(KNOWN_SESSION_ORIGINS)),
+        )
+    return value
+
+
 def _utc_now() -> datetime:
     return datetime.now(UTC)
 
@@ -445,9 +471,17 @@ class HostedTranscriptStore:
         session_id: str,
         agent_name: str,
         created_at: datetime,
+        origin: str | None = None,
+        parent_session_id: str | None = None,
         runtime_model: dict[str, Any] | None = None,
         system_message: TerraFinConversationMessage | None = None,
     ) -> HostedSessionIndexEntry:
+        """Open a transcript.
+
+        `origin` and `parent_session_id` go in the header rather than only in
+        the session record, which the idle sweep deletes: a corpus reader has
+        the file and nothing else.
+        """
         with self.lock.session(session_id):
             with self.lock.index() as locked:
                 index = self._load_index_unlocked()
@@ -459,7 +493,11 @@ class HostedTranscriptStore:
                         session_id=session_id,
                         event_type="session_header",
                         created_at=created_at,
-                        payload={"agentName": agent_name},
+                        payload={
+                            "agentName": agent_name,
+                            **({"origin": origin} if origin else {}),
+                            **({"parentSessionId": parent_session_id} if parent_session_id else {}),
+                        },
                     )
                 ]
                 if runtime_model is not None:

@@ -18,6 +18,7 @@ from ..contracts.conversation import (
 )
 from ..contracts.conversation_state import record_tool_call_history
 from ..runtime.recovery import RecoveryTracker
+from ..storage.transcript_store import SESSION_ORIGIN_GURU
 from ..tools import TerraFinToolDefinition
 from .feedback import _is_broad_market_request, _normalize_text, _persona_fit_feedback
 from .memo import (
@@ -50,6 +51,7 @@ def _run_guru_research_memo(
     """Run one hidden guru worker and require a structured memo tool call."""
     parent_record = loop.runtime.get_session_record(parent_session_id)
     session_metadata = {
+        "origin": SESSION_ORIGIN_GURU,
         "hiddenInternal": True,
         "disableGuruRouting": True,
         "parentSessionId": parent_session_id,

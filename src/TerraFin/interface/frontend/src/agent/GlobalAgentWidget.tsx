@@ -1361,6 +1361,9 @@ const GlobalAgentWidget: React.FC = () => {
           body: JSON.stringify({
             agentName,
             metadata: {
+              // Recorded in the transcript header: this session is a person
+              // typing, not a pipeline using the agent as an LLM.
+              origin: 'dashboard',
               viewContextId: getAgentViewContextId(),
             },
           }),
