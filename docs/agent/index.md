@@ -28,6 +28,7 @@ TerraFin's agent surface has three separate jobs:
 
 | Doc | Read this when... |
 |-----|-------------------|
+| [For External Agents](external-agents.md) | **Your own agent is calling TerraFin** — skill install, base URL, capability discovery, finding a series by name |
 | [Usage](usage.md) | You want Python, CLI, HTTP, OpenAPI, or widget usage |
 | [Model Management](models.md) | You want to inspect providers, save credentials, or switch hosted models |
 | [Architecture](architecture.md) | You are designing the shared capability layer or provider routing |
@@ -52,12 +53,12 @@ straight:
 |---|---|
 | **TerraFin Agent** | The hosted runtime + browser chat panel that ships with TerraFin (Mode A). Singular product surface. |
 | **TerraFin Agent runtime** | The Python-side machinery that powers the Agent: capability registry, tool loop, session/task state, model routing. Lives in `src/TerraFin/agent/`. |
-| **Capability** | A single agent-callable function (e.g., `valuation`, `fcf_history`, `sec_filings`). Each capability is exposed identically through Python (`TerraFinAgentClient`), CLI (`terrafin-agent`), and HTTP (`/agent/api/*`). 30 in total. |
+| **Capability** | A single agent-callable function (e.g., `valuation`, `fcf_history`, `sec_filings`). Registered in `src/TerraFin/agent/runtime/capability.py`; `terrafin-agent capabilities` prints the live set as JSON with a `count`. HTTP (`/agent/api/*`) is the widest surface; Python (`TerraFinAgentClient`) and CLI (`terrafin-agent`) expose a smaller subset under the same names. `curl $TF/openapi.json` is the authority on what exists. |
 | **Tool** | The model-facing wrapper around a Capability, with input schema validation and an LLM-readable description. Defined in `src/TerraFin/agent/contracts/tool_contracts.py` (registry) + `src/TerraFin/agent/runtime/capability.py` (capability registration). The top-level `agent/tool_contracts.py` is a compatibility shim. |
 | **Skill** | An Anthropic-Skills-shaped artifact (`skills/terrafin/SKILL.md`) that lets external agents like Claude Code or Codex consume TerraFin (Mode B). The agent reads SKILL.md and self-registers TerraFin's capabilities by introspecting the documented Python / CLI / HTTP surfaces — no provider-specific manifest required. Drop-in install. |
 | **`TerraFinAgentClient`** | The Python client for stateless capability calls. The skill examples use it. Direct import — no server required. |
 | **`terrafin-agent`** | The CLI counterpart — same capabilities, shell-friendly. Registered as a `[project.scripts]` entry. |
-| **`/agent/api/*`** | The HTTP parity surface. Every Capability has a route. External HTTP-only agents and SDK consumers use this. |
+| **`/agent/api/*`** | The HTTP surface — nearly every capability has a route here; the exceptions are the hosted-runtime tools below. `curl $TF/openapi.json` enumerates them. External HTTP-only agents and SDK consumers use this. |
 | **Hosted runtime tools** | Capabilities that only make sense inside a live session (e.g., `current_view_context()` reads the user's frontend panel state; `open_chart(...)` creates a chart artifact bound to the session). Not exposed as stateless HTTP routes. |
 | **Persona** | A named investing-archetype subagent (Buffett, Marks, Druckenmiller). Allowlists are defined in `src/TerraFin/agent/guru/personas/*.yaml` and are the **single source of truth** — no hidden override layer. (`agent/personas/` is a compatibility shim that re-exports `agent.guru.personas`.) |
 | **Orchestrator-as-tool** | The default assistant LLM consults persona subagents via `consult_<persona>` tools rather than via a regex pre-route. The persona's research memo is then synthesized back into the user-facing answer. |

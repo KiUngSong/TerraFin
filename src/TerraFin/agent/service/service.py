@@ -140,6 +140,31 @@ class TerraFinAgentService:
         )
         return payload
 
+    def indicator_search(self, query: str, *, limit: int = 10) -> dict[str, Any]:
+        """Find indicators by substring, over both symbol and description.
+
+        The step before every series call: `resolve` only matches a name you
+        already know exactly and answers an unknown string with a stock guess,
+        so this is what turns "the 10-year yield" into `Treasury-10Y`. Feed a
+        match's `symbol` to `market_data`.
+        """
+        from TerraFin.data.factory import DataFactory
+
+        matches = DataFactory().search_indicators(query, limit=limit)
+        return {
+            "query": query,
+            "count": len(matches),
+            "matches": [
+                {"symbol": m.symbol, "name": m.name, "group": m.group} for m in matches
+            ],
+            "processing": _full_processing(
+                requested_depth="full",
+                source_version="indicator-catalog",
+                view=None,
+                frame=None,
+            ),
+        }
+
     def market_data(self, name: str, *, depth: str = "auto", view: str = "daily") -> dict[str, Any]:
         payload = self._market_series(name, depth=depth, view=view)
         series = payload["series"]

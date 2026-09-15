@@ -233,7 +233,9 @@ When touching hosted runtime code, the highest-signal regression surfaces are:
 - session reopen/history summaries derived from transcript + index
 - session delete/archive behavior
 - response parsing from each provider
-- semantic parity across Python, CLI, and HTTP
+- semantic agreement between the surfaces a capability does expose: HTTP
+  reaches nearly all of them, while the Python client and CLI expose a smaller
+  subset under the same names and arguments
 - widget integration over `/agent/api/runtime/*`
 
 Current tests:
@@ -276,8 +278,9 @@ npm run build
 
 ## Background-task completion delivery
 
-A `background_only` capability (today: `deep_research`) is never exposed to the
-model as a synchronous tool -- only `start_<cap>_task` is. The model kicks the
+A capability registered with `background_only=True` is never exposed to the
+model as a synchronous tool -- only `start_<cap>_task` is. Which capabilities
+set it is a property of the registry, not of this document. The model kicks the
 task off and keeps talking; the result arrives later. "Later" needs machinery,
 because no model turn is running when the task finishes.
 

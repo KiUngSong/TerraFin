@@ -6,8 +6,6 @@ repo_name: KiUngSong/TerraFin
 edit_uri: edit/main/docs/
 docs_dir: docs
 site_dir: site
-exclude_docs: |
-  agent/README.md
 
 theme:
   name: material
@@ -86,10 +84,11 @@ nav:
       - Deployment & Operations: deployment.md
   - Agent Docs:
       - Overview: agent/index.md
+      - For External Agents: agent/external-agents.md
       - Usage: agent/usage.md
-      - Model Management: agent/models.md
       - Architecture: agent/architecture.md
       - Hosted Runtime: agent/hosted-runtime.md
+      - Model Management: agent/models.md
   - Product Guides:
       - Interface Overview: interface.md
       - API Reference: api-reference.md

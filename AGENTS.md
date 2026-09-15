@@ -26,9 +26,11 @@ TerraFin"):
 
 - Read [README.md](./README.md) for project shape, install, and the main documentation map.
 - Read [skills/terrafin/SKILL.md](./skills/terrafin/SKILL.md) for the
-  authoritative list of agent-callable capabilities (30 tools — count is
-  auto-generated; run `python scripts/generate-agent-artefacts.py` after
-  adding capabilities to keep SKILL.md and this count in sync).
+  agent-callable capabilities. Its `## Capability inventory` section is
+  generated from the registry — run `python scripts/generate-agent-artefacts.py`
+  after adding a capability, and `--check` fails the build when it is stale.
+  `terrafin-agent capabilities` prints the live set with a count; no file
+  states that number in prose, because nothing would keep it true.
 
 ### External HTTP entry point
 
@@ -45,12 +47,20 @@ matches the running server.
 
 ## Capability surface (current)
 
-All of these have parity Python (`TerraFinAgentClient`), CLI
-(`terrafin-agent`), and HTTP (`/agent/api/*`) surfaces:
+HTTP (`/agent/api/*`) is the widest surface — nearly every capability has a
+route there. The Python client (`TerraFinAgentClient`) and CLI
+(`terrafin-agent`) expose a smaller subset under the same names, so check
+before assuming a method exists: `curl $TF/openapi.json` is the authority.
+
+The grouping below is a rough map of the territory, not an inventory. It is
+hand-written, it already omits capabilities that exist today, and it will lag
+the registry further. `terrafin-agent capabilities` is the inventory; use it
+before concluding that something is absent.
 
 - **Data + chart**: `resolve`, `market_data`, `indicators`,
-  `market_snapshot`, `company_info`, `earnings`, `financials`, `portfolio`,
-  `economic`, `macro_focus`, `lppl_analysis`, `calendar_events`
+  `indicator_search`, `market_snapshot`, `company_info`, `earnings`,
+  `financials`, `portfolio`, `economic`, `macro_focus`, `lppl_analysis`,
+  `calendar_events`
 - **Valuation + fundamentals**: `valuation` (DCF — supports
   `projection_years`, `fcf_base_source`, and turnaround mode via
   `breakeven_year` / `breakeven_cash_flow_per_share` /
@@ -95,7 +105,10 @@ re-exports `agent.guru.personas`.)
 Start with:
 
 - [skills/terrafin/SKILL.md](./skills/terrafin/SKILL.md) — install recipe at
-  the top (one-shot `cp -r skills/terrafin ~/.claude/skills/`).
+  the top. Install with `./setup` (add `--host claude|codex|opencode` to narrow
+  it); it symlinks the host's skill directory at this checkout, so a `git pull`
+  here upgrades every host at once. Do not `cp` the directory — a copy stops
+  tracking the code it documents and drifts from the API it describes.
 - [docs/agent/usage.md](./docs/agent/usage.md)
 
 Use these when the goal is to consume TerraFin through:
@@ -125,9 +138,13 @@ When you add a new capability:
    `response_model_name` so downstream artefacts can derive accurate metadata.
 2. Add the tool input schema in `src/TerraFin/agent/contracts/tool_contracts.py`
    (`HOSTED_TOOL_CONTRACTS`).
-3. Add a parity HTTP route to
+3. Add the HTTP route to
    `src/TerraFin/interface/agent/data_routes.py` (the `http_route_path` you
-   declared above).
+   declared above). Skip it only for a capability that genuinely cannot work
+   outside a live session; then say why in the registration comment **and** add
+   the name to `CAPABILITIES_WITHOUT_ROUTE` in
+   `tests/agent/test_capability_parity.py`, which otherwise fails the build with
+   `capabilities missing http_route_path`.
 4. Add the recipe / worked example to
    [skills/terrafin/SKILL.md](./skills/terrafin/SKILL.md) — recipe sections
    stay hand-edited. Also add a row to the "If you want to do X" table in
@@ -135,7 +152,7 @@ When you add a new capability:
 5. Update the relevant persona YAML in
    `src/TerraFin/agent/guru/personas/` if it should be persona-callable.
 6. Run `python scripts/generate-agent-artefacts.py` to refresh the
-   sentinel-bounded "Key client methods" list in SKILL.md and the "Route
+   sentinel-bounded "Capability inventory" list in SKILL.md and the "Route
    summary" table in `docs/agent/usage.md`. The `package-smoke` CI job runs
    `--check` mode and fails if artefacts are stale. Verify locally with
    `terrafin-agent capabilities --name <new-cap>`.

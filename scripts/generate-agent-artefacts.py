@@ -2,8 +2,8 @@
 
 The capability list lives in `src/TerraFin/agent/runtime/capability.py` (the
 `build_default_capability_registry()` function). All downstream artefacts
-that mirror the public agent surface — `skills/terrafin/SKILL.md`'s "Key
-client methods" section and `docs/agent/usage.md`'s "Route summary" —
+that mirror the public agent surface — `skills/terrafin/SKILL.md`'s
+"Capability inventory" section and `docs/agent/usage.md`'s "Route summary" —
 should be derived from that single source. This script does the derivation.
 
 Usage:
@@ -82,11 +82,11 @@ def _load_capabilities() -> list[dict[str, Any]]:
 
 
 def render_skill_capability_list(caps: list[dict[str, Any]]) -> str:
-    """Render the SKILL.md "Key client methods" section.
+    """Render the SKILL.md "Capability inventory" section.
 
-    Splits into two sub-lists (stateless HTTP-parity vs hosted-runtime-only)
-    so the existing "every capability has a parity HTTP route" claim stays
-    accurate even when a future capability is hosted-only.
+    Splits into two sub-lists by whether the capability has an HTTP route, so
+    the docs can name the exceptions from the registry instead of asserting a
+    count that nothing keeps true.
     """
     stateless = [c for c in caps if c.get("http_route_path")]
     hosted_only = [c for c in caps if not c.get("http_route_path")]
@@ -123,6 +123,7 @@ USAGE_CATEGORIES: list[tuple[str, set[str]]] = [
         "Data + chart",
         {
             "resolve",
+            "indicator_search",
             "market_data",
             "indicators",
             "market_snapshot",

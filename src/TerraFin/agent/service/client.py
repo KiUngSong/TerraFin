@@ -306,6 +306,17 @@ class TerraFinAgentClient:
             return self._service_call("resolve", query)
         return self._http_get("/agent/api/resolve", params={"q": query})
 
+    def indicator_search(self, query: str, *, limit: int = 10) -> dict[str, Any]:
+        """Find what a market or macro series is called in this catalog.
+
+        Use before `market_data` whenever the exact name is unknown: `resolve`
+        matches exact names only and answers an unrecognised string with a
+        stock guess rather than a miss.
+        """
+        if self._resolved_transport() == "python":
+            return self._service_call("indicator_search", query, limit=limit)
+        return self._http_get("/agent/api/indicator-search", params={"q": query, "limit": limit})
+
     def market_data(self, name: str, *, depth: str = "auto", view: str = "daily") -> dict[str, Any]:
         if self._resolved_transport() == "python":
             return self._service_call("market_data", name, depth=depth, view=view)

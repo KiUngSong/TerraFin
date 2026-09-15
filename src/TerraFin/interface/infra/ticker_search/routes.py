@@ -49,21 +49,25 @@ def _build_indicator_entries() -> list[dict[str, Any]]:
     fetches via the private cape series). The wrappers are the canonical
     chart-UI entry points; the underlying source layer is not surfaced.
     """
-    from TerraFin.data.providers.economic import indicator_registry
-    from TerraFin.data.providers.market import INDEX_DESCRIPTIONS, INDEX_MAP, MARKET_INDICATOR_REGISTRY
+    from TerraFin.data.factory import DataFactory
     from TerraFin.interface.pages.chart.custom_indicators import load_custom_indicators
 
-    out: list[dict[str, Any]] = []
-    for name in INDEX_MAP:
-        out.append({"symbol": name, "name": INDEX_DESCRIPTIONS.get(name, name), "group": "Index"})
-    for name, ind in MARKET_INDICATOR_REGISTRY.items():
-        out.append({"symbol": name, "name": ind.description or name, "group": "Market"})
+    # The data-layer registries come through the facade so this route and an
+    # agent calling `DataFactory.search_indicators` cannot drift apart.
+    rows = DataFactory().list_indicators()
+    out: list[dict[str, Any]] = [
+        {"symbol": r.symbol, "name": r.name, "group": r.group}
+        for r in rows if r.group in ("Index", "Market")
+    ]
     # Custom declarative indicators (band/line specs) — same chart-UI surface,
-    # spec-driven registry; each spec carries its own catalog group.
+    # spec-driven registry; each spec carries its own catalog group. They are
+    # registered here in the interface layer, so the facade does not see them.
     for name, spec in load_custom_indicators().items():
         out.append({"symbol": name, "name": spec.description or name, "group": spec.group})
-    for name, ind in indicator_registry._indicators.items():
-        out.append({"symbol": name, "name": ind.description or name, "group": "Economic"})
+    out.extend(
+        {"symbol": r.symbol, "name": r.name, "group": r.group}
+        for r in rows if r.group == "Economic"
+    )
     return out
 
 

@@ -4,10 +4,11 @@ title: TerraFin Docs
 
 # TerraFin
 
-An **agent-friendly** financial-research toolkit: 30 capabilities (DCF with
-turnaround mode, reverse DCF, FCF history, SEC filings TOC + section bodies,
-sentiment widgets, market breadth, guru portfolios, view-context reader)
-callable from Claude Code, Codex, opencode, or TerraFin's own hosted agent.
+An **agent-friendly** financial-research toolkit: DCF with turnaround mode,
+reverse DCF, FCF history, SEC filings TOC + section bodies, sentiment widgets,
+market breadth, guru portfolios and a view-context reader, all callable from
+Claude Code, Codex, opencode, or TerraFin's own hosted agent. The
+[route summary](agent/usage.md) lists every capability reachable over HTTP.
 
 ```bash
 git clone https://github.com/KiUngSong/TerraFin
@@ -51,7 +52,8 @@ symlink-based, so `git pull` upgrades every host at once.
     into your agent's skill folder (or let `./setup` above do it) and
     TerraFin's full capability surface becomes callable from any
     Anthropic-Skills-compatible agent. External agents can also hit
-    `/agent/api/*` over HTTP directly.
+    `/agent/api/*` over HTTP directly — see
+    [For External Agents](agent/external-agents.md).
 
     ```bash
     ./setup --host claude    # or codex, opencode, auto

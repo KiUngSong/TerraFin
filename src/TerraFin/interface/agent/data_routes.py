@@ -43,6 +43,7 @@ from TerraFin.agent.models import (
     HostedToolInvocationResponse,
     HostedViewContextResponse,
     HostedViewContextUpdateRequest,
+    IndicatorSearchResponse,
     IndicatorsResponse,
     LPPLAnalysisResponse,
     MacroFocusResponse,
@@ -945,6 +946,16 @@ def create_agent_data_router() -> APIRouter:
     def api_agent_resolve(q: str = Query(..., min_length=1)):
         try:
             return ResolveResponse(**service.resolve(q))
+        except Exception as exc:
+            _raise_http_error(exc)
+
+    @router.get(f"{AGENT_API_PREFIX}/indicator-search", response_model=IndicatorSearchResponse)
+    def api_agent_indicator_search(
+        q: str = Query(..., min_length=1),
+        limit: int = Query(default=10, ge=1, le=50),
+    ):
+        try:
+            return IndicatorSearchResponse(**service.indicator_search(q, limit=limit))
         except Exception as exc:
             _raise_http_error(exc)
 

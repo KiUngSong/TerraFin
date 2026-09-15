@@ -1,10 +1,11 @@
 # TerraFin
 
 **TerraFin** — *terraform finance*. An **agent-friendly** financial-research
-toolkit: 30 capabilities (DCF with turnaround mode, reverse DCF, FCF history,
-SEC filings TOC + section bodies, sentiment widgets, market breadth, guru
-portfolios, view-context reader) callable from Claude Code, Codex, opencode,
-or TerraFin's own hosted agent.
+toolkit: DCF with turnaround mode, reverse DCF, FCF history, SEC filings TOC +
+section bodies, sentiment widgets, market breadth, guru portfolios and a
+view-context reader, all callable from Claude Code, Codex, opencode, or
+TerraFin's own hosted agent. `terrafin-agent capabilities` prints the full
+list.
 
 ```bash
 git clone https://github.com/KiUngSong/TerraFin
@@ -16,9 +17,9 @@ Install pattern adapted from [gstack](https://github.com/garrytan/gstack).
 `./setup` symlinks the skill into every AI host's skill dir, so `git pull`
 upgrades all of them at once.
 
-External agents can also hit `http://127.0.0.1:8001/agent/api/*` over HTTP —
-every capability has parity Python / CLI / HTTP surfaces (see
-[docs/agent/usage.md](docs/agent/usage.md)).
+External agents can also hit `/agent/api/*` over HTTP, the widest capability
+surface — start at
+[docs/agent/external-agents.md](docs/agent/external-agents.md).
 
 ## Two ways to use TerraFin
 
@@ -29,16 +30,19 @@ checks, and synthesizes guru-style memos (Buffett, Marks, Druckenmiller).
 See [docs/agent/hosted-runtime.md](docs/agent/hosted-runtime.md) and the
 [live demo](https://huggingface.co/spaces/sk851/TerraFin).
 
-**Mode B — TerraFin as a skill for Claude Code / external agents.** Drop
-[`skills/terrafin/SKILL.md`](skills/terrafin/SKILL.md) into your agent's
-skill folder (or let `./setup` above do it) and TerraFin's full capability
-surface becomes callable from any agent that consumes Anthropic Skills.
+**Mode B — TerraFin as a skill for Claude Code / external agents.** Run
+`./setup` and TerraFin's full capability surface becomes callable from any
+agent that consumes Anthropic Skills. On a machine with no checkout, copy the
+whole [`skills/terrafin/`](skills/terrafin/) directory — `SKILL.md` alone
+leaves `references/` behind, and the task recipes load from there on demand.
 
 ## Why agent-friendly
 
-- **Parity surfaces.** Every capability is exposed identically through
-  `TerraFinAgentClient` (Python), `terrafin-agent` (CLI), and `/agent/api/*`
-  (HTTP). Agents don't have to learn a second API to do the same thing.
+- **One capability, three surfaces.** `/agent/api/*` (HTTP) is the widest —
+  nearly every capability has a route; `TerraFinAgentClient` (Python) and
+  `terrafin-agent` (CLI) expose the most-used subset under the same names and
+  arguments, so moving between them costs nothing. `curl $TF/openapi.json`
+  enumerates what is actually there — prefer it over assuming a method exists.
 - **`processing` metadata on every response.** `requestedDepth`,
   `resolvedDepth`, `loadedStart/End`, `isComplete`, `hasOlder`,
   `sourceVersion`. Agents decide whether to deepen the request without

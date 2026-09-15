@@ -5,8 +5,9 @@ If this test fails, regenerate the artefacts:
     python scripts/generate-agent-artefacts.py
 
 and commit the result. The generator derives `skills/terrafin/SKILL.md`'s
-"Key client methods" section and `docs/agent/usage.md`'s "Route summary"
-table from the capability registry in `src/TerraFin/agent/runtime.py`.
+"Capability inventory" section and `docs/agent/usage.md`'s "Route summary"
+table from the capability registry in
+`src/TerraFin/agent/runtime/capability.py`.
 Drift is a sign that someone added or changed a capability without running
 the generator — the agent surfaces would otherwise diverge silently.
 """

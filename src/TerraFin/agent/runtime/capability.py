@@ -133,6 +133,20 @@ def build_default_capability_registry(
                 response_model_name="ResolveResponse",
             ),
             TerraFinCapability(
+                name="indicator_search",
+                description=(
+                    "Search the indicator catalog by substring to find what a market or "
+                    "macro series is called here. Use before market_data when the exact "
+                    "name is unknown — resolve matches exact names only."
+                ),
+                handler=resolved_service.indicator_search,
+                focus_extractor=_focus_from_input_keys("query"),
+                summary="Find an indicator's catalog name by substring.",
+                cli_subcommand_name="indicator-search",
+                http_route_path="/agent/api/indicator-search",
+                response_model_name="IndicatorSearchResponse",
+            ),
+            TerraFinCapability(
                 name="market_data",
                 description="Fetch chart-ready market data for a single asset.",
                 handler=resolved_service.market_data,
@@ -402,11 +416,11 @@ def build_default_capability_registry(
             ),
             TerraFinCapability(
                 name="portfolio",
-                description="Fetch guru portfolio holdings and summary metadata.",
+                description="Fetch a named guru's 13F book (Buffett/Marks/Druckenmiller). This is NOT the user's holdings.",
                 handler=resolved_service.portfolio,
                 focus_extractor=_focus_from_input_keys("guru"),
                 backgroundable=True,
-                summary="Guru portfolio holdings and summary metadata.",
+                summary="Guru 13F book — not the user's holdings.",
                 cli_subcommand_name="portfolio",
                 http_route_path="/agent/api/portfolio",
                 response_model_name="PortfolioResponse",

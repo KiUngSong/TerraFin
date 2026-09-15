@@ -8,6 +8,21 @@ allowed-tools:
   - WebFetch
 triggers:
   - terrafin
+  - treasury
+  - treasury yield
+  - 10-year
+  - 30-year
+  - yield curve
+  - term spread
+  - credit spread
+  - interest rate
+  - 국채
+  - 금리
+  - indicator
+  - indicator search
+  - macro indicator
+  - economic indicator
+  - time series
   - dcf
   - valuation
   - turnaround
@@ -63,7 +78,8 @@ re-copy step.
 
 After installing, open a new session in your AI host and type `terrafin`
 to invoke. For HTTP-only use you can skip `pip install` and run
-TerraFin's server separately (see "HTTP" below).
+TerraFin's server separately — see "Choose the entrypoint" below, which
+also defines the `$TF` base URL every example uses.
 
 ### Environment variables
 
@@ -123,8 +139,16 @@ Python:
 from TerraFin.agent import TerraFinAgentClient
 
 client = TerraFinAgentClient()
-client.valuation("MOH", projection_years=10, fcf_base_source="3yr_avg")
+client.market_data("MOH")
 ```
+
+`valuation` has no client method — reach it over HTTP or the CLI (see
+"Choose the entrypoint"). The client covers a subset of the capabilities, so
+check before assuming a method exists; `python -c "from TerraFin.agent import
+TerraFinAgentClient; print([m for m in dir(TerraFinAgentClient) if not
+m.startswith('_')])"` lists what it actually has. The `## Capability
+inventory` section below groups capabilities by HTTP route, not by client
+method, so it cannot answer this question for you.
 
 CLI:
 
@@ -132,13 +156,24 @@ CLI:
 terrafin-agent snapshot AAPL
 ```
 
-HTTP (parity with Python client — every capability has a route under
-`/agent/api/*`):
+HTTP — the widest surface: nearly every capability has a route under
+`/agent/api/*`. The few that do not are session-bound or in-process only;
+reach those through the capability registry. The generated section
+`## Capability inventory` below is regenerated from the registry, so its
+"Hosted-runtime-only tools" sub-list names the exceptions and stays correct as
+they change. Read it there rather than trusting names or a number written into
+prose.
+
+The server's address comes from `TERRAFIN_HOST`, `TERRAFIN_PORT` and
+`TERRAFIN_BASE_PATH` (see `.env.example`), so derive it rather than
+hardcoding — every example below uses `$TF`:
 
 ```bash
-curl "http://127.0.0.1:8001/agent/api/market-snapshot?ticker=AAPL"
-curl "http://127.0.0.1:8001/agent/api/valuation?ticker=MOH&projection_years=10&fcf_base_source=3yr_avg"
-curl "http://127.0.0.1:8001/agent/api/fcf-history?ticker=GOOGL&years=10"
+TF="http://${TERRAFIN_HOST:-127.0.0.1}:${TERRAFIN_PORT:-8001}${TERRAFIN_BASE_PATH:-}"
+
+curl "$TF/agent/api/market-snapshot?ticker=AAPL"
+curl "$TF/agent/api/valuation?ticker=MOH&projection_years=10&fcf_base_source=3yr_avg"
+curl "$TF/agent/api/fcf-history?ticker=GOOGL&years=10"
 ```
 
 ## Programmatic capability discovery
@@ -148,24 +183,25 @@ so the canonical machine-readable surface is the **live OpenAPI spec**:
 
 ```bash
 # Full OpenAPI document for the running TerraFin server
-curl http://127.0.0.1:8001/openapi.json
+curl $TF/openapi.json
 
 # Filter to just the stateless agent capability routes
-curl -s http://127.0.0.1:8001/openapi.json \
+curl -s $TF/openapi.json \
   | jq '.paths | with_entries(select(.key | startswith("/agent/api/") and (contains("/runtime") | not)))'
 ```
 
 Each path entry carries the parameter schema (types, enums, ranges,
 defaults), the response model, and the route's `summary` /  `description`.
 That's the source of truth for argument validation — prefer it over copy-
-pasting from the recipes below when you're building a programmatic call
+pasting from the reference files when you're building a programmatic call
 generator.
 
-The recipes in this file are still useful for:
+The recipes under `references/` are still useful for:
 
 - learning *when* to call which capability (the LLM-readable intent),
 - worked examples showing the parameter combinations the model trained on
-  (DCF turnaround, the SEC filings 3-step recipe, the FCF Base Source picker),
+  (DCF turnaround in `references/valuation.md`, the SEC filings 3-step recipe
+  in `references/filings-and-news.md`, the FCF Base Source picker),
 - the read-only-view-context contract and other non-schema constraints.
 
 ## Default depth rule
@@ -201,360 +237,17 @@ the request.
 
 ## Standard task recipes
 
-### Ticker brief
+Recipes live in reference files — read the one your task needs:
 
-Use:
+- [references/market-and-indicators.md](references/market-and-indicators.md) — find what a series is called, macro/market history, snapshots, compare, calendar, patterns, similarity, LPPL, sentiment/breadth
+- [references/valuation.md](references/valuation.md) — DCF (forward + turnaround), reverse DCF, S&P 500 DCF, FCF history, beta, fundamentals
+- [references/filings-and-news.md](references/filings-and-news.md) — SEC filings, headlines, forward consensus, claim verification
+- [references/portfolio-and-session.md](references/portfolio-and-session.md) — guru portfolios, watchlist, top companies, current view, chart
 
-- `ticker_brief(name)` or
-- `resolve(name)` then `market_snapshot(...)` and `company_info(...)`
+Start with `references/market-and-indicators.md` when you need a number and
+do not yet know what TerraFin calls it.
 
-### Market snapshot
-
-Use:
-
-- `market_snapshot(name, depth="auto", view="daily")`
-
-### Compare assets
-
-Use:
-
-- `compare_assets([name1, name2, ...], depth="auto", view="daily")`
-
-If the user asks for long-range comparison, rerun with `depth="full"`.
-
-### Macro context
-
-Use:
-
-- `macro_context(name, depth="auto", view="daily")`
-
-### Portfolio context
-
-Use:
-
-- `portfolio_context(guru)`
-
-### Stock fundamentals
-
-Use:
-
-- `stock_fundamentals(ticker, statement="income", period="annual")`
-
-### Calendar scan
-
-Use:
-
-- `calendar_scan(year=..., month=..., categories=..., limit=...)`
-
-### Bubble analysis (LPPL)
-
-Use:
-
-- `bubble_analysis(name, depth="auto", view="daily")`
-
-LPPL detects super-exponential growth with accelerating log-periodic
-oscillations. Best for broad market indices, not individual stocks. Always
-combine with macro context.
-
-### DCF valuation
-
-Use:
-
-- `valuation(ticker)` — full payload: forward DCF (5yr default horizon),
-  reverse DCF, relative valuation (trailing/forward P/E, P/B), Graham number,
-  margin of safety. Defaults are sane for healthy stable companies.
-
-Tune the forward DCF with optional kwargs:
-
-- `projection_years` — `5`, `10`, or `15`. Default `5`. Use `10`+ for
-  long-cycle businesses or turnaround stories so terminal value carries less
-  weight.
-- `fcf_base_source` — `auto` (default), `3yr_avg`, `ttm`, or `latest_annual`.
-  `auto` cascades `3yr_avg → latest_annual → ttm`. The 3-year average is the
-  professional default for DCF (single-period TTM is too noisy from
-  working-capital swings and capex lumps).
-
-```python
-client.valuation("AAPL", projection_years=10, fcf_base_source="3yr_avg")
-```
-
-### DCF turnaround mode
-
-Use when current FCF is negative or volatile but the user has a thesis that
-FCF turns positive. Supplying ALL three turnaround fields switches to an
-explicit per-year schedule:
-
-- `breakeven_year` — the year FCF turns positive (typical 1–5 for
-  operational turnarounds)
-- `breakeven_cash_flow_per_share` — FCF/share at the breakeven year
-- `post_breakeven_growth_pct` — growth rate after breakeven, fades toward
-  terminal growth across the remaining horizon
-
-Pre-breakeven years interpolate linearly from current FCF (which can be
-negative; cash-burn is *not* clipped — it reduces intrinsic value honestly)
-to the breakeven value.
-
-```python
-# MOH thesis: $2/share by 2027, then 15% growth fading to terminal
-client.valuation(
-    "MOH",
-    projection_years=10,
-    breakeven_year=3,
-    breakeven_cash_flow_per_share=2.0,
-    post_breakeven_growth_pct=15.0,
-)
-```
-
-### Historical FCF / share
-
-Use before DCF when the user is unsure what base to choose, or to surface
-candidate values for the FCF Base Source picker:
-
-- `fcf_history(ticker, years=10)` — annual rows, TTM marker, and
-  `candidates: {threeYearAvg, latestAnnual, ttm}` per share. Also returns
-  `autoSelectedSource` (which candidate the `auto` cascade would pick under
-  current data — `3yr_avg`, `annual`, or `quarterly_ttm`).
-
-```python
-hist = client.fcf_history("GOOGL", years=10)
-# Inspect hist["candidates"] before calling valuation()
-```
-
-### S&P 500 DCF
-
-Use:
-
-- `sp500_dcf()` — index-level DCF using earnings power + shareholder yield
-  blended methodology with consensus inputs.
-
-### Reverse DCF
-
-Bundled inside `valuation()` — see the `reverseDcf` field of the response.
-Returns the implied growth rate the market is pricing in.
-
-### Beta estimate
-
-Use:
-
-- `beta_estimate(ticker)` — TerraFin's `beta_5y_monthly` against the mapped
-  benchmark (S&P 500 for US, KOSPI 200 for KS, etc.). Used as the discount
-  rate input for DCF.
-
-### SEC filings
-
-Three-step recipe for analyzing US-listed company filings:
-
-1. `sec_filings(ticker)` — list recent 10-K / 10-Q / 8-K with EDGAR URLs and
-   `latestByForm[<form>]` shortcut.
-2. `sec_filing_document(ticker, accession, primaryDocument)` — get the
-   filing's table of contents (sections + char counts) WITHOUT pulling the
-   full body. Keeps the agent's context small.
-3. `sec_filing_section(ticker, accession, primaryDocument, sectionSlug)` —
-   pull a single section's markdown body by slug.
-
-```python
-filings = client.sec_filings("AAPL")
-acc = filings["latestByForm"]["10-K"]["accession"]
-prim = filings["latestByForm"]["10-K"]["primaryDocument"]
-toc = client.sec_filing_document("AAPL", acc, prim, form="10-K")
-md = client.sec_filing_section("AAPL", acc, prim, "item-1-business", form="10-K")
-```
-
-If `sec_filing_section` raises with "section not found", the error message
-includes the 5 largest sections in the filing — pick the largest neighbor
-(10-K parsers often nest MD&A inside an oversized parent).
-
-### Sentiment / breadth widgets
-
-Stateless market-temperature signals:
-
-- `fear_greed()` — current CNN-style fear & greed index
-- `market_regime()` — TerraFin's regime classification
-- `market_breadth()` — % advancing / new highs / etc.
-- `trailing_forward_pe()` — S&P 500 trailing vs forward P/E spread
-
-Use one of these (not all four) when the user asks "is the market frothy?" /
-"what's the cycle?" / "are we in a bubble?". For a deep cycle answer pair
-with `sp500_dcf()` and `lppl_analysis("S&P 500")`.
-
-### Watchlist
-
-Use:
-
-- `watchlist()` — read the user's current watchlist (read-only from agent).
-
-### Top companies
-
-Use:
-
-- `top_companies()` — market-cap-ranked equity list driving Market Insights.
-
-### Headlines / catalyst ("why now")
-
-Find the narrative around a move instead of inferring one.
-
-Use:
-
-- `news(ticker=None, query=None, days=7, limit=25)`
-
-Pass `ticker` for a symbol or `query` for a theme or company name — a plain company name usually beats the symbol for coverage. `days` is 1-90, `limit` is 1-100.
-
-Response per item: `title` (raw, ends with " - Publisher"), `headline` (suffix stripped), `publishedAt`, `source`, `sourceUrl`, `url`.
-
-Feed-level `fetchedAt` is when TerraFin fetched, not the window — a cached or stale-served feed reports its real vintage and can lag today; `null` means unknown.
-
-**Headlines only.** No article bodies are fetched or stored, so never claim to have read an article. `url` is a `news.google.com` **redirect**, not the publisher's canonical address.
-
-Limits worth stating in an answer:
-
-- matching is keyword-based, so same-name companies and passing mentions appear — read the publisher and headline before calling an item material
-- a week on a large cap routinely matches ~100 headlines; `warnings` tells you when the list was truncated
-- an unreachable feed returns zero items **with a warning**, so an empty list means "nothing found or feed unavailable", never "no news happened"
-
-For dated corporate events prefer `sec_filings` — an 8-K near an unexplained move is harder evidence — and `calendar_events`. Use `news` for the narrative around them.
-
-```bash
-curl "http://127.0.0.1:8001/agent/api/news?ticker=TSLA&days=5&limit=5"
-curl "http://127.0.0.1:8001/agent/api/news?query=Samsung%20Electronics&days=7"
-```
-
-There is no `TerraFinAgentClient.news` method — use the HTTP route, the hosted agent tool, or `TerraFinAgentService` directly.
-
-### Forward consensus (what is already priced in)
-
-Answers "what does the street already expect?" with observable data, before you claim a differentiated view.
-`earnings` gives *reported* history; `consensus` gives *forward* expectations and which way they are moving.
-
-Use:
-
-- `consensus(ticker)`
-
-Period keys are relative: `0q` current quarter, `+1q` next quarter, `0y` current fiscal year, `+1y` next.
-
-Response:
-
-- `revisions[]` — analyst up/down counts over 7 and 30 days per period, plus `net30d` and `direction30d` (`"up"` / `"down"` / `"flat"`). **The 30-day window includes the 7-day one — do not add them.** A tiny `analystCount` makes the direction near-meaningless.
-- `epsEstimates[]` / `revenueEstimates[]` — `avg`, `low`, `high`, `analystCount`, `growth` (a fraction), and `dispersion` = `(high-low)/|avg|`.
-- `priceTargets` — `current`, `mean`, `median`, `low`, `high`, `upsideToMeanPct` (already a percent).
-- `recommendations[]` — strongBuy/buy/hold/sell/strongSell by month offset (`0m`, `-1m`, …), so rating drift is visible.
-- `hasCoverage` — **check this, and the flags below with it.** An empty field means "unknown", never "neutral".
-
-> [!WARNING]
-> **Never report "this ticker has no analyst coverage."** Upstream returns an empty result for a rate-limited endpoint and for a genuinely uncovered symbol alike, so the two are not distinguishable. The flags say which story is possible, not which is true:
->
-> - `upstreamFailed` — nothing came back at all. `quoteTypeHint` (e.g. `INDEX`, `ETF`) is context only: it is recovered from endpoints that stay up when the estimate endpoint is down, so it cannot confirm the estimates are really absent. An all-empty response is deliberately **not cached**.
-> - `estimatesMissing` — other surfaces responded but every estimate surface was empty: an uncovered symbol or a partial failure.
-> - `cacheTier` — `stale` or `fallback` means these numbers are not fresh.
-
-> [!WARNING]
-> **Rising estimates are not evidence that something is "not yet priced in."** Sell-side analysts revise toward the tape, so price usually *leads* the revision — post-earnings-announcement drift and revision momentum are among the most documented anomalies there are. Treat up-revisions as closer to a momentum signal than to a contrarian edge.
-
-What this capability legitimately adds: a **dated record** of what consensus said (checkable later, which a reverse DCF cannot give you), and **dispersion** — whether "consensus" is a coherent number at all. When dispersion is wide, a differentiated thesis has to beat the range, not the midpoint; near break-even it is just a small denominator, so check `avg` before quoting it.
-
-`asOf` is the date TerraFin fetched, not the vintage of the estimates — upstream provides no estimate timestamp.
-
-Pair it with `valuation`: the reverse DCF infers what the *price* implies, while revisions show what analysts are *doing*.
-
-```bash
-curl "http://127.0.0.1:8001/agent/api/consensus?ticker=AAPL"
-```
-
-There is no `TerraFinAgentClient.consensus` method — use the HTTP route, the hosted agent tool, or `TerraFinAgentService` directly.
-
-### Pattern sweep (idea sourcing)
-
-Find which symbols are triggering technical patterns right now, instead of checking one ticker at a time.
-`patterns` verifies a name you already have; `pattern_scan` is how you find candidates in the first place.
-
-Use:
-
-- `pattern_scan(group=None, tickers=None, severity_min="low")`
-
-Parameters:
-
-- `group` — one watchlist tag. Omit both arguments to sweep the entire watchlist.
-- `tickers` — comma-separated string or list, to sweep symbols that are not on the watchlist.
-- `severity_min` — `"low"` (default), `"medium"`, `"high"`. Raise it when sweeping a large set.
-
-Patterns evaluated per symbol:
-
-- close-vs-MA cross grid — `MA20/60/120/200_{GOLDEN,DEATH}_CROSS` (daily) and `MA20/60/120W_{GOLDEN,DEATH}_CROSS` (weekly)
-- `52W_NEW_HIGH`, `52W_NEW_LOW`, `WEEKLY_NEW_HIGH`, `WEEKLY_NEW_LOW`, `MINERVINI_TEMPLATE`, `RSI_OVERBOUGHT` and `RSI_OVERSOLD` with their `WEEKLY_` counterparts, `WEEKLY_VOLUME_DRYUP`
-
-Severity, as the catalogue actually emits it:
-
-- no pattern emits `low`, so `severity_min="low"` and `"medium"` return the same set
-- `"high"` narrows to exactly `52W_NEW_HIGH`, `52W_NEW_LOW`, `WEEKLY_NEW_HIGH`, `WEEKLY_NEW_LOW`, `MINERVINI_TEMPLATE`, `WEEKLY_RSI_OVERBOUGHT`, `WEEKLY_RSI_OVERSOLD`
-
-Expect roughly 1–2 signals per symbol per scan — not a flood.
-
-Coverage fields — check these before concluding "nothing is triggering":
-
-- `requested` — symbols asked for
-- `scanned` — symbols actually fetched and evaluated
-- `failed` — the difference (a rate-limited sweep can silently scan far fewer)
-- `matched` — hits before truncation; `returned` / `truncated` describe the clipped `signals[]` (`limit`, default 200)
-
-Cost: one price-history fetch per symbol. Cache reads run 8-way concurrently, but cold downloads are serialised by a process-wide lock, so a cold sweep of hundreds of symbols takes minutes and slows other price requests in the same process. Use `start_pattern_scan_task` for large sets; keep interactive calls to a few dozen symbols.
-
-```bash
-curl "http://127.0.0.1:8001/agent/api/pattern-scan?severity_min=high"
-curl "http://127.0.0.1:8001/agent/api/pattern-scan?tickers=NVDA,AMD,AVGO,MU"
-```
-
-There is no `TerraFinAgentClient.pattern_scan` method — like most capabilities added after the original set, this one is reachable through the HTTP route, the hosted agent tool, or `TerraFinAgentService` directly.
-
-### Chart similarity search
-
-Find historical periods where another stock's chart had the same shape as the target ticker's recent chart.
-
-Use:
-
-- `similarity_search(ticker, universe="sp500+nasdaq100+kospi200", period="1y", top_n=20)`
-
-Parameters:
-
-- `ticker` — the stock to match (required). Its recent close-price chart over `period` becomes the template.
-- `universe` — `"sp500"`, `"nasdaq100"`, `"kospi200"`, `"sp500+kospi200"`, `"sp500+nasdaq100+kospi200"` (default), or `"watchlist"`.
-- `period` — template length: `"1y"` (default), `"2y"`, `"6m"`.
-- `top_n` — number of results (1–50, default 20).
-
-Response fields per result: `symbol`, `name`, `score` ([0,1]), `matchStart`, `matchEnd`, `overlapDays`.
-
-Algorithm: STUMPY MASS sliding-window z-normalized Euclidean distance on cumulative log returns — shape-matching, not level or trend. Score of 1 = perfect shape match; scores above 0.70 are meaningful.
-
-```python
-client.similarity_search("NVDA", universe="sp500+nasdaq100+kospi200", period="1y", top_n=10)
-```
-
-Use the results to surface analogous historical episodes and estimate plausible forward price paths (look at `matchEnd + ~1 month` in those historical series).
-
-### Read what the user is currently viewing
-
-Use:
-
-- `current_view_context()` — returns the page/panel the user is looking at,
-  including form-state selection (e.g., the DCF input form's current
-  `projectionYears`, `fcfBaseSource`, `turnaroundMode`, `breakevenYear`),
-  FCF history candidates already loaded, the auto-selected DCF base source,
-  and any active scenario state.
-
-This is the agent's primary tool for matching what the user *sees* without
-re-fetching. Always call it before answering "what am I looking at?" or
-"explain this card" types of questions.
-
-### Open chart
-
-Use only when a chart is explicitly helpful.
-
-- `open_chart("AAPL")`
-- `open_chart(["S&P 500", "Nasdaq"])`
-
-Chart requests by lookup name use TerraFin's progressive chart pipeline. Raw
-dataframe chart requests are supported through the Python client and are treated
-as complete from the start.
-
-## Key client methods
+## Capability inventory
 
 <!-- The two lists below are auto-generated from src/TerraFin/agent/runtime/capability.py
      by `python scripts/generate-agent-artefacts.py`. Edit the registry, not
@@ -565,6 +258,7 @@ as complete from the start.
 Stateless data + analysis (each has a matching `/agent/api/*` HTTP route):
 
 - `resolve` — Resolve a free-form query into a TerraFin route. `GET /agent/api/resolve`
+- `indicator_search` — Find an indicator's catalog name by substring. `GET /agent/api/indicator-search`
 - `market_data` — Chart-ready OHLC time series for one asset. `GET /agent/api/market-data`
 - `indicators` — Chart-matching technical indicators for one asset. `GET /agent/api/indicators`
 - `patterns` — Named market patterns matching the latest bar for one asset. `GET /agent/api/patterns`
@@ -576,7 +270,7 @@ Stateless data + analysis (each has a matching `/agent/api/*` HTTP route):
 - `company_info` — Company profile and valuation fields for a ticker. `GET /agent/api/company`
 - `earnings` — Earnings history (estimate / reported / surprise) for a ticker. `GET /agent/api/earnings`
 - `financials` — Financial statement table (income / balance / cashflow) for a ticker. `GET /agent/api/financials`
-- `portfolio` — Guru portfolio holdings and summary metadata. `GET /agent/api/portfolio`
+- `portfolio` — Guru 13F book — not the user's holdings. `GET /agent/api/portfolio`
 - `economic` — Economic indicator series (FRED-backed). `GET /agent/api/economic`
 - `macro_focus` — Macro summary plus chart-ready series for one instrument. `GET /agent/api/macro-focus`
 - `calendar_events` — TerraFin calendar events for a month. `GET /agent/api/calendar`

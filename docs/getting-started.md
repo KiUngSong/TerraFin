@@ -145,4 +145,10 @@ Notebook rules and layout guidance live in [Notebooks](notebooks.md).
 - [Agent Docs](agent/index.md) — both Hosted TerraFin Agent (Mode A) and the
   external-agent skill / HTTP surface (Mode B).
 - [TerraFin skill on GitHub](https://github.com/KiUngSong/TerraFin/blob/main/skills/terrafin/SKILL.md) —
-  drop-in for Claude Code / Codex (`cp -r skills/terrafin ~/.claude/skills/`).
+  drop-in for Claude Code / Codex. Install it with `./setup` from this checkout
+  (`./setup --host claude` for one host); it symlinks `skills/terrafin/`, so a
+  `git pull` upgrades every host at once. `./setup` refuses to overwrite a real
+  directory left behind by an earlier copy — remove it and re-run. Only on a
+  machine with no checkout, copy the whole `skills/terrafin/` directory:
+  `SKILL.md` alone leaves `references/` behind and the task recipes load from
+  there.

@@ -307,13 +307,13 @@ When a feature becomes public, check each box deliberately.
 - `agent/cli/main.py` updated if the feature deserves first-class shell access
 - `agent/contracts/tool_contracts.py` schema updated for any new params (input enums, ranges, required fields)
 - `agent/runtime/capability.py` capability registration with a description that names the new behaviour (the LLM reads this)
-- `interface/agent/data_routes.py` updated if HTTP exposure is required (every internal capability should have a parity `/agent/api/*` route — external HTTP-only agents depend on it)
+- `interface/agent/data_routes.py` updated with the `/agent/api/*` route the registration declares — HTTP is the only surface that reaches most capabilities, so an HTTP-only agent cannot see the feature without it. Skip the route only for a capability that genuinely cannot work outside a live session; then leave `http_route_path=None` with a comment saying why, and add the name to `CAPABILITIES_WITHOUT_ROUTE` in `tests/agent/test_capability_parity.py`, which otherwise fails the build.
 - `src/TerraFin/agent/guru/personas/*.yaml` updated if the capability should be persona-callable (Buffett / Marks / Druckenmiller). YAML allowlists are the **single source of truth** — no hidden override layer.
 
 ### Skill and docs
 
 - `docs/agent/usage.md` updated if agent usage changed (recipe / disclosure prose only — the route summary table is auto-generated; see below)
-- `skills/terrafin/SKILL.md` recipe added / updated for the new feature (recipe prose only — the "Key client methods" list is auto-generated)
+- `skills/terrafin/SKILL.md` recipe added / updated for the new feature (recipe prose only — the "Capability inventory" list is auto-generated)
 - `python scripts/generate-agent-artefacts.py` run to refresh the sentinel-bounded sections in SKILL.md and `usage.md`. CI guard: `pytest tests/agent/test_generated_artefacts_match.py` fails if you forget
 - `docs/interface.md`, `docs/data-layer.md`, `docs/chart-architecture.md`, or `docs/analytics.md` updated where appropriate
 - `README.md` updated if the feature changes the public product story
@@ -411,10 +411,10 @@ Layer-by-layer landing zone:
 | Tests | Backend: `_build_turnaround_schedule` unit tests, `_select_stock_fcf_base` cascade tests, API route accepts override tests. Agent service test stub updated to pass kwargs through. Frontend: typecheck + build. | `tests/analytics/test_dcf_inputs.py`, `tests/interface/test_dcf_api.py`, `tests/agent/test_service.py` |
 
 The single most important discipline: when you add a backend capability,
-always land the parity `/agent/api/*` route in the same PR. External agents
-that only use the HTTP transport otherwise can't see the feature, and the
-SKILL.md instruction "every capability has a parity HTTP route" stops being
-true.
+always land the `/agent/api/*` route in the same PR. HTTP is the only surface
+that reaches most capabilities, so without it an HTTP-only agent cannot see the
+feature at all. If it truly cannot have one, take the documented exemption
+above rather than leaving the gap undeclared.
 
 ## Practical shortcut
 

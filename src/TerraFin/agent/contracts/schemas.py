@@ -55,6 +55,19 @@ class ResolveResponse(BaseModel):
     processing: ProcessingMetadata
 
 
+class IndicatorCatalogMatch(BaseModel):
+    symbol: str
+    name: str
+    group: str
+
+
+class IndicatorSearchResponse(BaseModel):
+    query: str
+    count: int
+    matches: list[IndicatorCatalogMatch]
+    processing: ProcessingMetadata
+
+
 class MarketDataResponse(BaseModel):
     ticker: str
     seriesType: SeriesType

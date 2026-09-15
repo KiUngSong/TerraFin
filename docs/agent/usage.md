@@ -322,16 +322,22 @@ session.display_notebook()
 
 ```bash
 terrafin-agent snapshot AAPL
+terrafin-agent indicator-search trea --limit 5
 terrafin-agent runtime-create-session terrafin-assistant
 terrafin-agent models list --all
 ```
 
 ### HTTP
 
-```bash
-curl "http://127.0.0.1:8001/agent/api/market-snapshot?ticker=AAPL&depth=auto&view=daily"
+The address is configuration — derive it from `TERRAFIN_HOST`,
+`TERRAFIN_PORT` and `TERRAFIN_BASE_PATH` rather than hardcoding:
 
-curl -X POST "http://127.0.0.1:8001/agent/api/runtime/sessions" \
+```bash
+TF="http://${TERRAFIN_HOST:-127.0.0.1}:${TERRAFIN_PORT:-8001}${TERRAFIN_BASE_PATH:-}"
+
+curl "$TF/agent/api/market-snapshot?ticker=AAPL&depth=auto&view=daily"
+
+curl -X POST "$TF/agent/api/runtime/sessions" \
   -H "Content-Type: application/json" \
   -d '{"agentName":"terrafin-assistant"}'
 ```
@@ -345,9 +351,12 @@ Use the TerraFin Agent button in the lower-right corner.
 
 ## Route summary
 
-Stateless capability routes (every hosted-runtime tool also has a parity HTTP
-route under `/agent/api/*` — see `skills/terrafin/SKILL.md` for the full
-30-capability table with Python / CLI signatures).
+Capability routes — nearly every capability has one. The table below is
+generated from the registry and lists every capability that has a route; the
+few with none are session-bound or in-process only, and the generated
+"Hosted-runtime-only tools" list in `skills/terrafin/SKILL.md` names them.
+`terrafin-agent capabilities` prints every capability, routed or not, as JSON
+with a `count`. For the client's method list, ask the client itself: `python -c "from TerraFin.agent import TerraFinAgentClient; print([m for m in dir(TerraFinAgentClient) if not m.startswith('_')])"`.
 
 <!-- The route table below is auto-generated from
      src/TerraFin/agent/runtime/capability.py by
@@ -363,13 +372,14 @@ Data + chart:
 - `GET /agent/api/earnings` — Earnings history (estimate / reported / surprise) for a ticker.
 - `GET /agent/api/economic` — Economic indicator series (FRED-backed).
 - `GET /agent/api/financials` — Financial statement table (income / balance / cashflow) for a ticker.
+- `GET /agent/api/indicator-search` — Find an indicator's catalog name by substring.
 - `GET /agent/api/indicators` — Chart-matching technical indicators for one asset.
 - `GET /agent/api/lppl` — LPPL bubble analysis (super-exponential growth + log-periodic oscillation detection).
 - `GET /agent/api/macro-focus` — Macro summary plus chart-ready series for one instrument.
 - `GET /agent/api/market-data` — Chart-ready OHLC time series for one asset.
 - `GET /agent/api/market-snapshot` — Compact market snapshot for one asset.
 - `GET /agent/api/news` — Recent headlines for a ticker or query (metadata only).
-- `GET /agent/api/portfolio` — Guru portfolio holdings and summary metadata.
+- `GET /agent/api/portfolio` — Guru 13F book — not the user's holdings.
 - `GET /agent/api/resolve` — Resolve a free-form query into a TerraFin route.
 
 Valuation + fundamentals:

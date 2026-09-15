@@ -32,6 +32,10 @@ def _build_parser() -> argparse.ArgumentParser:
     resolve_parser = subparsers.add_parser("resolve")
     resolve_parser.add_argument("query")
 
+    indicator_search_parser = subparsers.add_parser("indicator-search")
+    indicator_search_parser.add_argument("query")
+    indicator_search_parser.add_argument("--limit", type=int, default=10)
+
     market_data_parser = subparsers.add_parser("market-data")
     market_data_parser.add_argument("name")
     market_data_parser.add_argument("--depth", default="auto", choices=["auto", "recent", "full"])
@@ -556,6 +560,8 @@ def main(argv: list[str] | None = None) -> int:
             client = _make_client(args)
             if args.command == "resolve":
                 payload = client.resolve(args.query)
+            elif args.command == "indicator-search":
+                payload = client.indicator_search(args.query, limit=args.limit)
             elif args.command == "market-data":
                 payload = client.market_data(args.name, depth=args.depth, view=args.view)
             elif args.command == "indicators":
