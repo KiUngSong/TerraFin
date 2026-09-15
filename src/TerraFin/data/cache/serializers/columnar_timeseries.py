@@ -29,6 +29,7 @@ import numpy as np
 import pandas as pd
 
 from TerraFin.data.contracts import HistoryChunk, TimeSeriesDataFrame
+from TerraFin.data.periods import period_cutoff
 
 
 _logger = logging.getLogger(__name__)
@@ -160,23 +161,6 @@ def _attach_meta(frame: TimeSeriesDataFrame, meta: dict) -> TimeSeriesDataFrame:
     return frame
 
 
-def _period_offset(period: str) -> pd.DateOffset:
-    text = period.strip().lower()
-    if not text:
-        raise ValueError("Period is required")
-    unit = text[-1]
-    amount = int(text[:-1] or "0")
-    if amount <= 0:
-        raise ValueError(f"Invalid period: {period}")
-    if unit == "y":
-        return pd.DateOffset(years=amount)
-    if unit == "m":
-        return pd.DateOffset(months=amount)
-    if unit == "d":
-        return pd.DateOffset(days=amount)
-    raise ValueError(f"Unsupported period: {period}")
-
-
 class ColumnarTimeSeriesSerializer:
     """Reads/writes OHLCV frames as a directory of ``.npy`` columns."""
 
@@ -275,9 +259,12 @@ class ColumnarTimeSeriesSerializer:
             if len(time_values) == 0:
                 return TimeSeriesDataFrame.make_empty(), False
             last_dt = pd.to_datetime(int(time_values[-1]), unit="s", utc=True)
-            cutoff = (last_dt - _period_offset(period)).normalize()
-            cutoff_seconds = int(cutoff.timestamp())
-            start_idx = int(np.searchsorted(time_values, cutoff_seconds, side="left"))
+            cutoff = period_cutoff(period, last_dt)
+            if cutoff is None:
+                start_idx = 0
+            else:
+                cutoff_seconds = int(cutoff.timestamp())
+                start_idx = int(np.searchsorted(time_values, cutoff_seconds, side="left"))
             has_older = start_idx > 0
             frame = _frame_from_columnar(path, meta, start_idx=start_idx, mmap=mmap)
         except Exception:

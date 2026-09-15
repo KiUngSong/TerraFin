@@ -8,6 +8,7 @@ import yfinance as yf
 
 from TerraFin.data.cache.policy import ttl_for
 from TerraFin.data.contracts import HistoryChunk, TimeSeriesDataFrame
+from TerraFin.data.periods import period_cutoff
 from TerraFin.data.providers.market.session_calendar import (
     is_cache_stale_by_session,
     latest_expected_close,
@@ -106,29 +107,14 @@ def _frame_bounds(frame: pd.DataFrame) -> tuple[str | None, str | None]:
     return index[0].strftime("%Y-%m-%d"), index[-1].strftime("%Y-%m-%d")
 
 
-def _period_offset(period: str) -> pd.DateOffset:
-    text = period.strip().lower()
-    if not text:
-        raise ValueError("Period is required")
-    unit = text[-1]
-    amount = int(text[:-1] or "0")
-    if amount <= 0:
-        raise ValueError(f"Invalid period: {period}")
-    if unit == "y":
-        return pd.DateOffset(years=amount)
-    if unit == "m":
-        return pd.DateOffset(months=amount)
-    if unit == "d":
-        return pd.DateOffset(days=amount)
-    raise ValueError(f"Unsupported period: {period}")
-
-
 def _slice_recent_frame(frame: pd.DataFrame, period: str) -> pd.DataFrame:
     normalized = _normalize_market_frame(frame)
     if normalized.empty:
         return normalized
     end = pd.Timestamp(normalized.index[-1])
-    start = (end - _period_offset(period)).normalize()
+    start = period_cutoff(period, end)
+    if start is None:
+        return normalized
     recent = normalized[normalized.index >= start]
     if recent.empty:
         return normalized.iloc[[-1]].copy()
@@ -140,7 +126,12 @@ def _infer_has_older(frame: pd.DataFrame, period: str) -> bool:
     if normalized.empty:
         return False
     end = pd.Timestamp(normalized.index[-1])
-    cutoff = (end - _period_offset(period)).normalize()
+    cutoff = period_cutoff(period, end)
+    if cutoff is None:
+        # "max" has no lower bound, so nothing older is being withheld. The
+        # live paths agree: `_slice_recent_frame` returns the whole frame and
+        # the columnar reader starts at index 0, both yielding has_older=False.
+        return False
     tolerance = pd.Timedelta(days=_RECENT_TOLERANCE_DAYS)
     first = pd.Timestamp(normalized.index[0])
     return first <= cutoff + tolerance

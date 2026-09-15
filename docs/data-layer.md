@@ -178,10 +178,35 @@ already know the source.
 2. Economic indicator registry (FRED series, macro, ...)
 3. Index map + yfinance (tickers, index names)
 
+### Finding the name in the first place
+
+Every method below takes a name from the catalog, and the catalog spans four
+registries — Index, Market, Economic, and chart-only custom specs. When the
+exact name is unknown, search rather than guess:
+
+```python
+df = DataFactory()
+df.search_indicators("trea")
+# [IndicatorCatalogEntry(symbol='Treasury-13W', name='Treasury-13W', group='Market'),
+#  … 2Y, 5Y, 10Y, 30Y, then TGA, Term Spread, High Yield Spread, … ]
+df.list_indicators()          # the whole catalog
+```
+
+`resolve` is not this. It matches exact names only and answers an unknown
+string with a fabricated stock row (`"trea"` → `type: stock, name: TREA`), so
+a caller that guesses gets a plausible wrong answer rather than a miss.
+`search_indicators` covers the three data-layer registries; the chart's custom
+declarative indicators are registered in the interface layer and are merged in
+by `ticker_search` alone.
+
+Over HTTP the same lookup is `GET /agent/api/indicator-search?q=trea`.
+
 ### Which method to call
 
 | Method | Return type | Description |
 |--------|-------------|-------------|
+| `search_indicators(query, limit=10)` | `list[IndicatorCatalogEntry]` | Find what a series is called, by substring over symbol and description |
+| `list_indicators()` | `list[IndicatorCatalogEntry]` | The whole catalog (Index + Market + Economic) |
 | `get(name)` | `TimeSeriesDataFrame` | Universal lookup across market indicators, economic indicators, index aliases, and raw tickers |
 | `get_recent_history(name, period="3y")` | `HistoryChunk` | Recent seed window used by progressive chart loading |
 | `get_full_history_backfill(name, loaded_start=None)` | `HistoryChunk` | Older history to prepend onto an already-seeded chart |
@@ -193,6 +218,20 @@ already know the source.
 
 The time-series methods are normalized by the `@chart_output` decorator before
 they are returned.
+
+Two things that are easy to get wrong here:
+
+- **`period` accepts `30d` / `3m` / `5y` offsets plus `ytd` and `max`.** `max`
+  means no lower bound — `get_recent_history("Treasury-30Y", period="max")`
+  returns 12,420 rows back to 1977, against 7,531 for `30y`. Parsing lives in
+  one place, `data/periods.py`, and the cutoff it returns carries the anchor's
+  timezone so it can be compared against either a naive or an aware index.
+- **`get_indicator_snapshot(name)` is private-series only**, despite the
+  general name. It raises `Unknown indicator snapshot` for a market or economic
+  name; those are served by `get_recent_history` / `get_market_data`.
+
+The returned `HistoryChunk.frame` carries lowercase `time` and `close`
+columns, with `time` as a column rather than the index.
 
 ## Output type conveniences
 

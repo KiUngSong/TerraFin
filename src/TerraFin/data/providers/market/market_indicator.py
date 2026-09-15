@@ -5,6 +5,7 @@ import numpy as np
 import pandas as pd
 
 from TerraFin.data.contracts import HistoryChunk, TimeSeriesDataFrame
+from TerraFin.data.periods import period_cutoff
 
 from .yfinance import get_yf_data, get_yf_full_history_backfill, get_yf_recent_history
 
@@ -35,30 +36,18 @@ def _frame_bounds(frame: TimeSeriesDataFrame) -> tuple[str | None, str | None]:
     return times.iloc[0].strftime("%Y-%m-%d"), times.iloc[-1].strftime("%Y-%m-%d")
 
 
-def _period_offset(period: str) -> pd.DateOffset:
-    text = period.strip().lower()
-    if not text:
-        raise ValueError("Period is required")
-    unit = text[-1]
-    amount = int(text[:-1] or "0")
-    if amount <= 0:
-        raise ValueError(f"Invalid period: {period}")
-    if unit == "y":
-        return pd.DateOffset(years=amount)
-    if unit == "m":
-        return pd.DateOffset(months=amount)
-    if unit == "d":
-        return pd.DateOffset(days=amount)
-    raise ValueError(f"Unsupported period: {period}")
-
-
 def _slice_recent_timeseries(frame: TimeSeriesDataFrame, period: str) -> TimeSeriesDataFrame:
     if frame.empty or "time" not in frame.columns:
         return TimeSeriesDataFrame.make_empty()
     times = pd.to_datetime(frame["time"], errors="coerce").dropna()
     if times.empty:
         return TimeSeriesDataFrame.make_empty()
-    cutoff = (times.iloc[-1] - _period_offset(period)).normalize()
+    cutoff = period_cutoff(period, times.iloc[-1])
+    if cutoff is None:
+        # Reset like the filtered branch below: callers get the same shape and
+        # a fresh object whichever period they asked for.
+        return TimeSeriesDataFrame(frame.reset_index(drop=True),
+                                   name=frame.name, chart_meta=frame.chart_meta)
     recent = frame[pd.to_datetime(frame["time"], errors="coerce") >= cutoff].reset_index(drop=True)
     if recent.empty:
         recent = frame.tail(1).reset_index(drop=True)

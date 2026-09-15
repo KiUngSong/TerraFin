@@ -13,7 +13,9 @@ from .contracts import (
     TOCEntry,
     chart_output,
 )
+from .contracts.indicators import IndicatorCatalogEntry
 from .contracts.dataframes import TimeSeriesDataFrame
+from .periods import period_cutoff
 from .contracts.estimates import ConsensusEstimates
 from .contracts.news import NewsFeed
 from .providers.corporate.filings.sec_edgar import get_sec_data, get_sec_toc
@@ -78,22 +80,6 @@ class DataFactory:
             return None, None
         return times.iloc[0].strftime("%Y-%m-%d"), times.iloc[-1].strftime("%Y-%m-%d")
 
-    @staticmethod
-    def _period_offset(period: str) -> pd.DateOffset:
-        text = period.strip().lower()
-        if not text:
-            raise ValueError("Period is required")
-        unit = text[-1]
-        amount = int(text[:-1] or "0")
-        if amount <= 0:
-            raise ValueError(f"Invalid period: {period}")
-        if unit == "y":
-            return pd.DateOffset(years=amount)
-        if unit == "m":
-            return pd.DateOffset(months=amount)
-        if unit == "d":
-            return pd.DateOffset(days=amount)
-        raise ValueError(f"Unsupported period: {period}")
 
     def _slice_recent_timeseries(self, frame: TimeSeriesDataFrame, period: str) -> TimeSeriesDataFrame:
         if frame.empty or "time" not in frame.columns:
@@ -101,7 +87,14 @@ class DataFactory:
         end = pd.to_datetime(frame["time"], errors="coerce").dropna()
         if end.empty:
             return TimeSeriesDataFrame.make_empty()
-        cutoff = (end.iloc[-1] - self._period_offset(period)).normalize()
+        cutoff = period_cutoff(period, end.iloc[-1])
+        if cutoff is None:
+            # Reset like the filtered branch below, so every period returns the
+            # same shape and a fresh object.
+            out = TimeSeriesDataFrame(frame.reset_index(drop=True),
+                                      name=frame.name, chart_meta=frame.chart_meta)
+            out.name = frame.name
+            return out
         recent = frame[pd.to_datetime(frame["time"], errors="coerce") >= cutoff].reset_index(drop=True)
         if recent.empty:
             recent = frame.tail(1).reset_index(drop=True)
@@ -336,11 +329,37 @@ class DataFactory:
         return EventList(events=filtered)
 
     def get_indicator_snapshot(self, name: str) -> IndicatorSnapshot:
-        """Return a current scalar snapshot for a private-series indicator."""
+        """Return a current scalar snapshot for a private-series indicator.
+
+        Private series only, despite the general name — a market or economic
+        indicator raises here. Reach those through `get_recent_history` or
+        `get_market_data`, and find their names with `search_indicators`.
+        """
         spec = PRIVATE_SERIES.get(name)
         if spec is None:
             raise ValueError(f"Unknown indicator snapshot: {name}")
         return get_private_series_current(spec)
+
+    def list_indicators(self) -> list[IndicatorCatalogEntry]:
+        """Every indicator this layer serves, as catalog rows.
+
+        The chart additionally offers custom declarative indicators, which are
+        registered in the interface layer and are not included here.
+        """
+        from .providers.market.indicator_catalog import list_indicators
+
+        return list_indicators()
+
+    def search_indicators(self, query: str, limit: int = 10) -> list[IndicatorCatalogEntry]:
+        """Find an indicator by substring, over both symbol and description.
+
+        The entry point for "what is this series called here?" — every other
+        call needs a name this returns. `search_indicators("trea")` gives the
+        Treasury tenors; feed `entry.symbol` to `get_recent_history`.
+        """
+        from .providers.market.indicator_catalog import search_indicators
+
+        return search_indicators(query, limit=limit)
 
     # -----------------------------------------------------------------
     # Private-source panel payloads (non-time-series). Exposed via
