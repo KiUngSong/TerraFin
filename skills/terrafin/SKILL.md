@@ -285,6 +285,7 @@ Stateless data + analysis (each has a matching `/agent/api/*` HTTP route):
 - `market_breadth` — Standalone market-breadth metrics (% advancing, new highs, etc.). `GET /agent/api/market-breadth`
 - `watchlist` — The user's current watchlist (read-only). `GET /agent/api/watchlist`
 - `fundamental_screen` — Fundamental quality and moat screen for a ticker. `GET /agent/api/fundamental-screen`
+- `growth_series` — Revenue and EPS YoY growth series for a ticker. `GET /agent/api/growth-series`
 - `risk_profile` — Statistical risk profile (tail risk, convexity, vol regime, drawdown). `GET /agent/api/risk-profile`
 - `valuation` — DCF (incl. turnaround mode), reverse DCF, relative valuation, Graham number. `GET /agent/api/valuation`
 - `sec_filings` — List recent 10-K / 10-Q / 8-K filings for a ticker with EDGAR URLs. `GET /agent/api/sec-filings`

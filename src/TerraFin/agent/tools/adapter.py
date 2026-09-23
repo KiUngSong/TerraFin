@@ -387,7 +387,7 @@ class TerraFinHostedToolAdapter:
         session_id: str,
         arguments: Mapping[str, Any],
     ) -> TerraFinToolInvocationResult | None:
-        business_only_tools = {"company_info", "earnings", "financials", "fundamental_screen"}
+        business_only_tools = {"company_info", "earnings", "financials", "fundamental_screen", "growth_series"}
         if tool.capability_name not in business_only_tools:
             return None
 
@@ -412,7 +412,7 @@ class TerraFinHostedToolAdapter:
                     "detail": requested_value,
                     "retryable": True,
                     "modelHint": (
-                        "Do not use company_info, earnings, financials, or fundamental_screen on SPY, QQQ, DIA, VT, "
+                        "Do not use company_info, earnings, financials, fundamental_screen, or growth_series on SPY, QQQ, DIA, VT, "
                         "or similar market-benchmark ETFs. Retry with market_snapshot, market_data, risk_profile, "
                         "or valuation depending on the question."
                     ),

@@ -26,6 +26,7 @@ allowed_capabilities:
   - macro_focus
   - market_snapshot
   - fundamental_screen
+  - growth_series
   - risk_profile
   - valuation
   - fear_greed

@@ -337,7 +337,7 @@ def _special_guru_research_guidance(
         "For SPY, QQQ, DIA, VT, or other equity benchmarks, use market_snapshot, market_data, risk_profile, valuation, and economic rather than free-form macro_focus guesses.",
         "Use economic with canonical names such as Federal Funds Effective Rate, Treasury-10Y, M2, or SOMA instead of improvising descriptive macro labels.",
         "If you need economic series, use canonical names like Federal Funds Effective Rate, Unemployment Rate, M2, or SOMA rather than free-form prose labels.",
-        "Do not call company_info, earnings, financials, or fundamental_screen on SPY, QQQ, DIA, VT, or similar benchmark ETFs.",
+        "Do not call company_info, earnings, financials, fundamental_screen, or growth_series on SPY, QQQ, DIA, VT, or similar benchmark ETFs.",
         "You do not need an exhaustive research pass here. Prefer a compact 2-4 tool plan, then finalize the memo instead of collecting every possible datapoint.",
         "A good broad-market sequence is: one or two market_snapshot or risk_profile checks on the main benchmarks, then at most one or two macro or economic context checks, then finalize.",
         "Do not use `resolve` for broad-market questions. It is not a web search substitute and usually just burns steps without improving the memo.",

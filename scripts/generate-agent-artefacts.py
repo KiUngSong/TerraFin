@@ -144,6 +144,7 @@ USAGE_CATEGORIES: list[tuple[str, set[str]]] = [
             "valuation",
             "sp500_dcf",
             "fundamental_screen",
+            "growth_series",
             "risk_profile",
             "beta_estimate",
             "fcf_history",

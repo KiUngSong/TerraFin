@@ -1190,6 +1190,13 @@ def create_agent_data_router() -> APIRouter:
         except Exception as exc:
             _raise_http_error(exc)
 
+    @router.get(f"{AGENT_API_PREFIX}/growth-series")
+    def api_agent_growth_series(ticker: str = Query(..., min_length=1)) -> dict:
+        try:
+            return service.growth_series(ticker)
+        except Exception as exc:
+            _raise_http_error(exc)
+
     @router.get(f"{AGENT_API_PREFIX}/risk-profile")
     def api_agent_risk_profile(
         name: str = Query(..., min_length=1),

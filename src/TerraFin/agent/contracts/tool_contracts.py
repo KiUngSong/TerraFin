@@ -276,6 +276,13 @@ HOSTED_TOOL_CONTRACTS: dict[str, dict[str, Any]] = {
         ),
         "response_model": "FundamentalScreenResponse",
     },
+    "growth_series": {
+        "input_schema": _object_schema(
+            properties={"ticker": {"type": "string", "minLength": 1}},
+            required=["ticker"],
+        ),
+        "response_model": "GrowthSeriesResponse",
+    },
     "risk_profile": {
         "input_schema": _object_schema(
             properties={

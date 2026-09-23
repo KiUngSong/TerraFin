@@ -69,6 +69,9 @@ def _build_parser() -> argparse.ArgumentParser:
     financials_parser.add_argument("--statement", default="income", choices=["income", "balance", "cashflow"])
     financials_parser.add_argument("--period", default="annual", choices=["annual", "quarter"])
 
+    growth_series_parser = subparsers.add_parser("growth-series")
+    growth_series_parser.add_argument("ticker")
+
     macro_parser = subparsers.add_parser("macro-focus")
     macro_parser.add_argument("name")
     macro_parser.add_argument("--depth", default="auto", choices=["auto", "recent", "full"])
@@ -578,6 +581,8 @@ def main(argv: list[str] | None = None) -> int:
                 payload = client.earnings(args.ticker)
             elif args.command == "financials":
                 payload = client.financials(args.ticker, statement=args.statement, period=args.period)
+            elif args.command == "growth-series":
+                payload = client.growth_series(args.ticker)
             elif args.command == "lppl":
                 payload = client.lppl_analysis(args.name, depth=args.depth, view=args.view)
             elif args.command == "macro-focus":

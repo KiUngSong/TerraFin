@@ -7,6 +7,7 @@ from TerraFin.analytics.analysis.fundamental.dcf import (
     build_stock_reverse_dcf_payload,
 )
 from TerraFin.analytics.analysis.fundamental.dcf.presenters import build_sp500_dcf_payload
+from TerraFin.analytics.analysis.fundamental.growth import build_growth_series
 from TerraFin.analytics.analysis.fundamental.screen import run_fundamental_screen
 from TerraFin.analytics.analysis.risk.profile import run_risk_profile
 from TerraFin.analytics.analysis.risk.returns import extract_close_series
@@ -535,6 +536,24 @@ class TerraFinAgentService:
         payload["processing"] = _full_processing(
             requested_depth="full",
             source_version="stock-financials",
+            view=None,
+            frame=None,
+        )
+        return payload
+
+    def growth_series(self, ticker: str) -> dict[str, Any]:
+        """Revenue and EPS values with their YoY change, from the annual and quarterly income statements."""
+        normalized = ticker.upper()
+        tables: dict[str, dict[str, Any]] = {}
+        for period in ("annual", "quarter"):
+            try:
+                tables[period] = self.financials(normalized, statement="income", period=period)
+            except Exception:
+                tables[period] = {}
+        payload = build_growth_series(normalized, annual=tables["annual"], quarterly=tables["quarter"])
+        payload["processing"] = _full_processing(
+            requested_depth="full",
+            source_version="growth-series",
             view=None,
             frame=None,
         )

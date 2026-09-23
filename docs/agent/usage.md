@@ -47,6 +47,7 @@ with rate-limit, retry, cache, and progressive-history handling.
 | Get 5y monthly beta vs mapped benchmark                    | `beta_estimate(ticker)`                                             |
 | Get statistical risk profile (tail risk, drawdown, regime) | `risk_profile(name)`                                                |
 | Run a fundamental quality / moat screen                    | `fundamental_screen(ticker)`                                        |
+| Get revenue / EPS YoY growth series (annual + quarterly)   | `growth_series(ticker)`                                             |
 | Get guru portfolio holdings (Buffett / Marks / Druck.)     | `portfolio(guru)`                                                   |
 | Get FRED-backed economic indicator series                  | `economic(indicators)`                                              |
 | Get macro summary + chart-ready series                     | `macro_focus(name, depth, view)`                                    |
@@ -388,6 +389,7 @@ Valuation + fundamentals:
 - `GET /agent/api/consensus` — Forward EPS/revenue consensus, revisions, and price targets.
 - `GET /agent/api/fcf-history` — FCF history + 3yr-avg / latest-annual / TTM candidates.
 - `GET /agent/api/fundamental-screen` — Fundamental quality and moat screen for a ticker.
+- `GET /agent/api/growth-series` — Revenue and EPS YoY growth series for a ticker.
 - `GET /agent/api/risk-profile` — Statistical risk profile (tail risk, convexity, vol regime, drawdown).
 - `GET /agent/api/sp500-dcf` — Full S&P 500 DCF valuation (scenarios, sensitivity, methods).
 - `GET /agent/api/valuation` — DCF (incl. turnaround mode), reverse DCF, relative valuation, Graham number.

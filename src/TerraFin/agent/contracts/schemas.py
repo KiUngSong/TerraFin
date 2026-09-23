@@ -278,6 +278,10 @@ class FundamentalScreenResponse(_PermissiveResponse):
     ticker: str | None = None
 
 
+class GrowthSeriesResponse(_PermissiveResponse):
+    ticker: str | None = None
+
+
 class RiskProfileResponse(_PermissiveResponse):
     name: str | None = None
 

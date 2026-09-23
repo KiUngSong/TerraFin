@@ -791,7 +791,7 @@ def test_buffett_broad_market_prompt_disallows_treating_indices_like_businesses(
         "Use economic with canonical names such as Federal Funds Effective Rate, Treasury-10Y, M2, or SOMA" in prompt
     )
     assert (
-        "Do not call company_info, earnings, financials, or fundamental_screen on SPY, QQQ, DIA, VT, or similar benchmark ETFs."
+        "Do not call company_info, earnings, financials, fundamental_screen, or growth_series on SPY, QQQ, DIA, VT, or similar benchmark ETFs."
         in prompt
     )
     assert "Prefer a compact 2-4 tool plan" in prompt

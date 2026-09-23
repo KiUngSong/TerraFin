@@ -382,6 +382,11 @@ class TerraFinAgentClient:
             params={"ticker": ticker, "statement": statement, "period": period},
         )
 
+    def growth_series(self, ticker: str) -> dict[str, Any]:
+        if self._resolved_transport() == "python":
+            return self._service_call("growth_series", ticker)
+        return self._http_get("/agent/api/growth-series", params={"ticker": ticker})
+
     def lppl_analysis(self, name: str, *, depth: str = "auto", view: str = "daily") -> dict[str, Any]:
         if self._resolved_transport() == "python":
             return self._service_call("lppl_analysis", name, depth=depth, view=view)

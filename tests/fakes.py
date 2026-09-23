@@ -151,6 +151,17 @@ class BaseFakeService:
             "processing": processing(),
         }
 
+    def growth_series(self, ticker: str) -> dict[str, object]:
+        return {
+            "ticker": ticker,
+            "annual_revenue": [],
+            "annual_revenue_yoy": [],
+            "quarterly_revenue": [],
+            "quarterly_revenue_yoy": [],
+            "counts": {},
+            "processing": processing(),
+        }
+
     def risk_profile(self, name: str, *, depth: str = "auto") -> dict[str, object]:
         return {
             "ticker": name,

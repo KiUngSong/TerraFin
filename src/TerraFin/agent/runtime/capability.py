@@ -622,6 +622,17 @@ def build_default_capability_registry(
                 response_model_name="FundamentalScreenResponse",
             ),
             TerraFinCapability(
+                name="growth_series",
+                description="Fetch revenue and EPS values with their year-over-year change, from the annual and quarterly income statements.",
+                handler=resolved_service.growth_series,
+                focus_extractor=_focus_from_input_keys("ticker"),
+                backgroundable=True,
+                summary="Revenue and EPS YoY growth series for a ticker.",
+                cli_subcommand_name="growth-series",
+                http_route_path="/agent/api/growth-series",
+                response_model_name="GrowthSeriesResponse",
+            ),
+            TerraFinCapability(
                 name="risk_profile",
                 description="Compute statistical risk profile for an asset (tail risk, convexity, volatility regime, drawdown).",
                 handler=resolved_service.risk_profile,
