@@ -92,7 +92,9 @@ def live_route_paths() -> set[str | None]:
 
     from TerraFin.interface.server import create_app
 
-    return {getattr(route, "path", None) for route in create_app().routes}
+    app = create_app()
+    # A route mounted through an included router has no `path` of its own. The OpenAPI schema lists it.
+    return {getattr(route, "path", None) for route in app.routes} | set(app.openapi()["paths"])
 
 
 def _declared_class_names() -> set[str]:
