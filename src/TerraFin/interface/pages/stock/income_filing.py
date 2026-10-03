@@ -26,11 +26,27 @@ _UNIT_MULT = {"thousands": 1_000, "millions": 1_000_000, "billions": 1_000_000_0
 
 def _quarter_col(cell: str) -> bool:
     """True for a QUARTER period-column header (not a YTD six/nine-month column).
-    Handles the common dialects: 'Three Months Ended ...' and 'Quarter Ended ...'."""
+    Handles 'Three Months Ended ...', 'Quarter Ended ...' and an 8-K's '4th Qtr.'."""
     cl = cell.lower()
     if any(x in cl for x in ("six month", "nine month", "year ended", "twelve month", "fiscal year")):
         return False
-    return ("three month" in cl) or ("quarter ended" in cl) or ("quarter end" in cl)
+    return (("three month" in cl) or ("quarter ended" in cl) or ("quarter end" in cl)
+            or re.search(r"\bqtr\b", cl) is not None)
+
+
+_MONTHS = {m: i for i, m in enumerate(
+    ("january", "february", "march", "april", "may", "june",
+     "july", "august", "september", "october", "november", "december"), start=1)}
+_COL_DATE_RE = re.compile(rf"({'|'.join(_MONTHS)})\s+(\d{{1,2}}),?\s+(20\d{{2}})", re.I)
+
+
+def _col_date(cell: str) -> str | None:
+    """The period end in a column header, as ISO: an 8-K's reportDate is its release date."""
+    m = _COL_DATE_RE.search(cell or "")
+    if not m:
+        return None
+    month = _MONTHS[m.group(1).lower()]
+    return f"{m.group(3)}-{month:02d}-{int(m.group(2)):02d}"
 
 
 def _cells(line: str) -> list[str]:
@@ -128,6 +144,7 @@ def _parse_income_statement(md: str, report_date: str):
     for start in _statement_starts(md):
         lines = md[start:].splitlines()
         cur_col = prior_col = rows_start = None
+        cur_end = prior_end = None
         for i, ln in enumerate(lines[:40]):
             if "|" not in ln:
                 continue
@@ -137,10 +154,12 @@ def _parse_income_statement(md: str, report_date: str):
                     if not _quarter_col(c):
                         continue
                     ym = re.search(r"(20\d{2})", c)
-                    if ym and ym.group(1) == ry:
-                        cur_col = idx
+                    # Current: leftmost, as a release lists its quarter before the sequential one.
+                    # Prior: last-wins, as a sequential quarter can sit left of the year-ago one.
+                    if ym and ym.group(1) == ry and cur_col is None:
+                        cur_col, cur_end = idx, _col_date(c)
                     elif ym and ym.group(1) == py:
-                        prior_col = idx
+                        prior_col, prior_end = idx, _col_date(c)
                 if cur_col is not None:
                     rows_start = i + 1
                     break
@@ -171,6 +190,9 @@ def _parse_income_statement(md: str, report_date: str):
                 continue
             key = _classify(cells[0])
             if not key:
+                continue
+            # A percent cell ("54%", or "54 | %") is a ratio row, not $54 of gross profit.
+            if "%" in cells[cur_col] or (len(cells) > cur_col + 1 and cells[cur_col + 1].strip() == "%"):
                 continue
             cv = _num(cells[cur_col])
             pv = _num(cells[prior_col]) if (prior_col is not None and len(cells) > prior_col) else None
@@ -209,13 +231,9 @@ def _parse_income_statement(md: str, report_date: str):
         # the opex anchor below still balances.
         for _d in (cur, prior):
             _rv, _gp = _d.get("revenue"), _d.get("grossProfit")
-            # >=2% of revenue: a stray ratio row (54 against revenue 11,536) is not a
-            # credible gross profit, and trusting it would wipe out costOfRevenue.
-            if _rv and _gp is not None and 0.02 * _rv <= _gp < _rv:
+            # Ratio rows are skipped above, so only a gross profit above revenue is impossible.
+            if _rv and _gp is not None and _gp < _rv:
                 _d["costOfRevenue"] = _rv - _gp
-            elif _gp is not None and _rv and _gp < 0.02 * _rv:
-                log.warning("income_filing: implausible grossProfit %s vs revenue %s — ignoring", _gp, _rv)
-                _d.pop("grossProfit", None)
         cur = {k: (v * mult if v is not None else None) for k, v in cur.items()}
         prior = {k: (v * mult if v is not None else None) for k, v in prior.items()}
         # Anchor total operating expense on the REPORTED operating income
@@ -237,8 +255,8 @@ def _parse_income_statement(md: str, report_date: str):
                 # balance). Otherwise leave it for the assembler's R&D+SG&A default.
                 if _opex >= _captured:
                     _d["operatingExpense"] = _opex
-        prior_as_of = f"{py}{report_date[4:]}"
-        return cur, prior, report_date, prior_as_of
+        # The column's own period end first, since an 8-K's reportDate is its release date.
+        return cur, prior, (cur_end or report_date), (prior_end or f"{py}{report_date[4:]}")
     return None, None, None, None
 
 
@@ -332,9 +350,12 @@ def build_cashflow_context(ticker: str, form: str = "10-Q") -> dict | None:
                     # showing both quarterly and YTD columns states both spans, but
                     # the selected column is always the YTD one, so prefer the widest.
                     _region = " ".join(_lines[:rows_start]).lower()
+                    # A release states no month span: its cash-flow statement is the full year.
                     period_label = ("nine-month" if "nine month" in _region else
                                     "six-month" if "six month" in _region else
-                                    "three-month" if "three month" in _region else "six-month")
+                                    "three-month" if "three month" in _region else
+                                    "annual" if ("year ended" in _region
+                                                 or "twelve month" in _region) else "six-month")
                     break
         if cur_col is None:
             continue
