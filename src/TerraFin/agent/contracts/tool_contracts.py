@@ -430,7 +430,7 @@ HOSTED_TOOL_CONTRACTS: dict[str, dict[str, Any]] = {
     # Persona-consult tools. Each takes a single `question` arg (the
     # orchestrator-scoped prompt sent to the persona subagent) and returns
     # a `GuruResearchMemo`-shaped payload. See
-    # `docs/agent/architecture.md#orchestrator--persona-subagents`.
+    # `docs/agent/architecture.md#orchestrator-persona-subagents`.
     "consult_warren_buffett": {
         "input_schema": _object_schema(
             properties={"question": {"type": "string", "minLength": 1}},

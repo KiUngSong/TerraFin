@@ -34,7 +34,7 @@ def run_guru_consult(
     returns the persona's `GuruResearchMemo` as a JSON-ready dict for
     the orchestrator to read as its tool_result.
 
-    See `docs/agent/architecture.md#orchestrator--persona-subagents` for
+    See `docs/agent/architecture.md#orchestrator-persona-subagents` for
     the authoritative shape.
     """
     registry = persona_registry or build_default_persona_registry()
