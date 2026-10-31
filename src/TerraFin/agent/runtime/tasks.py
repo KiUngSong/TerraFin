@@ -37,6 +37,7 @@ class TerraFinTaskRecord:
     worker_id: str | None = None
     lease_expires_at: datetime | None = None
     attempt_count: int = 0
+    origin_tool_call_id: str | None = None
 
 
 class TerraFinTaskRegistry:
@@ -51,6 +52,7 @@ class TerraFinTaskRegistry:
         description: str,
         session_id: str | None = None,
         input_payload: Mapping[str, Any] | None = None,
+        origin_tool_call_id: str | None = None,
     ) -> TerraFinTaskRecord:
         with self._lock:
             now = _utc_now()
@@ -62,6 +64,7 @@ class TerraFinTaskRegistry:
                 session_id=session_id,
                 created_at=now,
                 input_payload=dict(input_payload or {}),
+                origin_tool_call_id=origin_tool_call_id,
             )
             self._tasks[record.task_id] = record
             return record
@@ -116,6 +119,34 @@ class TerraFinTaskRegistry:
                 progress=dict(progress or previous.progress),
                 lease_expires_at=previous.lease_expires_at,
                 worker_id=previous.worker_id,
+            )
+            self._tasks[task_id] = record
+            return record
+
+    def record_progress(
+        self,
+        task_id: str,
+        *,
+        progress: Mapping[str, Any] | None = None,
+        lease_expires_at: datetime | None = None,
+    ) -> TerraFinTaskRecord:
+        """Heartbeat a running task mid-execution.
+
+        Unlike `mark_running`, this keeps `started_at`, so elapsed time is not
+        reset on every tick, and renews the lease when `lease_expires_at` is
+        given, so another worker does not re-claim a task still making progress.
+        """
+        with self._lock:
+            previous = self._tasks[task_id]
+            if _is_terminal_task_status(previous.status):
+                return previous
+            record = replace(
+                previous,
+                status="running",
+                started_at=previous.started_at or _utc_now(),
+                progress=dict(progress or previous.progress),
+                worker_id=previous.worker_id,
+                lease_expires_at=lease_expires_at if lease_expires_at is not None else previous.lease_expires_at,
             )
             self._tasks[task_id] = record
             return record

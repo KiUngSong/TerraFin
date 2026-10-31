@@ -1,3 +1,4 @@
+import json
 from collections.abc import Callable, Mapping
 from typing import Any
 
@@ -255,6 +256,9 @@ class TerraFinHostedAgentLoop:
         recovery_tracker = RecoveryTracker(self.recovery_policy)
 
         self._ensure_message_budget(conversation, incoming_messages=1)
+        # Background tasks that finished since the last turn are delivered
+        # before the model sees this one. See `docs/agent/hosted-runtime.md`.
+        self._drain_pending_completions(session_id, conversation, added=added)
         user_message = TerraFinConversationMessage(
             role="user",
             content=content,
@@ -265,7 +269,7 @@ class TerraFinHostedAgentLoop:
         # No pre-intercept router. The orchestrator agent's own LLM decides
         # when to consult a hidden persona (Buffett / Marks / Druckenmiller)
         # via `consult_<persona>` tool-calls handled by the tool adapter.
-        # See `docs/agent/architecture.md#orchestrator--persona-subagents`.
+        # See `docs/agent/architecture.md#orchestrator-persona-subagents`.
 
         # Track (tool_name, canonical_args) call counts across this run so we
         # can break LLM loops that re-issue the same tool call step after step.
@@ -502,6 +506,75 @@ class TerraFinHostedAgentLoop:
                 )
                 for tool_call in tool_calls
             ),
+        )
+
+    def _drain_pending_completions(
+        self,
+        session_id: str,
+        conversation: TerraFinHostedConversation,
+        *,
+        added: list[TerraFinConversationMessage],
+    ) -> None:
+        """Deliver background-task completions queued since the last turn.
+
+        A marker is cleared only after its note is appended to the transcript,
+        so a failed append leaves it for the next turn. A marker whose task
+        already has a note in the transcript is cleared without a second note.
+        A missing session is a no-op.
+
+        Each completion is delivered as one user-role note. Every provider
+        adapter forwards a user message as is, while a synthesized tool result
+        with no matching tool call is rejected. `internalOnly` hides the note
+        from the UI but not from the model.
+        """
+        try:
+            markers = self.runtime.session_store.peek_pending_completions(session_id)
+        except KeyError:
+            return
+        if not markers:
+            return
+        delivered_task_ids = {
+            str(message.metadata.get("taskId") or "").strip()
+            for message in conversation.snapshot()
+            if message.metadata.get("internalCompletionDelivery")
+        }
+        for marker in markers:
+            task_id = str(marker.get("taskId") or "").strip()
+            if task_id and task_id in delivered_task_ids:
+                self.runtime.session_store.clear_pending_completions(session_id, task_ids=(task_id,))
+                continue
+            note_message = self._build_completion_delivery_message(marker)
+            self._append_conversation_message(conversation, note_message, added=added)
+            if task_id:
+                delivered_task_ids.add(task_id)
+                self.runtime.session_store.clear_pending_completions(session_id, task_ids=(task_id,))
+        self._persist_conversation_runtime_state(session_id, conversation)
+
+    def _build_completion_delivery_message(
+        self,
+        marker: Mapping[str, Any],
+    ) -> TerraFinConversationMessage:
+        capability_name = str(marker.get("capabilityName") or "deep_research")
+        report = marker.get("result")
+        report_text = (
+            json.dumps(report, ensure_ascii=False, separators=(",", ":")) if report is not None else "(no report)"
+        )
+        content = (
+            "[Automated system note: background research completed]\n\n"
+            f"A background TerraFin '{capability_name}' task the user started earlier has finished. "
+            "Integrate its findings into your reply to the user's next message; do not re-run the task.\n\n"
+            f"{report_text}"
+        )
+        return TerraFinConversationMessage(
+            role="user",
+            content=content,
+            metadata={
+                "internalOnly": True,
+                "internalCompletionDelivery": True,
+                "capabilityName": capability_name,
+                "taskId": marker.get("taskId"),
+            },
+            blocks=(make_text_block(content),),
         )
 
     def _build_recoverable_tool_error_message(

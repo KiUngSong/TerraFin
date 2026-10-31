@@ -7,6 +7,7 @@ materialises every TerraFin capability the agent service exposes.
 """
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
+from inspect import signature
 from typing import TYPE_CHECKING, Any
 
 from .artifacts import (
@@ -96,10 +97,16 @@ class TerraFinCapabilityRegistry:
         capability_name: str,
         *,
         context: "TerraFinAgentContext | None" = None,
+        progress_reporter: Callable[[str], None] | None = None,
         **kwargs: Any,
     ) -> dict[str, Any]:
         capability = self.get(capability_name)
-        payload = capability.handler(**kwargs)
+        handler_kwargs = dict(kwargs)
+        # The progress reporter goes only to a handler that takes a `progress`
+        # parameter. It stays out of `kwargs`, so recorded inputs never carry it.
+        if progress_reporter is not None and "progress" in signature(capability.handler).parameters:
+            handler_kwargs["progress"] = progress_reporter
+        payload = capability.handler(**handler_kwargs)
         if not isinstance(payload, dict):
             raise TypeError(f"Capability '{capability_name}' must return a dict payload.")
         if context is not None:

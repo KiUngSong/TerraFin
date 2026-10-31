@@ -1,5 +1,5 @@
 """Offline tests for deferred-on-next-turn delivery of backgroundable task
-completions (Part B for `deep_research`).
+completions, tested with a stub `deep_research` capability.
 
 A backgrounded task's report is NOT pushed through a server-initiated model
 turn. Instead, on completion the worker stashes a pending-completion marker in
@@ -16,6 +16,7 @@ import time
 import pytest
 from test_loop import _fake_chart_opener, _FakeService
 
+from TerraFin.agent.contracts import tool_contracts
 from TerraFin.agent.contracts.conversation import (
     TerraFinConversationMessage,
     TerraFinHostedConversation,
@@ -58,9 +59,28 @@ def _stub_deep_research(*, ticker, question=None, progress=None):
     return report
 
 
+@pytest.fixture(autouse=True)
+def _stub_tool_contract(monkeypatch):
+    # The stub capability is test-only, so its hosted tool contract lives only
+    # for each test's scope.
+    monkeypatch.setitem(
+        tool_contracts.HOSTED_TOOL_CONTRACTS,
+        "deep_research",
+        {
+            "input_schema": {
+                "type": "object",
+                "properties": {"ticker": {"type": "string"}, "question": {"type": "string"}},
+                "required": [],
+                "additionalProperties": False,
+            },
+            "response_model": None,
+        },
+    )
+
+
 def _stubbed_registry(service):
     registry = build_default_capability_registry(service, chart_opener=_fake_chart_opener)
-    # Replace the live spine-backed handler with a canned one so the async
+    # Register a stub `deep_research` with a canned report so the async
     # execution path runs fully offline.
     registry._capabilities["deep_research"] = TerraFinCapability(
         name="deep_research",

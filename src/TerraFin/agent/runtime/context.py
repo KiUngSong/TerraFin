@@ -25,8 +25,20 @@ class TerraFinAgentContext:
     service: "TerraFinAgentService | None" = None
     metadata: dict[str, Any] = field(default_factory=dict)
 
-    def call(self, capability_name: str, /, **kwargs: Any) -> dict[str, Any]:
-        return self.registry.invoke(capability_name, context=self, **kwargs)
+    def call(
+        self,
+        capability_name: str,
+        /,
+        *,
+        progress_reporter: Callable[[str], None] | None = None,
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        return self.registry.invoke(
+            capability_name,
+            context=self,
+            progress_reporter=progress_reporter,
+            **kwargs,
+        )
 
     def run_task(
         self,

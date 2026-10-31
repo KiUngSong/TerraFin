@@ -1,5 +1,6 @@
 import json
 import sqlite3
+from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -251,6 +252,20 @@ class HostedSessionStore:
     def delete(self, session_id: str) -> TerraFinHostedSessionRecord:
         raise NotImplementedError
 
+    def append_pending_completion(
+        self,
+        session_id: str,
+        *,
+        marker: dict[str, Any],
+    ) -> None:
+        raise NotImplementedError
+
+    def peek_pending_completions(self, session_id: str) -> tuple[dict[str, Any], ...]:
+        raise NotImplementedError
+
+    def clear_pending_completions(self, session_id: str, *, task_ids: tuple[str, ...]) -> None:
+        raise NotImplementedError
+
     def cleanup_expired(self, *, session_ttl_seconds: int) -> tuple[TerraFinHostedSessionRecord, ...]:
         raise NotImplementedError
 
@@ -318,6 +333,7 @@ def _serialize_task(task: TerraFinTaskRecord) -> dict[str, Any]:
         "workerId": task.worker_id,
         "leaseExpiresAt": _isoformat(task.lease_expires_at),
         "attemptCount": task.attempt_count,
+        "originToolCallId": task.origin_tool_call_id,
     }
 
 
@@ -338,7 +354,12 @@ def _deserialize_task(payload: dict[str, Any]) -> TerraFinTaskRecord:
         worker_id=payload.get("workerId"),
         lease_expires_at=_parse_datetime(payload.get("leaseExpiresAt")),
         attempt_count=int(payload.get("attemptCount", 0)),
+        origin_tool_call_id=payload.get("originToolCallId"),
     )
+
+
+def _marker_task_id(marker: Mapping[str, Any]) -> str:
+    return str(marker.get("taskId") or "").strip()
 
 
 def _task_is_claimable(task: TerraFinTaskRecord, *, now: datetime) -> bool:
@@ -514,6 +535,7 @@ class InMemoryHostedSessionStore(HostedSessionStore):
     def __init__(self) -> None:
         self._records: dict[str, TerraFinHostedSessionRecord] = {}
         self._view_contexts: dict[str, TerraFinHostedViewContextRecord] = {}
+        self._pending_completions: dict[str, list[dict[str, Any]]] = {}
         self._lock = RLock()
 
     def create(self, record: TerraFinHostedSessionRecord) -> TerraFinHostedSessionRecord:
@@ -713,8 +735,42 @@ class InMemoryHostedSessionStore(HostedSessionStore):
             record.touch()
             return record
 
+    def append_pending_completion(
+        self,
+        session_id: str,
+        *,
+        marker: dict[str, Any],
+    ) -> None:
+        with self._lock:
+            if session_id not in self._records:
+                raise KeyError(session_id)
+            markers = self._pending_completions.setdefault(session_id, [])
+            task_id = _marker_task_id(marker)
+            if any(_marker_task_id(existing) == task_id for existing in markers):
+                return
+            markers.append(dict(marker))
+
+    def peek_pending_completions(self, session_id: str) -> tuple[dict[str, Any], ...]:
+        with self._lock:
+            return tuple(dict(marker) for marker in self._pending_completions.get(session_id, []))
+
+    def clear_pending_completions(self, session_id: str, *, task_ids: tuple[str, ...]) -> None:
+        if not task_ids:
+            return
+        drop = set(task_ids)
+        with self._lock:
+            markers = self._pending_completions.get(session_id)
+            if not markers:
+                return
+            remaining = [marker for marker in markers if _marker_task_id(marker) not in drop]
+            if remaining:
+                self._pending_completions[session_id] = remaining
+            else:
+                self._pending_completions.pop(session_id, None)
+
     def delete(self, session_id: str) -> TerraFinHostedSessionRecord:
         with self._lock:
+            self._pending_completions.pop(session_id, None)
             return self._records.pop(session_id)
 
     def cleanup_expired(self, *, session_ttl_seconds: int) -> tuple[TerraFinHostedSessionRecord, ...]:
@@ -730,6 +786,7 @@ class InMemoryHostedSessionStore(HostedSessionStore):
                     continue
                 removed.append(record)
                 del self._records[session_id]
+                self._pending_completions.pop(session_id, None)
         return tuple(removed)
 
 
@@ -786,6 +843,21 @@ class SQLiteHostedSessionStore(HostedSessionStore):
                 """
                 CREATE INDEX IF NOT EXISTS idx_hosted_view_contexts_updated
                 ON hosted_view_contexts(updated_at)
+                """
+            )
+            # Background-task completions awaiting delivery on the user's next
+            # turn. They live outside the session payload so a whole-record
+            # persist() cannot drop one, and every read hits this table, so all
+            # workers see the same markers. (session_id, task_id) dedupes them.
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS hosted_pending_completions (
+                    session_id TEXT NOT NULL,
+                    task_id TEXT NOT NULL,
+                    payload TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    PRIMARY KEY (session_id, task_id)
+                )
                 """
             )
 
@@ -1165,11 +1237,68 @@ class SQLiteHostedSessionStore(HostedSessionStore):
             record.touch()
             return self._save_record(record)
 
+    def append_pending_completion(
+        self,
+        session_id: str,
+        *,
+        marker: dict[str, Any],
+    ) -> None:
+        # `INSERT OR IGNORE` on the (session_id, task_id) key keeps the first
+        # marker when two workers record the same completion.
+        with self._lock:
+            with self._connect() as connection:
+                connection.execute("BEGIN IMMEDIATE")
+                exists = connection.execute(
+                    "SELECT 1 FROM hosted_sessions WHERE session_id = ?",
+                    (session_id,),
+                ).fetchone()
+                if exists is None:
+                    raise KeyError(session_id)
+                task_id = _marker_task_id(marker) or f"anon:{uuid4().hex}"
+                connection.execute(
+                    """
+                    INSERT OR IGNORE INTO hosted_pending_completions(session_id, task_id, payload, created_at)
+                    VALUES (?, ?, ?, ?)
+                    """,
+                    (
+                        session_id,
+                        task_id,
+                        json.dumps(dict(marker), ensure_ascii=False, separators=(",", ":")),
+                        _utc_now().isoformat(),
+                    ),
+                )
+
+    def peek_pending_completions(self, session_id: str) -> tuple[dict[str, Any], ...]:
+        with self._lock:
+            with self._connect() as connection:
+                rows = connection.execute(
+                    "SELECT payload FROM hosted_pending_completions WHERE session_id = ? ORDER BY created_at, rowid",
+                    (session_id,),
+                ).fetchall()
+        markers: list[dict[str, Any]] = []
+        for row in rows:
+            parsed = json.loads(str(row[0]))
+            if isinstance(parsed, dict):
+                markers.append(parsed)
+        return tuple(markers)
+
+    def clear_pending_completions(self, session_id: str, *, task_ids: tuple[str, ...]) -> None:
+        if not task_ids:
+            return
+        with self._lock:
+            with self._connect() as connection:
+                placeholders = ",".join("?" for _ in task_ids)
+                connection.execute(
+                    f"DELETE FROM hosted_pending_completions WHERE session_id = ? AND task_id IN ({placeholders})",
+                    (session_id, *task_ids),
+                )
+
     def delete(self, session_id: str) -> TerraFinHostedSessionRecord:
         with self._lock:
             record = self.get(session_id)
             with self._connect() as connection:
                 connection.execute("DELETE FROM hosted_sessions WHERE session_id = ?", (session_id,))
+                connection.execute("DELETE FROM hosted_pending_completions WHERE session_id = ?", (session_id,))
             self._cache.pop(session_id, None)
             return record
 
