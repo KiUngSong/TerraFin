@@ -11,7 +11,9 @@ read_when:
 
 # Analytics Modules
 
-TerraFin's analytics package lives under `src/TerraFin/analytics/`. It is a mix
+Package paths on this page drop the leading `src/TerraFin/`: `data/` means `src/TerraFin/data/`.
+
+TerraFin's analytics package lives under `analytics/`. It is a mix
 of:
 
 - pure indicator functions used by the chart and agent APIs
@@ -28,7 +30,7 @@ are still standalone or experimental from a UI/API perspective.
 ## Base utilities
 
 `get_returns(df: TimeSeriesDataFrame)` in
-`src/TerraFin/analytics/analysis/base_analytics.py` is the shared helper for
+`analytics/analysis/base_analytics.py` is the shared helper for
 daily percentage returns with `NaN` rows removed.
 
 ## Technical analysis
@@ -48,26 +50,24 @@ Most technical functions:
 
 | Function | Module | Signature | Returns |
 |----------|--------|-----------|---------|
-| `rsi` | `technical/rsi.py` | `rsi(closes, window=14)` | `(offset, values)` — offset = window + 1 |
-| `macd` | `technical/macd.py` | `macd(closes, fast=12, slow=26, signal_window=9)` | `(offset, macd, signal, histogram)` — offset = slow - 1 |
-| `moving_average` | `technical/ma.py` | `moving_average(closes, window)` | `(offset, values)` — offset = window - 1 |
-| `bollinger_bands` | `technical/bollinger.py` | `bollinger_bands(closes, window=20, num_std=2.0)` | `(offset, upper, lower)` — offset = window - 1 |
-| `realized_vol` | `technical/volatility.py` | `realized_vol(closes, window=21)` | `(offset, values)` — annualized, offset = window |
-| `range_vol` | `technical/volatility.py` | `range_vol(highs, lows, window=20)` | `(offset, values)` — Parkinson's, offset = window - 1 |
-| `trend_signal` | `technical/trend_signal.py` | `trend_signal(closes, window=126, distribution="normal", df=5)` | `(offset, values)` — Delta-Straddle signal in [-1, +1], offset = window + 1 |
-| `trend_signal_composite` | `technical/trend_signal.py` | `trend_signal_composite(closes, windows=[32,64,126,252,504])` | `(offset, values)` — multi-timeframe averaged signal in [-1, +1] |
-| `mandelbrot_fractal_dimension` | `technical/mandelbrot.py` | `mandelbrot_fractal_dimension(closes, window=65)` | `(offset, values)` — rolling path-complexity score in [1, 2], where lower is smoother / more fragile and higher is choppier / more anti-fragile. The function default is `window=65`; TerraFin's chart calls it with `window=130` explicitly and renders that line by default. Agent consumers can request 65, 130, and 260 explicitly. |
-| `percentile_rank` | `technical/vol_regime.py` | `percentile_rank(values, window=126)` | `(offset, ranks)` — rolling min-max rank in [0, 100] |
-| `vol_regime` | `technical/vol_regime.py` | `vol_regime(values, window=126, entry_threshold=20.0, exit_threshold=80.0)` | `(offset, regimes)` — 1=stable, 0=unstable with hysteresis |
-| `lppl` | `technical/lppl.py` | `lppl(closes, n_windows=33, min_window=50, max_window=750, window_step=5, max_iter=45, seed=42)` | `LPPLResult` — confidence, full-series fit, qualifying sub-window fits. Pass `n_windows=None` to use the full article ladder (750→50 in 5-day steps). |
+| `rsi` | `analytics/analysis/technical/rsi.py` | `rsi(closes, window=14)` | `(offset, values)` — offset = window + 1 |
+| `macd` | `analytics/analysis/technical/macd.py` | `macd(closes, fast=12, slow=26, signal_window=9)` | `(offset, macd, signal, histogram)` — offset = slow - 1 |
+| `moving_average` | `analytics/analysis/technical/ma.py` | `moving_average(closes, window)` | `(offset, values)` — offset = window - 1 |
+| `bollinger_bands` | `analytics/analysis/technical/bollinger.py` | `bollinger_bands(closes, window=20, num_std=2.0)` | `(offset, upper, lower)` — offset = window - 1 |
+| `realized_vol` | `analytics/analysis/technical/volatility.py` | `realized_vol(closes, window=21)` | `(offset, values)` — annualized, offset = window |
+| `range_vol` | `analytics/analysis/technical/volatility.py` | `range_vol(highs, lows, window=20)` | `(offset, values)` — Parkinson's, offset = window - 1 |
+| `trend_signal` | `analytics/analysis/technical/trend_signal.py` | `trend_signal(closes, window=126, distribution="normal", df=5)` | `(offset, values)` — Delta-Straddle signal in [-1, +1], offset = window + 1 |
+| `trend_signal_composite` | `analytics/analysis/technical/trend_signal.py` | `trend_signal_composite(closes, windows=[32,64,126,252,504])` | `(offset, values)` — multi-timeframe averaged signal in [-1, +1] |
+| `mandelbrot_fractal_dimension` | `analytics/analysis/technical/mandelbrot.py` | `mandelbrot_fractal_dimension(closes, window=65)` | `(offset, values)` — rolling path-complexity score in [1, 2], where lower is smoother / more fragile and higher is choppier / more anti-fragile. The function default is `window=65`; TerraFin's chart calls it with `window=130` explicitly and renders that line by default. Agent consumers can request 65, 130, and 260 explicitly. |
+| `percentile_rank` | `analytics/analysis/technical/vol_regime.py` | `percentile_rank(values, window=126)` | `(offset, ranks)` — rolling min-max rank in [0, 100] |
+| `vol_regime` | `analytics/analysis/technical/vol_regime.py` | `vol_regime(values, window=126, entry_threshold=20.0, exit_threshold=80.0)` | `(offset, regimes)` — 1=stable, 0=unstable with hysteresis |
+| `lppl` | `analytics/analysis/technical/lppl.py` | `lppl(closes, n_windows=33, min_window=50, max_window=750, window_step=5, max_iter=45, seed=42)` | `LPPLResult` — confidence, full-series fit, qualifying sub-window fits. Pass `n_windows=None` to use the full article ladder (750→50 in 5-day steps). |
 
-All module paths are relative to `src/TerraFin/analytics/analysis/`.
-
-`technical/macd.py` also exposes `ema(values, span)` as a reusable helper.
+`analytics/analysis/technical/macd.py` also exposes `ema(values, span)` as a reusable helper.
 
 ### Spectral analysis
 
-`technical/spectral.py` contains frequency-domain utilities for cycle analysis.
+`analytics/analysis/technical/spectral.py` contains frequency-domain utilities for cycle analysis.
 These are currently standalone helpers rather than chart overlays.
 
 | Function | Purpose |
@@ -80,7 +80,7 @@ These are currently standalone helpers rather than chart overlays.
 
 ### TimeSeriesDataFrame wrappers
 
-`technical/volatility.py` also exposes pandas-friendly wrappers:
+`analytics/analysis/technical/volatility.py` also exposes pandas-friendly wrappers:
 
 | Function | Input | Output |
 |----------|-------|--------|
@@ -89,8 +89,8 @@ These are currently standalone helpers rather than chart overlays.
 
 ## Fundamental analysis
 
-Fundamental analysis lives under `src/TerraFin/analytics/analysis/fundamental/`.
-DCF now lives in the dedicated package `src/TerraFin/analytics/analysis/fundamental/dcf/`.
+Fundamental analysis lives under `analytics/analysis/fundamental/`.
+DCF now lives in the dedicated package `analytics/analysis/fundamental/dcf/`.
 
 | Entry point | Purpose |
 |-------------|---------|
@@ -115,7 +115,7 @@ Current DCF assumption notes now live in
 
 ## Risk analysis
 
-Risk analysis lives under `src/TerraFin/analytics/analysis/risk/`.
+Risk analysis lives under `analytics/analysis/risk/`.
 
 | Entry point | Purpose |
 |-------------|---------|
@@ -133,7 +133,7 @@ Beta-method and benchmark-mapping notes also live in
 
 ## Options analysis
 
-Options analysis lives under `src/TerraFin/analytics/analysis/options/`.
+Options analysis lives under `analytics/analysis/options/`.
 
 | Entry point | Purpose |
 |-------------|---------|
@@ -144,7 +144,7 @@ GEX is now a first-class API feature. Per-ticker GEX is served by `/stock/api/ge
 
 ## Market data modules
 
-`src/TerraFin/analytics/data/` contains data-fetching helpers used by analytics and market indicators.
+`data/providers/market/` contains data-fetching helpers used by analytics and market indicators.
 
 | Module | Purpose |
 |--------|---------|
@@ -152,7 +152,7 @@ GEX is now a first-class API feature. Per-ticker GEX is served by `/stock/api/ge
 
 ## Portfolio optimization
 
-Portfolio optimization lives under `src/TerraFin/analytics/analysis/portfolio/`.
+Portfolio optimization lives under `analytics/analysis/portfolio/`.
 
 | Entry point | Purpose |
 |-------------|---------|
@@ -163,10 +163,10 @@ This is implemented as a standalone computation module rather than a UI feature.
 
 ## Pattern signals
 
-`src/TerraFin/analytics/analysis/patterns/` is the systematic, rules-based
+`analytics/analysis/patterns/` is the systematic, rules-based
 pattern catalog — the "do any of these named market conditions match the
-latest bar?" surface. Where `technical/` exposes primitives (RSI value, MACD
-line), `patterns/` evaluates whether a *named pattern* fires:
+latest bar?" surface. Where `analytics/analysis/technical/` exposes primitives (RSI value, MACD
+line), `analytics/analysis/patterns/` evaluates whether a *named pattern* fires:
 `CAPITULATION_BOTTOM`, `MA_GOLDEN_CROSS`, `WYCKOFF_SPRING`,
 `52W_NEW_HIGH`, etc. Each pattern returns zero or more `Signal` objects
 (`name`, `ticker`, `severity`, `message`, `snapshot`) and is stateless —
@@ -202,7 +202,7 @@ caller wants a narrower scan.
 
 ### Regime gates
 
-A few patterns consult `spy_trend_ok(50)` from `patterns/_base.py` — a
+A few patterns consult `spy_trend_ok(50)` from `analytics/analysis/patterns/_base.py` — a
 day-cached "is SPY above its 50-day SMA" flag. Bullish-entry patterns
 (`MINERVINI_TEMPLATE`, `52W_NEW_HIGH`) suppress fires when the broad
 market is in primary downtrend. This was added after bear-period backtests
@@ -211,7 +211,7 @@ COVID 2020, and the 2022 bear.
 
 ### Pull vs push: same `Signal`, different trigger
 
-`patterns/` is the **pull-driven** side: the agent flow, weekly reports,
+`analytics/analysis/patterns/` is the **pull-driven** side: the agent flow, weekly reports,
 or an ad-hoc backtest asks "evaluate every pattern on this frame now."
 The **push-driven** flavor lives at `interface/infra/monitor/`: an external
 realtime monitor service holds a broker WebSocket open, runs its own
@@ -222,7 +222,7 @@ shape.
 
 ## Chart similarity search
 
-`src/TerraFin/analytics/similarity/` — sliding-window template matching across a large stock universe.
+`analytics/similarity/` — sliding-window template matching across a large stock universe.
 
 | Module | Role |
 |--------|------|
@@ -266,7 +266,7 @@ See `notebooks/analytics/chart_similarity_scan.ipynb` for an interactive walkthr
 
 ## Simulation
 
-Simulation lives under `src/TerraFin/analytics/simulation/`.
+Simulation lives under `analytics/simulation/`.
 
 | Entry point | Purpose |
 |-------------|---------|

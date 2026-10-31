@@ -5,6 +5,8 @@ summary: Local workflow for code, docs, tests, notebooks, and frontend changes.
 
 # Development Guide
 
+Package paths on this page drop the leading `src/TerraFin/`: `data/` means `src/TerraFin/data/`.
+
 This page is the maintainer-facing companion to the product docs.
 
 ## Repo Layout
@@ -56,7 +58,7 @@ python scripts/package_smoke.py
 
 ## Frontend
 
-The frontend lives under `src/TerraFin/interface/frontend/`.
+The frontend lives under `interface/frontend/`.
 
 Typical commands:
 
@@ -103,7 +105,7 @@ Some code-adjacent references remain useful even though they are not formal
 docs pages:
 
 - analytics implementation notes:
-  [src/TerraFin/analytics/analysis/README.md](https://github.com/KiUngSong/TerraFin/blob/main/src/TerraFin/analytics/analysis/README.md)
+  [analytics/analysis/README.md](https://github.com/KiUngSong/TerraFin/blob/main/src/TerraFin/analytics/analysis/README.md)
 - shipped TerraFin skill:
   [skills/terrafin/SKILL.md](https://github.com/KiUngSong/TerraFin/blob/main/skills/terrafin/SKILL.md)
 

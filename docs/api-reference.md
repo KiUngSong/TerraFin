@@ -140,20 +140,9 @@ session-scoped calendar selection state.
 
 Prefix: `/agent/api/*`
 
-Current external-agent routes:
-
-- `GET /agent/api/resolve`
-- `GET /agent/api/market-data`
-- `GET /agent/api/indicators`
-- `GET /agent/api/market-snapshot`
-- `GET /agent/api/company`
-- `GET /agent/api/earnings`
-- `GET /agent/api/financials`
-- `GET /agent/api/portfolio`
-- `GET /agent/api/economic`
-- `GET /agent/api/macro-focus`
-- `GET /agent/api/lppl`
-- `GET /agent/api/calendar`
+The [route summary](agent/usage.md#route-summary) lists every route, generated
+from the capability registry. `/openapi.json` on a running server is the
+authority.
 
 ## Hosted Agent Runtime
 

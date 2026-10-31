@@ -16,7 +16,7 @@ Hosted model selection resolves in this order:
 1. `TERRAFIN_AGENT_MODEL_REF`
 2. saved CLI state from `.terrafin/agent-models.json`
 3. legacy `TERRAFIN_OPENAI_MODEL`
-4. built-in default `openai/gpt-4.1-mini`
+4. built-in default `openai/gpt-6-luna`
 
 Provider credentials resolve in this order:
 
@@ -59,7 +59,7 @@ state.
 
 | Variable | Purpose |
 |----------|---------|
-| `TERRAFIN_AGENT_MODEL_REF` | Canonical hosted model ref such as `openai/gpt-4.1` or `google/gemini-3.1-pro-preview` |
+| `TERRAFIN_AGENT_MODEL_REF` | Canonical hosted model ref such as `openai/gpt-6-luna` or `google/gemini-4-argon` |
 | `TERRAFIN_AGENT_MODELS_PATH` | Override path for saved CLI model/auth state |
 | `TERRAFIN_AGENT_SESSION_DB_PATH` | Override path for hosted runtime task/approval/view-context state |
 | `TERRAFIN_AGENT_TRANSCRIPT_DIR` | Override root directory for hosted transcript JSONL history and `sessions.json` |
@@ -71,6 +71,7 @@ Provider credentials:
 |----------|-----------|
 | OpenAI | `OPENAI_API_KEY` |
 | Google Gemini | `GEMINI_API_KEY`, `GOOGLE_API_KEY` |
+| Anthropic | `ANTHROPIC_API_KEY` |
 
 ## Recommended Local Setup
 

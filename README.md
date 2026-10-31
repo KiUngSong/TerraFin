@@ -1,89 +1,106 @@
 # TerraFin
 
-**TerraFin** — *terraform finance*. An **agent-friendly** financial-research
-toolkit: DCF with turnaround mode, reverse DCF, FCF history, SEC filings TOC +
-section bodies, sentiment widgets, market breadth, guru portfolios and a
-view-context reader, all callable from Claude Code, Codex, opencode, or
-TerraFin's own hosted agent. `terrafin-agent capabilities` prints the full
-list.
+**TerraFin** is terraform for financial research and investment decisions.
+It has four parts:
+
+- **Skills** that give any AI agent (Claude Code, Codex, opencode) a
+  financial analyst's toolkit.
+- **TerraFin Terminal**, a web dashboard for browsing markets and companies.
+- **Its own agent**, built on the same skills, that sees what you have open in
+  the dashboard.
+    - Ask "is this cheap?" on a stock page and it knows which ticker you mean.
+    - In the filing reader it works from the section you are reading. In the
+      DCF workbench it reads the inputs you entered.
+- **A data pipeline** that fetches, caches and normalizes each source once, so
+  one agent can sweep a whole watchlist or search a stock universe in a few
+  calls.
+
+## Quickstart
 
 ```bash
 git clone https://github.com/KiUngSong/TerraFin
 cd TerraFin
-./setup   # auto-detects Claude Code / Codex / opencode on PATH
+pip install -e .   # the package, the terrafin-agent CLI and the server
+./setup            # links the skill into Claude Code, Codex and opencode on PATH
 ```
 
-Install pattern adapted from [gstack](https://github.com/garrytan/gstack).
-`./setup` symlinks the skill into every AI host's skill dir, so `git pull`
-upgrades all of them at once.
+Then ask your agent something like "give me a market snapshot of AAPL with
+terrafin".
 
-External agents can also hit `/agent/api/*` over HTTP, the widest capability
-surface — start at
-[docs/agent/external-agents.md](docs/agent/external-agents.md).
+- No API key is needed for market data, company data or valuation.
+- `FRED_API_KEY` adds FRED economic series. `TERRAFIN_SEC_USER_AGENT` adds SEC
+  filings. Set them in your shell or in `.env` (copy `.env.example`).
+- The Python client and the CLI run in-process, with no server. Capabilities
+  they do not cover, such as valuation, go over HTTP and need the server.
+
+To open TerraFin Terminal:
+
+```bash
+cd src/TerraFin/interface
+python server.py run   # then open http://127.0.0.1:8001/terminal
+```
 
 ## Two ways to use TerraFin
 
-**Mode A — Hosted TerraFin Agent.** Run TerraFin's own agent runtime locally
-or as a public deployment. A floating chat panel on every page consumes the
-user's view context, runs DCF / reverse DCF / SEC-filing analysis / sentiment
-checks, and synthesizes guru-style memos (Buffett, Marks, Druckenmiller).
-See [docs/agent/hosted-runtime.md](docs/agent/hosted-runtime.md) and the
+Capabilities live in one registry, and both surfaces read from it:
+
+```
+                    capability registry
+                             │
+          ┌──────────────────┴──────────────────┐
+     skill layer                         TerraFin agent harness
+     SKILL.md · /agent/api/* ·           sessions, model providers,
+     terrafin-agent CLI · Python client  tool loop, view context
+     → Claude Code, Codex, opencode      → chat panel on every page
+```
+
+Another agent can also call TerraFin's agent as a sub-agent: open a session
+and send it a question over HTTP (`/agent/api/runtime/*`) or the
+`terrafin-agent` CLI. It answers with the model configured in TerraFin.
+
+**Your agent, TerraFin's skills.** Your agent keeps its own model and needs no
+key from TerraFin. On a machine with no checkout, copy the whole
+[`skills/terrafin/`](skills/terrafin/) directory, since the task recipes in
+`references/` load from there on demand.
+
+**TerraFin's own agent.** It runs in the chat panel on every page and needs a
+model: set `TERRAFIN_AGENT_MODEL_REF` (`provider/model`, default
+`openai/gpt-6-luna`) and the matching `OPENAI_API_KEY`, `GEMINI_API_KEY` or
+`ANTHROPIC_API_KEY`.
+Without one, the panel shows setup guidance instead of a chat. See the
 [live demo](https://huggingface.co/spaces/sk851/TerraFin).
 
-**Mode B — TerraFin as a skill for Claude Code / external agents.** Run
-`./setup` and TerraFin's full capability surface becomes callable from any
-agent that consumes Anthropic Skills. On a machine with no checkout, copy the
-whole [`skills/terrafin/`](skills/terrafin/) directory — `SKILL.md` alone
-leaves `references/` behind, and the task recipes load from there on demand.
+Not sure where to start? The docs site lays out each path:
+[Pick your track](https://kiungsong.github.io/TerraFin/#pick-your-track).
 
-## Why agent-friendly
+## Example: a DCF
 
-- **One capability, three surfaces.** `/agent/api/*` (HTTP) is the widest —
-  nearly every capability has a route; `TerraFinAgentClient` (Python) and
-  `terrafin-agent` (CLI) expose the most-used subset under the same names and
-  arguments, so moving between them costs nothing. `curl $TF/openapi.json`
-  enumerates what is actually there — prefer it over assuming a method exists.
-- **`processing` metadata on every response.** `requestedDepth`,
-  `resolvedDepth`, `loadedStart/End`, `isComplete`, `hasOlder`,
-  `sourceVersion`. Agents decide whether to deepen the request without
-  guessing.
-- **`current_view_context()` tool.** The agent reads which panel and form
-  state the user is currently looking at — including DCF input form values,
-  FCF history candidates, the auto-selected DCF base source — without
-  re-fetching data.
+With the server running:
 
-## Other features
+```bash
+curl "http://127.0.0.1:8001/agent/api/valuation?ticker=AAPL"
+```
 
-- market, macro, and filings data access
-- chart-first browser pages
-- DCF / reverse DCF / S&P 500 DCF — including turnaround mode for
-  negative-FCF companies whose thesis is a future turn
+Trimmed output, from a run on 2026-11-01:
 
-> [!IMPORTANT]
-> **TerraFin is MIT-licensed open-source software, and the MIT license applies to the software only.**
-> It does **not** grant any right to third-party data, content, trademarks, or
-> services accessed through this project. TerraFin is not affiliated with or
-> endorsed by any upstream data provider unless explicitly stated.
->
-> TerraFin may access multiple source families, including Yahoo-derived data via
-> `yfinance`, SEC EDGAR, FRED, news headlines, and user-operated private
-> endpoints. **Rights to the actual data remain subject to the applicable
-> provider terms, licenses, and law.** Depending on the source, personal,
-> public, automated, cached, redistributed, or commercial use of upstream data
-> may be restricted or prohibited.
->
-> Anyone operating a public deployment of TerraFin is responsible for the
-> sources they enable, any connected private API, and the privacy and
-> compliance posture of that service. Authentication, caching, or proxying do
-> not create rights to upstream data. End users are responsible only for their
-> own downstream copying, scraping, caching, redistribution, or other reuse of
-> displayed data.
->
-> The maintainer-operated public demo Space at
-> [`https://huggingface.co/spaces/sk851/TerraFin`](https://huggingface.co/spaces/sk851/TerraFin)
-> is one such deployment and is referenced here because it is a publicly
-> accessible TerraFin demo. Access to that demo does not create any right to
-> upstream data. Nothing in this notice modifies the [LICENSE](LICENSE).
+```json
+{
+  "ticker": "AAPL",
+  "currentPrice": 344.63,
+  "dcf": {
+    "currentIntrinsicValue": 115.7,
+    "upsidePct": -66.43,
+    "scenarios": {"bear": {"intrinsicValue": 92.44}, "base": {"intrinsicValue": 115.7}, "bull": {"intrinsicValue": 151.12}}
+  },
+  "reverseDcf": {"impliedGrowthPct": 68.51, "projectionYears": 5},
+  "relative": {"trailingPE": 39.52, "forwardPE": 36.07},
+  "processing": {"isComplete": true}
+}
+```
+
+The base case puts AAPL's DCF value 66% below its price. The reverse DCF says
+the price needs 68.5% cash-flow growth in year one, fading over five years. Negative-FCF companies get a
+turnaround mode: pass `breakeven_year` and `breakeven_cash_flow_per_share`.
 
 ## Docs
 
@@ -91,96 +108,7 @@ leaves `references/` behind, and the task recipes load from there on demand.
 - Getting started: <https://kiungsong.github.io/TerraFin/getting-started/>
 - Agent usage: <https://kiungsong.github.io/TerraFin/agent/usage/>
 - Interface guide: <https://kiungsong.github.io/TerraFin/interface/>
-- Hosted runtime details: <https://kiungsong.github.io/TerraFin/agent/hosted-runtime/>
-
-Public demo:
-
-- Hugging Face Space: <https://huggingface.co/spaces/sk851/TerraFin>
-
-## Quickstart
-
-Prerequisite:
-
-- Python 3.11+
-
-Install and run:
-
-```bash
-cp .env.example .env
-pip install -e .
-cd src/TerraFin/interface
-python server.py run
-```
-
-Useful optional env vars:
-
-| Variable | Use |
-|----------|-----|
-| `FRED_API_KEY` | Enable FRED-backed economic data |
-| `TERRAFIN_SEC_USER_AGENT` | Enable SEC EDGAR filings and guru 13F access |
-| `TERRAFIN_AGENT_MODEL_REF` | Choose the hosted model in `provider/model` format |
-| `OPENAI_API_KEY` / `GEMINI_API_KEY` | Provider credentials for TerraFin Agent |
-
-## Quick Examples
-
-Python:
-
-```python
-from TerraFin.data import DataFactory
-
-data = DataFactory()
-spy = data.get("S&P 500")
-unrate = data.get_fred_data("UNRATE")
-```
-
-Hosted agent:
-
-```python
-from TerraFin.agent import TerraFinAgentClient
-
-agent = TerraFinAgentClient()
-session = agent.runtime_create_session("terrafin-assistant")
-run = agent.runtime_message(session["sessionId"], "Give me a compact AAPL market snapshot.")
-```
-
-CLI:
-
-```bash
-terrafin-agent snapshot AAPL
-terrafin-agent models list --all
-terrafin-agent models auth login --provider google --set-default
-```
-
-## TerraFin Agent
-
-The browser UI is exposed through the floating **TerraFin Agent** panel on the
-main interface pages.
-
-That panel is the only default chat surface. TerraFin does not expose a guru
-picker in the main product flow.
-
-For some research questions, the main TerraFin orchestrator may route the
-request through hidden investor-role research passes such as Buffett, Marks, or
-Druckenmiller, then synthesize the result back into one answer. This stays
-research-only in v1.
-
-If the deployment does not have a valid hosted model configured, the widget
-stays in warning/info mode:
-
-- it shows setup guidance
-- it does not create a session
-- it does not accept chat input until provider credentials are valid
-
-Model management follows canonical `provider/model` refs such as
-`openai/gpt-4.1-mini` or `google/gemini-3.1-pro-preview`.
-
-The CLI model-management UX was inspired by OpenClaw. TerraFin's runtime
-binding, saved-state format, hosted session model, and widget integration are
-TerraFin-specific. See
-<https://kiungsong.github.io/TerraFin/agent/models/> for the explicit
-attribution boundary. The hidden guru-router pattern also takes high-level role
-separation inspiration from `ai-hedge-fund`, while keeping TerraFin's shared
-capability layer instead of hardcoded per-guru Python analysis modules.
+- Model management: <https://kiungsong.github.io/TerraFin/agent/models/>
 
 ## Development
 
@@ -191,10 +119,15 @@ ruff check src tests
 ruff format --check src tests
 ```
 
-Frontend note:
+`src/TerraFin/interface/frontend/build/` is committed on purpose. If you change
+frontend source, rebuild and commit the generated assets too.
 
-- `src/TerraFin/interface/frontend/build/` is committed on purpose
-- if you change frontend source, rebuild and commit the generated assets too
+## Credits
+
+- The `./setup` install pattern is adapted from
+  [gstack](https://github.com/garrytan/gstack).
+- The CLI model-management UX was inspired by OpenClaw. The boundary is in
+  [Model management](https://kiungsong.github.io/TerraFin/agent/models/).
 
 ## License And Data Rights
 

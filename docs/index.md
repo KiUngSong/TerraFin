@@ -4,11 +4,38 @@ title: TerraFin Docs
 
 # TerraFin
 
-An **agent-friendly** financial-research toolkit: DCF with turnaround mode,
-reverse DCF, FCF history, SEC filings TOC + section bodies, sentiment widgets,
-market breadth, guru portfolios and a view-context reader, all callable from
-Claude Code, Codex, opencode, or TerraFin's own hosted agent. The
-[route summary](agent/usage.md) lists every capability reachable over HTTP.
+**TerraFin** is terraform for financial research and investment decisions.
+It has four parts:
+
+- **Skills** that give any AI agent (Claude Code, Codex, opencode) a
+  financial analyst's toolkit.
+- **TerraFin Terminal**, a web dashboard for browsing markets and companies.
+- **Its own agent**, built on the same skills, that sees what you have open in
+  the dashboard.
+    - Ask "is this cheap?" on a stock page and it knows which ticker you mean.
+    - In the filing reader it works from the section you are reading. In the
+      DCF workbench it reads the inputs you entered.
+- **A data pipeline** that fetches, caches and normalizes each source once, so
+  one agent can sweep a whole watchlist or search a stock universe in a few
+  calls.
+
+## Architecture
+
+The skills and the harness read one capability registry, which runs on the data pipeline:
+
+```
+                    capability registry
+                             │
+          ┌──────────────────┴──────────────────┐
+     skill layer                         TerraFin agent harness
+     SKILL.md · /agent/api/* ·           sessions, model providers,
+     terrafin-agent CLI · Python client  tool loop, view context
+     → Claude Code, Codex, opencode      → chat panel on every page
+```
+
+Another agent can also call TerraFin's agent as a sub-agent: open a session
+and send it a question over HTTP (`/agent/api/runtime/*`) or the
+`terrafin-agent` CLI. It answers with the model configured in TerraFin.
 
 ```bash
 git clone https://github.com/KiUngSong/TerraFin
@@ -16,68 +43,55 @@ cd TerraFin
 ./setup   # auto-detects Claude Code / Codex / opencode on PATH
 ```
 
-Install pattern adapted from [gstack](https://github.com/garrytan/gstack) —
+Install pattern adapted from [gstack](https://github.com/garrytan/gstack):
 symlink-based, so `git pull` upgrades every host at once.
-
-## What TerraFin Includes
-
-| Area | Purpose |
-|------|---------|
-| Data layer | Unified access to market, economic, corporate, and private-access data |
-| Analytics | Technical indicators, DCF tooling, risk helpers, and standalone analysis modules |
-| Interface | FastAPI app with chart, terminal, stock, market-insights, calendar, and watchlist surfaces |
-| Agent harness | Shared capability layer, hosted runtime, model-provider registry, and browser widget |
-| Cache system | In-memory and on-disk warming, fallback behavior, and refresh coordination |
 
 ## Pick your track
 
-=== "Mode A — Hosted TerraFin Agent"
+=== "Use TerraFin's skills from your agent"
 
-    The TerraFin Agent runtime ships with a floating chat panel on every
-    terminal page, hidden guru routing (Buffett, Marks, Druckenmiller),
-    and view-context awareness. Run it locally or as a public deployment.
-
-    - [Getting Started](getting-started.md) — install, configure, run the
-      first server.
-    - [Hosted Runtime](agent/hosted-runtime.md) — runtime architecture,
-      model bindings, session state.
-    - [Agent Architecture](agent/architecture.md) — capability layer,
-      orchestrator-as-tool persona routing.
-    - [Model Management](agent/models.md) — provider catalog, credentials,
-      `provider/model` refs.
-
-=== "Mode B — Skill for external agents (Claude Code, Codex, …)"
-
-    Drop [`skills/terrafin/SKILL.md`](https://github.com/KiUngSong/TerraFin/blob/main/skills/terrafin/SKILL.md)
-    into your agent's skill folder (or let `./setup` above do it) and
-    TerraFin's full capability surface becomes callable from any
-    Anthropic-Skills-compatible agent. External agents can also hit
-    `/agent/api/*` over HTTP directly — see
-    [For External Agents](agent/external-agents.md).
+    Your agent (Claude Code, Codex, opencode, or anything that speaks HTTP)
+    keeps its own model and loop, and calls TerraFin for data, valuation,
+    and filings.
 
     ```bash
     ./setup --host claude    # or codex, opencode, auto
     ```
 
-    - [Agent Docs Overview](agent/index.md) — surfaces, transports,
-      disclosure rules.
-    - [Agent Usage](agent/usage.md) — request policy, route summary, the
-      view-context read-only contract, the form-mutation gap.
-    - [API Reference](api-reference.md) — per-route docs for `/stock/api/*`
-      and `/agent/api/*`.
+    - [Skills](skills/index.md): what the skill layer is, install, the
+      surfaces, discovery.
+    - [Route summary](agent/usage.md#route-summary): every capability with a route, grouped by kind.
+    - [For External Agents](agent/external-agents.md): base URL, discovery,
+      finding a series by name.
+    - [Usage](agent/usage.md): request policy, route summary, the
+      view-context read-only contract.
 
-=== "Maintainer / contributor"
+=== "Run TerraFin's own agent"
+
+    TerraFin's harness owns the loop: sessions, model providers, the tool
+    loop, and view context, behind a chat panel on every page. Guru personas
+    (Buffett, Marks, Druckenmiller) run as hidden subagents. Run it locally
+    or as a public deployment.
+
+    - [Getting Started](getting-started.md): install, set a model key, run
+      the server.
+    - [Model Management](agent/models.md): choose a provider and model.
+
+    How it works, for contributors: [Agent Harness](harness/index.md),
+    [The Agent Loop](harness/loop.md), [Hosted Runtime](agent/hosted-runtime.md),
+    [Architecture and Personas](agent/architecture.md).
+
+=== "Contribute to TerraFin"
 
     Working on TerraFin's internals? Start with the architecture and
     feature-integration rules so your change lands in the right layer.
 
-    - [AGENTS.md](https://github.com/KiUngSong/TerraFin/blob/main/AGENTS.md) —
-      repo-internal entry point for agents (and human contributors)
-      working in this codebase.
-    - [Feature Integration](feature-integration.md) — where new logic
-      lives across data / analytics / interface / agent layers.
+    - [AGENTS.md](https://github.com/KiUngSong/TerraFin/blob/main/AGENTS.md):
+      the entry point for agents and people working in this codebase.
+    - [Feature Integration](feature-integration.md): where new logic
+      lives across the data, analytics, interface and agent layers.
     - [Data Layer](data-layer.md), [Analytics](analytics.md),
-      [Analytics Notes](analytics-notes.md) — DCF cascade, turnaround
+      [Analytics Notes](analytics-notes.md): DCF cascade, turnaround
       math, indicator contract.
     - [Chart Architecture](chart-architecture.md), [Caching](caching.md),
       [Development Guide](development.md).
@@ -100,7 +114,8 @@ symlink-based, so `git pull` upgrades every host at once.
 |-------------------|------------|
 | install TerraFin and try it locally | [Getting Started](getting-started.md) |
 | understand the page routes and APIs | [Interface Overview](interface.md) |
-| use TerraFin from an external or hosted agent | [Agent Docs](agent/index.md) |
+| call TerraFin from your own agent | [Skills](skills/index.md) |
+| run TerraFin's own agent | [Agent Harness](harness/index.md) |
 | add a provider, indicator, or feature | [Data Layer](data-layer.md) and [Feature Integration](feature-integration.md) |
 | operate the server in demo or private mode | [Deployment & Operations](deployment.md) |
 | work on the repo itself | [Development Guide](development.md) |

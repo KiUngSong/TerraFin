@@ -1,11 +1,13 @@
 # TerraFin AGENTS.md
 
+Package paths on this page drop the leading `src/TerraFin/`: `data/` means `src/TerraFin/data/`.
+
 Read this file first when working inside the TerraFin repository.
 
 **Agent / worker dropping in?** Start at [docs/agent/index.md](./docs/agent/index.md)
 for the glossary + start-here map, then
-[docs/agent/usage.md](./docs/agent/usage.md) for the **"If you want to do X,
-use this tool"** index and the **"Don't roll your own"** anti-pattern tables.
+[skills/terrafin/references/tool-lookup.md](./skills/terrafin/references/tool-lookup.md)
+for the **"Pick a tool"** table and the **"Don't roll your own"** anti-patterns.
 Hand-rolling `urllib`/`requests`/regex against SEC EDGAR (or against any of
 TerraFin's already-shipped capabilities) is almost always the wrong move —
 the helpers carry rate-limit, cache, and parser semantics the manual path
@@ -15,8 +17,8 @@ TerraFin is an **agent-friendly** financial-research toolkit with two
 supported usage modes (see [README.md](./README.md) "Two ways to use
 TerraFin"):
 
-- **Mode A — Hosted TerraFin Agent.** Runtime in `src/TerraFin/agent/` +
-  `src/TerraFin/interface/agent/`, browser panel on every page, hidden
+- **Mode A — Hosted TerraFin Agent.** Runtime in `agent/` +
+  `interface/agent/`, browser panel on every page, hidden
   guru routing (Buffett, Marks, Druckenmiller).
 - **Mode B — TerraFin as a skill for external agents.** [`skills/terrafin/SKILL.md`](./skills/terrafin/SKILL.md)
   is the source of truth for the public capability surface; external Claude
@@ -86,7 +88,7 @@ Hosted-runtime-only tools (no stateless HTTP route):
 ## Persona allowlists
 
 Persona tool access is defined in YAML files under
-[`src/TerraFin/agent/guru/personas/`](./src/TerraFin/agent/guru/personas/). The
+[`agent/guru/personas/`](./src/TerraFin/agent/guru/personas/). The
 `allowed_capabilities` field on each persona is the **single source of
 truth**. `_select_guru_worker_tools` (in `agent/guru/worker.py`) still exists
 but intentionally does not impose a second hidden allowlist — broad-market
@@ -95,8 +97,8 @@ and ticker-specific guru sessions get the same persona-filtered toolset.
 To grant or revoke a capability for Buffett / Marks / Druckenmiller, edit
 the corresponding YAML.
 
-(`src/TerraFin/agent/personas/` remains as a compatibility shim that
-re-exports `agent.guru.personas`.)
+(`agent/personas/` remains as a compatibility shim that
+re-exports `TerraFin.agent.guru.personas`.)
 
 ## Choose the right path
 
@@ -126,20 +128,20 @@ Start with:
 
 Use this when changing:
 
-- `src/TerraFin/agent/`
-- `src/TerraFin/interface/agent/`
+- `agent/`
+- `interface/agent/`
 - public agent contracts, client methods, CLI commands, or skill docs
 
 When you add a new capability:
 
-1. Register it in `src/TerraFin/agent/runtime/capability.py`
+1. Register it in `agent/runtime/capability.py`
    (`build_default_capability_registry`). Populate `summary`,
    `cli_subcommand_name` (if exposed via the CLI), `http_route_path`, and
    `response_model_name` so downstream artefacts can derive accurate metadata.
-2. Add the tool input schema in `src/TerraFin/agent/contracts/tool_contracts.py`
+2. Add the tool input schema in `agent/contracts/tool_contracts.py`
    (`HOSTED_TOOL_CONTRACTS`).
 3. Add the HTTP route to
-   `src/TerraFin/interface/agent/data_routes.py` (the `http_route_path` you
+   `interface/agent/data_routes.py` (the `http_route_path` you
    declared above). Skip it only for a capability that genuinely cannot work
    outside a live session; then say why in the registration comment **and** add
    the name to `CAPABILITIES_WITHOUT_ROUTE` in
@@ -147,10 +149,10 @@ When you add a new capability:
    `capabilities missing http_route_path`.
 4. Add the recipe / worked example to
    [skills/terrafin/SKILL.md](./skills/terrafin/SKILL.md) — recipe sections
-   stay hand-edited. Also add a row to the "If you want to do X" table in
-   [docs/agent/usage.md](./docs/agent/usage.md).
+   stay hand-edited. Also add a row to the "Pick a tool" table in
+   [skills/terrafin/references/tool-lookup.md](./skills/terrafin/references/tool-lookup.md).
 5. Update the relevant persona YAML in
-   `src/TerraFin/agent/guru/personas/` if it should be persona-callable.
+   `agent/guru/personas/` if it should be persona-callable.
 6. Run `python scripts/generate-agent-artefacts.py` to refresh the
    sentinel-bounded "Capability inventory" list in SKILL.md and the "Route
    summary" table in `docs/agent/usage.md`. The `package-smoke` CI job runs
@@ -185,6 +187,16 @@ For public features:
 - reusable math belongs in analytics
 - page and session composition belong in the interface layer
 - structured programmatic exposure belongs in the agent layer
+
+## Inside TerraFin's code
+
+- SEC filings: in data-layer code (route handlers, batch jobs), use
+  `fetch_and_parse_filing` from `TerraFin.data.providers.corporate.filings.sec_edgar`.
+  It is the only path that appends 8-K exhibits. Calling `download_filing` and
+  `parse_sec_filing` yourself skips them.
+- Model catalog: use `list_provider_catalog()` and
+  `get_provider_catalog(provider_id)` from `TerraFin.agent.models.management`. Do not
+  import the private `_PROVIDER_CATALOG` dict. It can change without notice.
 
 ## Related docs
 

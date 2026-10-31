@@ -10,196 +10,73 @@ read_when:
 
 # Agent Usage
 
-TerraFin is most useful to agents when it stays on the same path as the product.
+TerraFin can be used by agents in two ways:
 
-That means:
+- **Your own agent calls TerraFin's tools.** Claude Code, Codex, or any other
+  agent keeps its own model loop and calls TerraFin through Python, the CLI,
+  or HTTP.
+- **TerraFin's own agent.** TerraFin runs the model loop itself, behind the
+  **TerraFin Agent** widget in the browser and the hosted runtime API.
 
-- market and macro responses use the same progressive-history rules as the chart stack
-- indicator math matches the chart indicators
-- chart-opening uses the same session semantics as the browser UI
-- every research response includes `processing`
+Both use the same data path as the product. Market and macro responses start
+with a recent window and load older history on request, the way the chart does.
+Indicator math matches the chart, and every research response includes
+`processing`.
 
 If you are maintaining the runtime itself, read [hosted-runtime.md](./hosted-runtime.md)
-and [architecture.md](./architecture.md). This document is the usage guide.
+and [architecture.md](./architecture.md). This page is the usage guide.
 
-## If you want to do X, use this tool
+## Tool lookup
 
-Scan this table **first** before reaching for `requests` / `urllib` /
-`yfinance` / pandas-html / regex parsers. Every row below is already shipped
-with rate-limit, retry, cache, and progressive-history handling.
-
-| If you want to...                                          | Use this tool                                                       |
-| ---------------------------------------------------------- | ------------------------------------------------------------------- |
-| Resolve a ticker/name into a TerraFin route                | `resolve(query)`                                                    |
-| Get a chart-ready OHLC series                              | `market_data(name, depth, view)`                                    |
-| Get a one-asset snapshot (price action + indicators)       | `market_snapshot(name, depth, view, force_refresh=False)` — response `asof` is the ISO date of the last bar served; pass `force_refresh=True` only for time-sensitive snapshots (mid-session, freshly-closed bar) to bypass the 24h `yfinance.full` cache |
-| Get company profile / valuation fields                     | `company_info(ticker)`                                              |
-| Get earnings history (estimate / reported / surprise)      | `earnings(ticker)`                                                  |
-| Get forward consensus, revisions, and price targets         | `consensus(ticker)`                                                 |
-| Find recent headlines / the catalyst behind a move          | `news(ticker, query, days, limit)`                                  |
-| Get income / balance / cashflow statement                  | `financials(ticker, statement, period)`                             |
-| List a ticker's recent 10-K / 10-Q / 8-K filings           | `sec_filings(ticker)`                                               |
-| Get a single filing's TOC (no full body)                   | `sec_filing_document(ticker, accession, primaryDocument, form)`     |
-| Pull one filing section's markdown body                    | `sec_filing_section(..., sectionSlug, form)`                        |
-| Run DCF / reverse DCF / Graham / relative valuation        | `valuation(ticker, ...)` (see SKILL.md for turnaround inputs)       |
-| Inspect FCF base candidates (3yr_avg / annual / TTM)       | `fcf_history(ticker, years)`                                        |
-| Get S&P 500 index-level DCF                                | `sp500_dcf()`                                                       |
-| Get 5y monthly beta vs mapped benchmark                    | `beta_estimate(ticker)`                                             |
-| Get statistical risk profile (tail risk, drawdown, regime) | `risk_profile(name)`                                                |
-| Run a fundamental quality / moat screen                    | `fundamental_screen(ticker)`                                        |
-| Get revenue / EPS YoY growth series (annual + quarterly)   | `growth_series(ticker)`                                             |
-| Get guru portfolio holdings (Buffett / Marks / Druck.)     | `portfolio(guru)`                                                   |
-| Get FRED-backed economic indicator series                  | `economic(indicators)`                                              |
-| Get macro summary + chart-ready series                     | `macro_focus(name, depth, view)`                                    |
-| Scan calendar events for a month                           | `calendar_events(year, month, categories, limit)`                   |
-| Detect bubble (super-exp growth + log-periodic osc.)       | `lppl_analysis(name, depth, view)`                                  |
-| Find chart-shape-similar historical episodes               | `similarity_search(ticker, universe, period, top_n)`                |
-| Get market temperature signals                             | `fear_greed()`, `market_regime()`, `market_breadth()`, `trailing_forward_pe()` |
-| Get top companies by market cap                            | `top_companies()`                                                   |
-| Read the user's watchlist                                  | `watchlist()`                                                       |
-| Get chart-matching technical indicators                    | `indicators(name, indicators, depth, view)`                         |
-| Get named pattern signals matching the latest bar          | `patterns(name, depth, view)`                                       |
-| Sweep many symbols for pattern triggers (idea sourcing)    | `pattern_scan(group, tickers, severity_min)`                        |
-| Read which panel/form the user is currently looking at     | `current_view_context()` (hosted runtime only)                      |
-| Open a chart artifact bound to the session                 | `open_chart(name)` (hosted runtime only)                            |
-| List / authenticate / switch hosted models                 | `terrafin-agent models ...` (see [models.md](./models.md))          |
-| Discover capability schemas programmatically               | `GET /openapi.json` — filter `paths` to `/agent/api/*`              |
-
-Capability signatures with full parameter ranges and worked examples live in
-[`skills/terrafin/SKILL.md`](https://github.com/KiUngSong/TerraFin/blob/main/skills/terrafin/SKILL.md).
-The route summary further down this page is auto-generated and lists every
-HTTP route.
-
-## Don't roll your own
-
-Reach for the TerraFin helper before hand-rolling any of the patterns below.
-Each one has been a real source of breakage (rate-limit, cache miss,
-parser inconsistency, hidden-API drift).
-
-### SEC EDGAR — don't roll your own scrape
-
-If you find yourself reaching for `urllib.request.urlopen("https://www.sec.gov/...")`,
-regex-parsing the accession folder index, or stripping `<html>` tags by hand —
-stop. The same content is one tool call away through the parsed + cached path:
-
-| Manual approach (DON'T)                                              | TerraFin tool (DO)                                                                          |
-| -------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
-| `urlopen("https://www.sec.gov/Archives/edgar/data/<cik>/<acc>/")` to list exhibits | `sec_filing_document(ticker, accession, primaryDocument, form="8-K")` → `toc` carries `exhibit-991-press-release` / `exhibit-992-supplemental-material` slugs |
-| `urlopen("https://www.sec.gov/.../q1fy27pr.htm")` to grab the earnings PR | `sec_filing_section(..., sectionSlug="exhibit-991-press-release", form="8-K")` → returns parsed markdown body |
-| Strip `<p>` / `<table>` / `&nbsp;` with regex                        | already done — `sec_filing_section` returns clean markdown                                  |
-| Strip the `/ix?doc=` viewer wrapper off `documentUrl`                | use `sec_filing_document` / `sec_filing_section` instead of dereferencing the URL yourself |
-
-Why this matters:
-- SEC rate-limits aggressively (~10 req/s per IP). The TerraFin helpers
-  share a single `SECClient` with rate-limit + retry; raw `urllib` does not.
-- Parsed markdown is cached 30 days under `sec.parsed`; raw fetches re-pull
-  every newsletter run.
-- Bypassing the cache risks SEC IP-banning the host.
-
-The `form` arg is required for 8-K exhibit content — service defaults to
-`"10-Q"`, and 8-Ks called without `form="8-K"` produce only the 4 KB cover
-sheet stub (no exhibits appended). Pull `form` from
-`sec_filings(...)["latestByForm"][...]["form"]` (or from any flat-list entry)
-and pass it through every call.
-
-### 8-K exhibits — don't bypass `fetch_and_parse_filing`
-
-If you're tempted to call `download_filing(...)` then `parse_sec_filing(...)`
-yourself for an 8-K, you'll get the 4 KB cover sheet with **no exhibits
-appended**. The exhibit-appending logic lives only in
-`fetch_and_parse_filing(cik, accession, doc, "8-K", include_images)`.
-
-| Manual approach (DON'T)                                                                | TerraFin tool (DO)                                                                  |
-| -------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
-| `parse_sec_filing(download_filing(cik, acc, doc), "8-K")`                              | `fetch_and_parse_filing(cik, acc, doc, "8-K", include_images=False)` — appends every `EX-99.x` exhibit |
-| Manually loop `list_filing_files()` → `download_exhibit()` → `parse_sec_filing()`      | `fetch_and_parse_filing(...)` — already does this with per-exhibit error markers    |
-| Call `sec_filing_section` without `form="8-K"`                                         | always pass `form="8-K"` — service defaults to `"10-Q"`                             |
-
-The agent-facing path (`sec_filing_section`) wraps `fetch_and_parse_filing`
-under the cache; only fall through to `fetch_and_parse_filing` directly when
-writing non-agent data-layer code (route handlers, batch ingestion).
-
-### Model catalog — don't reach into `_PROVIDER_CATALOG`
-
-The provider catalog is a public function, not a private dict.
-
-| Manual approach (DON'T)                                                   | TerraFin tool (DO)                                                       |
-| ------------------------------------------------------------------------- | ------------------------------------------------------------------------ |
-| `from TerraFin.agent.models.management import _PROVIDER_CATALOG`          | `from TerraFin.agent.models.management import list_provider_catalog`     |
-| `_PROVIDER_CATALOG["openai"].featured_model_refs`                         | `get_provider_catalog("openai").featured_model_refs`                     |
-| Iterate the private dict to discover providers                            | `for entry in list_provider_catalog(): ...`                              |
-
-The private `_PROVIDER_CATALOG` mapping may be renamed or reshaped without
-notice; `list_provider_catalog()` / `get_provider_catalog(provider_id)` are
-the stable surface.
+Agents pick a tool from the skill's [tool lookup](https://github.com/KiUngSong/TerraFin/blob/main/skills/terrafin/references/tool-lookup.md), which also lists the
+patterns not to hand-roll.
 
 ## Choose a surface
 
 There are two agent-facing HTTP families:
 
-- `GET/POST /agent/api/*`
-  Stateless capability access, best when another agent already owns the model loop
-- `GET/POST /agent/api/runtime/*`
-  Stateful hosted runtime access, best when TerraFin should own the conversation and tool loop
+- `/agent/api/*` is stateless capability access. Use it when your own agent
+  already owns the model loop.
+- `/agent/api/runtime/*` is TerraFin's own agent (the hosted runtime). Use it
+  when TerraFin should own the conversation and tool loop.
 
-In the browser, the hosted runtime is exposed through the floating **TerraFin Agent**
-widget available on main interface pages such as `/terminal`, `/chart`, and `/stock/<ticker>`.
+In the browser, TerraFin's own agent is the floating **TerraFin Agent** widget
+on the main pages, such as `/terminal`, `/chart`, and `/stock/<ticker>`.
 
-That panel is always the public surface. There is no guru picker in the default
-product flow.
+If no usable hosted model is configured, the widget shows a setup warning,
+creates no session, and accepts no chat input until the credentials are valid.
 
-If the deployment does not have a usable hosted model configured, the widget
-stays in an info-only state:
+Chat history is a local transcript per session. Deleting a session archives
+its transcript and removes it from the history list. Raw tool output stays in
+the transcript but is hidden from previews.
 
-- it shows the local setup warning
-- it does not create a runtime session
-- it does not accept chat input until the hosted model credentials are valid
+### Investor personas
 
-Hosted runtime chat history is local transcript history:
+TerraFin Agent can consult hidden investor personas (Warren Buffett,
+Howard Marks, Stanley Druckenmiller) before it replies. It does this through
+`consult_<persona>` tool calls. See
+[architecture.md](./architecture.md#orchestrator-persona-subagents).
 
-- each session is stored as an append-only JSONL transcript
-- history list and previews are derived from the transcript index
-- deleting a session archives the transcript and removes it from active history
-- raw tool JSON stays in the transcript for replay, but is hidden from user-facing previews
-
-TerraFin Agent may also route some research questions through hidden investor
-roles before replying. Today those roles include Warren Buffett, Howard Marks,
-and Stanley Druckenmiller.
-
-Important product rules:
-
-- users still talk only to `TerraFin Agent`
-- `TerraFin Agent` is the **orchestrator**; hidden persona roles are
-  reached by its own LLM via `consult_warren_buffett`,
-  `consult_howard_marks`, and `consult_stanley_druckenmiller` tool
-  calls (no pre-intercept router — see the architecture diagrams in
-  [architecture.md](./architecture.md#orchestrator-persona-subagents))
-- the hidden guru path is research-only in v1
-- hidden guru sessions are not shown in normal session history
-- hidden guru roles cannot be created through the normal public runtime API
-- hidden guru session ids are not valid public session/task/approval resources
-- internal guru handoff uses a structured memo contract before the main assistant synthesizes a reply
+- Users only ever talk to TerraFin Agent.
+- Persona sessions are research-only and hidden from session history.
+- Persona sessions cannot be created or addressed through the public runtime API.
+- Each persona returns a structured memo, which TerraFin Agent turns into the reply.
 
 ## Disclosure
 
-The hosted TerraFin Agent produces **research-oriented analysis, not personalized
-investment advice**. A few properties follow from that framing and should be
-called out to downstream product surfaces, integrators, and end users:
+TerraFin Agent produces **research-oriented analysis, not personalized
+investment advice**. Product surfaces, integrators, and end users should know:
 
-- the agent cannot place trades, hold funds, or take fiduciary responsibility
-- outputs are grounded in tool results and what the user says in the same
-  session; the agent should not invent numbers it has not seen in a tool result
-- persona consults (Buffett, Marks, Druckenmiller) are framed as research
-  voices, not registered advisor recommendations
-- a `confidence` score ≥ 80 returned by a persona consult carries at least one
-  citation — the `GuruResearchMemo` validator clamps unsupported high-confidence
-  memos to 60 before returning them to the orchestrator (see
-  [guru/memo.py](https://github.com/KiUngSong/TerraFin/blob/main/src/TerraFin/agent/guru/memo.py))
+- The agent cannot place trades, hold funds, or take fiduciary responsibility.
+- Outputs are grounded in tool results and what the user says in the session.
+  The agent should not invent numbers it has not seen in a tool result.
+- Persona consults are research voices, not registered advisor recommendations.
+- A persona memo with high confidence and no citations has its confidence
+  lowered before TerraFin Agent sees it.
 
-The orchestrator's system prompt carries a matching `DISCLOSURE` paragraph so the
-model stays inside this framing. Product surfaces that embed the widget or call
-the runtime HTTP API are responsible for any **user-facing** disclosure copy
-their jurisdiction requires — the agent itself does not render one.
+TerraFin Agent's system prompt carries a matching disclosure. A product that
+embeds the widget or calls the runtime API must add any **user-facing**
+disclosure its jurisdiction requires. The agent does not render one.
 
 ## Choose a transport
 
@@ -210,10 +87,8 @@ their jurisdiction requires — the agent itself does not render one.
 | CLI | Shell composition is the simplest fit |
 | Skill artifact | Another agent environment needs portable instructions |
 
-`TerraFinAgentClient(transport="auto")` follows the normal rule:
-
-1. Python when no `base_url` is set
-2. HTTP when a `base_url` is set
+`TerraFinAgentClient(transport="auto")` uses Python when no `base_url` is set,
+and HTTP when one is.
 
 ## Default request policy
 
@@ -221,14 +96,12 @@ For market and macro requests:
 
 - start with `depth="auto"`
 - inspect the returned `processing`
-- rerun with `depth="full"` only when the task genuinely needs long-range context
+- rerun with `depth="full"` only when the task needs long-range context
 
-For company info, earnings, financials, portfolio, and calendar data:
+Company info, earnings, financials, portfolio, and calendar data come back
+complete, so `processing.isComplete` should be `true`.
 
-- the payload should already be complete
-- `processing.isComplete` is expected to be `true`
-
-Charts are optional. Open them when the chart itself materially helps the task.
+Charts are optional. Open one only when the chart itself helps the task.
 
 ## Processing metadata
 
@@ -254,49 +127,28 @@ Every structured research response includes a top-level `processing` object.
 | `requestedDepth` | What the caller asked for |
 | `resolvedDepth` | What TerraFin actually returned |
 | `loadedStart` / `loadedEnd` | Loaded time span for time-series tasks |
-| `isComplete` | Whether older data still exists outside the response |
+| `isComplete` | Whether the response holds the full available history |
 | `hasOlder` | Whether the request can be deepened |
 | `sourceVersion` | Provider/cache version hint |
 | `view` | Effective timeframe transform |
 
 ## Common tasks
 
-Multi-step task recipes. For a one-row "what tool do I need" lookup, scan the
-[tool-index table at the top](#if-you-want-to-do-x-use-this-tool) instead.
+Multi-step recipes. For single tools, use the
+[tool lookup](https://github.com/KiUngSong/TerraFin/blob/main/skills/terrafin/references/tool-lookup.md).
 
-Rows marked **(helper)** are composed module-level functions exported from
-`from TerraFin.agent import …` — not registered capabilities. They wrap
-one or more capabilities (e.g. `compare_assets` calls `resolve` + `market_snapshot`
-under the hood). They're not in the 30-row capability table because they
-don't appear in the agent capability registry.
+Rows marked **(helper)** are plain functions in `TerraFin.agent`, not
+registered capabilities. They combine capabilities, for example
+`compare_assets` calls `market_snapshot` once per asset.
 
 | Task | Recommended entrypoint |
 |------|------------------------|
 | Ticker brief | `resolve(...)` then `market_snapshot(...)` |
-| Market snapshot | `market_snapshot(name, depth="auto", view="daily")` |
 | Compare assets | `compare_assets([...], depth="auto", view="daily")` **(helper)** |
 | Macro context | `macro_context(name, depth="auto", view="daily")` **(helper)** |
 | Portfolio context | `portfolio_context(guru)` **(helper)** |
 | Stock fundamentals | `stock_fundamentals(ticker, statement="income", period="annual")` **(helper)** |
-| Stock DCF | `valuation(ticker, projection_years=..., fcf_base_source=..., breakeven_year=..., breakeven_cash_flow_per_share=..., post_breakeven_growth_pct=...)` |
-| FCF history candidates | `fcf_history(ticker, years=10)` |
-| SEC filings | `sec_filings(ticker)` → `sec_filing_document(..., form=...)` → `sec_filing_section(..., sectionSlug=..., form=...)`. **Pass the actual `form` string** ("10-K" / "10-Q" / "8-K" / "8-K/A") on every call — service defaults to "10-Q". For 8-K, the TOC includes `exhibit-991-press-release` / `exhibit-992-supplemental-material` slugs holding the earnings PR + CFO commentary bodies. |
-| Sentiment / breadth | `fear_greed()`, `market_regime()`, `market_breadth()`, `trailing_forward_pe()` |
-| Calendar scan | `calendar_events(year=..., month=..., categories=..., limit=...)` |
-| Bubble analysis | `lppl_analysis(name, depth="auto", view="daily")` |
-| Chart similarity search | `similarity_search(ticker, universe="sp500+nasdaq100+kospi200", period="1y", top_n=20)` |
-| Open chart | `open_chart(...)` when the chart is explicitly useful |
-
-> See [Don't roll your own → SEC EDGAR](#sec-edgar--dont-roll-your-own-scrape)
-> for the anti-pattern table and why the helper exists. The summary: pass
-> `form="8-K"` explicitly (service defaults to `"10-Q"`), pull it from
-> `sec_filings(...)["latestByForm"][...]["form"]`.
-
-> The full per-capability call signature, parameter ranges, and worked
-> examples (including DCF turnaround mode) live in
-> [`skills/terrafin/SKILL.md`](https://github.com/KiUngSong/TerraFin/blob/main/skills/terrafin/SKILL.md) —
-> the skill is the authoritative capability reference for both this doc and
-> external agents.
+| Read a filing | `sec_filings` then `sec_filing_document` then `sec_filing_section`, passing `form` each time (see [SEC filings](#sec-filings)) |
 
 ## Minimal examples
 
@@ -309,7 +161,7 @@ client = TerraFinAgentClient()
 snapshot = client.market_snapshot("AAPL", depth="auto", view="daily")
 ```
 
-### Hosted runtime helper
+### TerraFin's own agent from Python
 
 ```python
 from TerraFin.agent import create_runtime_session
@@ -330,8 +182,8 @@ terrafin-agent models list --all
 
 ### HTTP
 
-The address is configuration — derive it from `TERRAFIN_HOST`,
-`TERRAFIN_PORT` and `TERRAFIN_BASE_PATH` rather than hardcoding:
+Build the address from `TERRAFIN_HOST`, `TERRAFIN_PORT`, and
+`TERRAFIN_BASE_PATH` rather than hardcoding it:
 
 ```bash
 TF="http://${TERRAFIN_HOST:-127.0.0.1}:${TERRAFIN_PORT:-8001}${TERRAFIN_BASE_PATH:-}"
@@ -345,19 +197,15 @@ curl -X POST "$TF/agent/api/runtime/sessions" \
 
 ### Browser UI
 
-```text
-http://127.0.0.1:8001/terminal
-Use the TerraFin Agent button in the lower-right corner.
-```
+Open `/terminal` and use the **TerraFin Agent** button in the lower-right corner.
 
 ## Route summary
 
-Capability routes — nearly every capability has one. The table below is
-generated from the registry and lists every capability that has a route; the
-few with none are session-bound or in-process only, and the generated
-"Hosted-runtime-only tools" list in `skills/terrafin/SKILL.md` names them.
-`terrafin-agent capabilities` prints every capability, routed or not, as JSON
-with a `count`. For the client's method list, ask the client itself: `python -c "from TerraFin.agent import TerraFinAgentClient; print([m for m in dir(TerraFinAgentClient) if not m.startswith('_')])"`.
+Capability routes. The list below is generated from the registry and covers
+every capability with a route. Capabilities without a route only work inside
+a live session, and the generated "Hosted-runtime-only tools" list in
+`skills/terrafin/SKILL.md` names them. `terrafin-agent capabilities` prints
+every capability as JSON.
 
 <!-- The route table below is auto-generated from
      src/TerraFin/agent/runtime/capability.py by
@@ -417,52 +265,29 @@ Sentiment / breadth / market state:
 
 <!-- generated:route-summary:end -->
 
-> **View context is read-only.** The hosted runtime exposes a
-> `current_view_context()` tool that returns the panel and form state the
-> user is currently looking at — including the DCF input form's
-> `projectionYears` / `fcfBaseSource` / `turnaroundMode` selections, the FCF
-> history candidates already loaded, and the auto-selected DCF base source.
-> The agent **cannot currently write back to the user's frontend form** (no
-> `apply_dcf_inputs` / `set_form_state` tool exists). If the agent suggests
-> input values, the user applies them manually. This gap is tracked.
+`current_view_context()` is read-only. TerraFin Agent can see the panel and
+form state the user is looking at, such as the DCF inputs, but it cannot write
+back to the form. If it suggests input values, the user applies them by hand.
 
-Hosted runtime routes:
-
-- `GET /agent/api/runtime/agents`
-- `POST /agent/api/runtime/sessions`
-- `GET /agent/api/runtime/sessions`
-- `GET /agent/api/runtime/sessions/{session_id}`
-- `DELETE /agent/api/runtime/sessions/{session_id}`
-- `POST /agent/api/runtime/sessions/{session_id}/messages`
-- `GET /agent/api/runtime/sessions/{session_id}/approvals`
-- `GET /agent/api/runtime/tasks/{task_id}`
-- `POST /agent/api/runtime/tasks/{task_id}/cancel`
-- `GET /agent/api/runtime/approvals/{approval_id}`
-- `POST /agent/api/runtime/approvals/{approval_id}/approve`
-- `POST /agent/api/runtime/approvals/{approval_id}/deny`
-
-OpenAPI is available at `/openapi.json`.
+Runtime routes for TerraFin's own agent (sessions, messages, tasks, approvals)
+are under `/agent/api/runtime/*`. `/openapi.json` lists them all, and
+[hosted-runtime.md](./hosted-runtime.md) explains how they fit together.
 
 ## Managing hosted models
 
-The hosted runtime now has a small built-in model manager. Use it when you want
-OpenAI or Gemini without hand-editing env vars every time.
-
-This command family was inspired by OpenClaw's provider/model UX, but TerraFin
-implements and persists it through its own runtime and CLI layers. See
-[models.md](./models.md) for the explicit attribution and boundary.
+TerraFin's own agent has a small model manager. Use it to switch between
+OpenAI and Gemini without editing env vars. See [models.md](./models.md) for
+the full guide, including its OpenClaw attribution.
 
 ```bash
 terrafin-agent models list --all
 terrafin-agent models current
-terrafin-agent models use google/gemini-3.1-pro-preview
+terrafin-agent models use google/gemini-4-argon
 terrafin-agent models auth login --provider google --set-default
 ```
 
-`models auth login` prompts for the credential on an interactive TTY. For
-non-interactive shells, pass `--token` instead.
-
-For the full model-management guide, read [models.md](./models.md).
+`models auth login` prompts for the credential on an interactive terminal.
+In a non-interactive shell, pass `--token`.
 
 ## Read next
 

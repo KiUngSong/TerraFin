@@ -1,39 +1,42 @@
 ---
 title: Agent Architecture
-summary: Design guide for TerraFin's shared capability layer and the boundary between hosted and external agent modes.
+summary: Design guide for TerraFin's shared capability layer and the boundary between TerraFin's own agent and external agents.
 read_when:
   - Designing the next layer of TerraFin's agent harness
   - Deciding where a new agent feature belongs
-  - Reviewing how hosted and external agent modes should stay aligned
+  - Reviewing how TerraFin's own agent and external agents stay aligned
 ---
 
 # Agent Architecture
 
 This document is for maintainers.
 
-!!! note "Attribution Boundary"
-    TerraFin's provider/model registry and model-management CLI were inspired by
-    OpenClaw's model-provider UX. TerraFin's transcript-first session history
-    now also follows the same broad reference shape used by OpenClaw and Claude
-    Code: append-only per-session transcripts plus a separate session index. The
-    hidden guru-role split described below also borrows the high-level idea of
-    explicit analyst role separation from `ai-hedge-fund`, while deliberately
-    keeping TerraFin's shared capability layer instead of per-guru Python
-    analysis modules.
-    The shared financial capability layer, hosted-runtime policy layer,
-    permission flow, widget integration, and view-context design described here
-    are TerraFin-specific architecture.
+TerraFin can be used by an agent in two ways:
+
+- **TerraFin's own agent (hosted runtime).** TerraFin runs the model loop
+  itself and serves it in the browser panel and over `/agent/api/*`.
+- **TerraFin's skills from your own agent (external agent).** Another agent,
+  such as Claude Code or Codex, owns the model loop and calls TerraFin through
+  Python, the CLI, or HTTP.
 
 The main rule is simple:
 
 > Do not create an agent-only shortcut path that bypasses TerraFin's real data,
 > chart, and analysis pipeline.
 
-Hosted agents and external agents should both sit on top of the same shared capability layer.
+Both ways sit on top of the same shared capability layer.
+
+!!! note "Attribution"
+    The provider/model registry and model-management CLI were inspired by
+    OpenClaw's model-provider UX. Session history follows the shape used by
+    OpenClaw and Claude Code: append-only per-session transcripts plus a
+    separate session index. The capability layer, persona sub-agents, policy
+    layer, permission flow, widget integration, and view-context design are
+    TerraFin's own.
 
 ## Core idea
 
-TerraFin should converge on one shared **capability layer** that owns:
+One shared **capability layer** owns:
 
 - capability registration
 - typed inputs and outputs
@@ -42,33 +45,23 @@ TerraFin should converge on one shared **capability layer** that owns:
 - task lifecycle
 - policy and permission decisions
 
-Then two controllers can sit on top:
+Two controllers sit on top:
 
-- **Hosted runtime mode**
-  TerraFin owns the model loop and tool execution.
-- **External agent mode**
-  Another system owns the model loop and calls TerraFin through Python, CLI, HTTP, or future MCP-like adapters.
+- **Hosted runtime.** TerraFin owns the model loop and tool execution.
+- **External agent.** Another system owns the model loop and calls TerraFin
+  through Python, CLI, or HTTP adapters.
 
-The unification point is not the LLM loop. It is the capability layer.
-The capability layer plays the role an MCP server plays for MCP clients — it
-exposes one typed capability set identically to the hosted runtime and to
-external agents.
+The unification point is not the LLM loop. It is the capability layer. It
+plays the role an MCP server plays for MCP clients: one typed capability set,
+exposed the same way to both controllers.
 
 ## Capability-layer components
 
 ### Capability registry
 
-Examples:
-
-- market snapshots
-- macro focus
-- indicators
-- company info
-- earnings and financial statements
-- guru portfolios
-- calendar scans
-- LPPL analysis
-- chart opening
+Each capability (market snapshots, company info, filings, valuation, chart
+opening, and so on) is registered once in `agent/runtime/capability.py`. The
+live list comes from `terrafin-agent capabilities`, not from this page.
 
 Rules:
 
@@ -79,22 +72,13 @@ Rules:
 
 ### Session and context layer
 
-The runtime should own session-scoped state through objects like:
+The runtime owns session-scoped state through `TerraFinAgentSession` and
+`TerraFinAgentContext`: current symbols, chart session references, user
+defaults like depth and view, task and artifact references, and session ids
+that stay stable across transports.
 
-- `TerraFinAgentSession`
-- `TerraFinAgentContext`
-
-Suggested responsibilities:
-
-- current symbols or macro instruments
-- chart session references
-- user defaults like depth/view
-- task references
-- artifact references
-- stable session ids across transports
-
-Conversation history should not be treated as another mutable session blob.
-Transcript history is append-only and separate from the runtime session record.
+Conversation history is not another mutable session blob. Transcripts are
+append-only and stored apart from the runtime session record.
 
 ### Task layer
 
@@ -107,80 +91,41 @@ Use a task when:
 - output should become an artifact
 - the result may arrive after the current turn
 
-Likely task categories:
-
-- multi-asset screens
-- portfolio sweeps
-- report synthesis
-- valuation packs
-- chart build workflows
-
 ### Agent definition layer
 
-Hosted agents should come from a registry, not ad-hoc prompt blobs.
+Hosted agents come from a registry (`agent/contracts/definitions.py`), not
+ad-hoc prompt blobs. A definition names the role, its purpose, the
+capabilities it may use, default depth and view, and whether it may open
+charts or run background tasks.
 
-Definitions should describe:
+Users talk to one agent, `terrafin-assistant`. The registry also holds hidden
+guru roles (Buffett, Marks, Druckenmiller). These are internal research roles:
 
-- role name
-- purpose
-- allowed capabilities
-- default depth and view
-- chart permission
-- background-task permission
-
-Current default product path:
-
-- `terrafin-assistant`
-
-The registry also contains **internal guru definitions** such as Buffett,
-Marks, and Druckenmiller. These are hidden research roles, not public product
-surfaces.
-
-Current product rule:
-
-- users talk to `terrafin-assistant`
-- `terrafin-assistant` is the **orchestrator**. It calls hidden guru
-  subagents as tool-calls (`consult_warren_buffett`, `consult_howard_marks`,
-  `consult_stanley_druckenmiller`) when its own LLM decides, per-turn,
-  that an investor lens would help. See the diagrams in
-  [Orchestrator + persona subagents](#orchestrator-persona-subagents).
-- guru roles are not shown in the default catalog or session history
-- guru roles are not creatable through the public runtime session API
-- hidden guru session ids are not valid public session/task/approval handles
+- they are not shown in the default catalog or session history
+- they cannot be created through the public session API
+- their session ids are not valid public session, task, or approval handles
 
 ### Hosted loop layer
 
-This exists only for hosted runtime mode.
-
-Its job is to:
-
-- run the model loop
-- expose capabilities as tools
-- append transcript-first messages and structured tool results to the session
-- decide when to invoke a capability directly versus launch a task
-- normalize transcript state before the next provider call
-- compact context proactively before the provider rejects the prompt
+This exists only for the hosted runtime. It runs the model loop, exposes
+capabilities as tools, appends messages and structured tool results to the
+transcript, chooses between a direct call and a task, normalizes the
+transcript before each provider call, and compacts context before the
+provider rejects the prompt.
 
 External agents do not need TerraFin to own this layer.
 
 ### Orchestrator + persona subagents
 
-The user-facing `terrafin-assistant` is the **orchestrator**. It has
-autonomy — its own LLM decides, in-context, when to call a hidden
-investor persona. The three personas (Warren Buffett, Howard Marks,
-Stanley Druckenmiller) are exposed to the orchestrator as **tools**,
-not as a pre-route. This is a standard agent-with-subagent pattern.
+`terrafin-assistant` is the **orchestrator**. Its own LLM decides, each turn,
+whether an investor lens would help. The three personas are exposed to it as
+tools (`consult_warren_buffett`, `consult_howard_marks`,
+`consult_stanley_druckenmiller`), not as a pre-route.
 
-Two levels. The orchestrator runs the usual tool-call loop; the
-`consult_<persona>` tool, when called, spins up a hidden persona
-subagent that runs its own tool-call loop and finalises via a
-structured memo.
+#### Level 1: orchestrator loop
 
-#### Level 1 — orchestrator loop
-
-The user prompt arrives at the orchestrator. It owns conversation
-history, view-context, and tool results. The orchestrator agent
-decides, per-turn, whether a persona lens would improve the answer.
+The orchestrator holds the conversation, the view context, and tool results.
+Each turn it either replies or calls a tool.
 
 ```
             ┌─────────────────┐
@@ -218,35 +163,16 @@ decides, per-turn, whether a persona lens would improve the answer.
                                           (next turn)
 ```
 
-Tools available to the orchestrator agent:
+Its tools are the research and data capabilities plus the three
+`consult_<persona>` tools. It may call no persona (for a lookup like "what's
+AAPL trading at"), one, or several in parallel ("how would Buffett and Marks
+disagree on this").
 
-- **Research / data tools** — `sec_filings`, `sec_filing_document`,
-  `sec_filing_section`, `market_snapshot`, `valuation`,
-  `financials`, `earnings`, `company_info`, `macro_focus`,
-  `portfolio`, `economic`, `calendar_events`, `lppl_analysis`,
-  `market_breadth`, `watchlist`, `fear_greed`, `sp500_dcf`,
-  `beta_estimate`, `top_companies`, `market_regime`,
-  `trailing_forward_pe`, `fundamental_screen`, `risk_profile`,
-  `open_chart`, `current_view_context`, `resolve`
-- **Persona-consult tools** — `consult_warren_buffett`,
-  `consult_howard_marks`, `consult_stanley_druckenmiller`
+#### Level 2: persona subagent loop
 
-The orchestrator agent may ignore all three persona tools (for pure
-lookup questions like "what's AAPL trading at"), call one, or call
-several in parallel ("how would Buffett and Marks disagree on
-this"). The decision is an agent tool-call, not a regex gate.
-
-#### Level 2 — persona subagent loop (zoom-in on `consult_<persona>`)
-
-When the orchestrator calls `consult_warren_buffett("is this a good
-business")`, a hidden session spins up with:
-
-- `metadata.hiddenInternal = true` (excluded from session history)
-- `metadata.disableGuruRouting = true` (defensive; can't recurse)
-- linked view-context inherited from the parent
-- the persona's YAML persona prompt as system prompt
-- a persona-specific tool set (research tools only; no nested
-  `consult_*`)
+A `consult_<persona>` call starts a hidden session. It inherits the parent's
+view context, loads the persona's YAML prompt as its system prompt, and is
+excluded from session history.
 
 ```
    Orchestrator Agent calls consult_<persona>(question)
@@ -255,7 +181,7 @@ business")`, a hidden session spins up with:
   ┌─────────────────────────────────────────────────┐
   │  Hidden Persona Subagent session                │
   │                                                 │
-  │  new session, metadata.hiddenInternal = true,   │
+  │  new hidden session,                            │
   │  persona YAML loaded as system prompt,          │
   │  linked view-context inherited from parent      │
   └────────────────────────┬────────────────────────┘
@@ -293,157 +219,87 @@ business")`, a hidden session spins up with:
                     Orchestrator Agent (Level 1)
 ```
 
-Tools available to the persona agent inside the hidden subagent:
+The persona's tools:
 
-- **Research / data tools** — a persona-scoped subset chosen by
-  `_select_guru_worker_tools` in `guru.py`. Same capability layer
-  as the orchestrator, but curated per persona (Buffett skews to
-  `valuation`, `financials`, `fundamental_screen`; Marks to
-  `economic`, `risk_profile`, `macro_focus`; Druckenmiller to
-  `macro_focus`, `market_snapshot`, `economic`). No
-  `consult_<persona>` tools (recursion is blocked by construction).
-- **Finalizer** — `submit_guru_research_memo`, a single-shot tool
-  the persona MUST call to end its turn. The memo payload is
-  validated against `GuruResearchMemo` (Pydantic). Non-memo
-  free-form prose is not accepted as a finalisation.
+- **Research tools.** The allowlist is `allowed_capabilities` in the persona's
+  YAML under `agent/guru/personas/`. The YAML is the allowlist. To change a
+  persona's tools, edit its YAML.
+- **Finalizer.** The persona must end by calling `submit_guru_research_memo`.
+  The payload is validated against `GuruResearchMemo` (`agent/guru/memo.py`):
+  stance, confidence, thesis, evidence, risks, open questions, and citations.
 
-#### `GuruResearchMemo` fields (what the orchestrator gets back)
-
-| Field | Shape | Source |
-|-------|-------|--------|
-| `guru` | string | Server-stamped (persona name) |
-| `stance` | `bullish` \| `bearish` \| `neutral` \| `abstain` | Persona self-reported |
-| `confidence` | integer 0–100 | Persona self-reported (see note below) |
-| `thesis` | short paragraph | Persona self-reported |
-| `key_evidence` | list of bullets | Persona self-reported |
-| `risks` | list of bullets | Persona self-reported |
-| `open_questions` | list of bullets | Persona self-reported |
-| `citations` | list of strings | Persona self-reported |
-
-**Note on `confidence`**: it's a number the persona agent writes
-into the memo payload. It is NOT a calculated metric. The persona's
-system prompt instructs: if evidence is missing or the case is
-outside the persona's style, either use `stance="abstain"` or
-submit a lower-confidence partial memo. Pydantic validates the
-value is an integer in `[0, 100]`; `_persona_fit_feedback` separately
-validates that the memo sounds like the persona (and triggers one
-in-turn retry if it doesn't) but never edits the confidence number.
-Treat `confidence` as the persona's self-assessed evidence
-strength, not a statistical score.
+`confidence` is a number the persona writes, not a calculated metric. Treat it
+as the persona's own view of its evidence strength. The memo schema lowers it
+when a high-confidence memo cites nothing, and appends a note to the thesis
+saying why. A separate persona-fit check can ask the persona to revise a memo
+that does not sound like it.
 
 #### Invariants
 
-- **One visible assistant.** The user only ever sees the
-  orchestrator's reply. Persona sessions are never surfaced.
-- **Persona can't recurse.** Consult tools are not registered for
-  `hiddenInternal` sessions, so Buffett can't call
-  `consult_howard_marks` which calls `consult_warren_buffett`.
-- **Structured handoff only.** Personas finalise through
-  `submit_guru_research_memo(...)` — never via free-form prose. The
-  memo schema (`GuruResearchMemo`) is a Pydantic model so the
-  orchestrator always gets typed fields, not text to re-parse.
-- **View-context inheritance.** Persona sessions see the same
-  linked view-context the orchestrator is reasoning over, so their
-  research uses the same ticker / filing / page the user is looking
-  at.
-- **Loop-guard.** Calling the same persona with the same question
-  three times in a turn is short-circuited (see `loop.py`
-  `_tool_call_fingerprint`).
+- **One visible assistant.** The user only sees the orchestrator's reply.
+  Persona sessions are never surfaced.
+- **Personas cannot recurse.** Hidden persona sessions do not get
+  `consult_*` tools.
+- **Structured handoff only.** Personas finish through the memo tool, never
+  through free-form prose, so the orchestrator gets typed fields.
+- **Shared view context.** Personas see the same ticker, filing, or page the
+  user is looking at.
+- **Loop guard.** The hosted loop short-circuits a tool call repeated with
+  the same arguments within a turn.
 
 ### Transport adapters
 
-Northbound transports should stay thin:
-
-- Python client
-- CLI
-- HTTP routes
-- browser widget
-- skill artifact
-- future MCP or notebook adapters
-
-Different transport, same semantics. That's the rule.
+Transports stay thin: Python client, CLI, HTTP routes, browser widget, and the
+skill file. Different transport, same semantics.
 
 ## Operating modes
 
-### Hosted runtime mode
-
-TerraFin owns:
-
-- the model loop
-- the session
-- task dispatch
-- artifacts
-- chart/session side effects
-
-Shape:
+TerraFin's own agent:
 
 `User -> hosted runtime -> shared context/session -> capability layer`
 
-### External agent mode
+TerraFin owns the model loop, the session, task dispatch, artifacts, and chart
+side effects.
 
-Another system owns:
-
-- the model
-- prompt strategy
-- conversation planning
-
-TerraFin owns:
-
-- the same capability layer
-- optional session/task semantics
-- transport adapters
-
-Shape:
+TerraFin's skills from your own agent:
 
 `External agent -> Python/CLI/HTTP adapter -> shared context/session -> capability layer`
 
+The other system owns the model, prompt strategy, and planning. TerraFin
+owns the same capability layer, optional session and task semantics, and the
+adapters.
+
 ## Current code map
 
-The agent package was split into sub-packages — compatibility shims at the
-old top-level paths re-export the new locations so external imports keep
-working, but new code should target the canonical paths below.
+Paths are under `src/TerraFin/`. New code should import from these packages.
 
-| Module (canonical)                                                  | Role                                                                                          | Shim at                                  |
-|----------------------------------------------------------------------|-----------------------------------------------------------------------------------------------|------------------------------------------|
-| `agent/runtime/capability.py`                                        | capability registry + `build_default_capability_registry`                                     | (re-exported via `agent/runtime/__init__.py`) |
-| `agent/runtime/hosted.py`                                            | hosted runtime controller and policy layer                                                    | `agent/hosted_runtime.py`                |
-| `agent/runtime/loop.py`                                              | provider-agnostic hosted loop and transcript append flow                                      | `agent/loop.py`                          |
-| `agent/runtime/context.py`, `session.py`, `tasks.py`, `artifacts.py` | session context, task registry, artifact tracking                                             | —                                        |
-| `agent/runtime/transcript_normalizer.py`, `context_budget.py`, `recovery.py` | normalization, prompt-budget estimation, per-turn recovery                            | —                                        |
-| `agent/contracts/tool_contracts.py`                                  | LLM-facing tool input schemas                                                                 | `agent/tool_contracts.py`                |
-| `agent/contracts/definitions.py`                                     | hosted agent definition registry                                                              | `agent/definitions.py`                   |
-| `agent/contracts/conversation.py`, `conversation_state.py`           | message/block protocol + conversation dataclasses                                             | `agent/conversation.py`, `conversation_state.py` |
-| `agent/service/service.py`                                           | capability implementation layer (`TerraFinAgentService`)                                      | —                                        |
-| `agent/service/hosted.py`                                            | hosted-service wiring                                                                         | `agent/hosted_service.py`                |
-| `agent/service/client.py`                                            | Python transport adapter (`TerraFinAgentClient`)                                              | `agent/client.py`                        |
-| `agent/service/client_helpers.py`                                    | helpers used by client + CLI                                                                  | `agent/runtime_helpers.py`               |
-| `agent/storage/transcript_store.py`                                  | append-only transcript store + `sessions.json` index                                          | `agent/transcript_store.py`              |
-| `agent/storage/session_store.py`                                     | non-transcript hosted state: tasks, approvals, audit, view context                            | `agent/session_store.py`                 |
-| `agent/models/management.py`                                         | saved model/auth state + CLI-facing provider catalog (`list_provider_catalog`)                | `agent/model_management.py`              |
-| `agent/models/runtime.py`                                            | provider registry, runtime-model binding, canonical `provider/model` refs                     | `agent/model_runtime.py`                 |
-| `agent/models/providers/*.py`                                        | provider adapters for OpenAI and Gemini                                                       | `agent/providers/*.py`                   |
-| `agent/tools/adapter.py`, `execution.py`, `normalize.py`             | hosted tool adapter + structured tool execution outcomes                                      | `agent/tools.py`, `tool_execution.py`    |
-| `agent/guru/worker.py`                                               | hidden persona subagent runner, persona prompts, `_select_guru_worker_tools`                  | (re-exported via `agent/guru/__init__.py`) |
-| `agent/guru/memo.py`, `consult.py`, `feedback.py`                    | `GuruResearchMemo` schema, `consult_<persona>` glue, persona-fit feedback                     | —                                        |
-| `agent/guru/personas/*.yaml`                                         | persona YAMLs (Buffett / Marks / Druckenmiller) — single source of truth for allowlists       | `agent/personas/` (re-export shim)       |
-| `agent/cli/main.py`                                                  | CLI adapter (`terrafin-agent`)                                                                | (none — `agent/cli/` package replaces the old `agent/cli.py` module) |
-| `interface/agent/data_routes.py`                                     | HTTP adapter                                                                                  | —                                        |
-| `interface/frontend/src/agent/GlobalAgentWidget.tsx`                 | browser widget over the hosted runtime                                                        | —                                        |
+| Module | Role |
+|--------|------|
+| `agent/runtime/` | capability registry, hosted runtime and policy, hosted loop, session, context, tasks, artifacts |
+| `agent/contracts/` | tool input schemas, agent definitions, conversation protocol |
+| `agent/service/` | capability implementations (`TerraFinAgentService`) and the Python client (`TerraFinAgentClient`) |
+| `agent/storage/` | append-only transcript store and session index, plus tasks, approvals, audit, and view context |
+| `agent/models/` | saved model and auth state, provider registry, provider adapters |
+| `agent/tools/` | hosted tool adapter and tool execution |
+| `agent/guru/` | persona subagent runner, memo schema, consult tools, persona YAMLs |
+| `agent/cli/` | `terrafin-agent` CLI |
+| `interface/agent/data_routes.py` | HTTP adapter |
+| `interface/frontend/src/agent/GlobalAgentWidget.tsx` | browser widget |
 
 ## Guardrails
 
 - Do not fork financial logic away from the product path.
-- Do not make hosted-only capabilities that external agents cannot also reach.
+- Keep every financial capability reachable by external agents. Only tools
+  that need a live hosted session are hosted-only: the `consult_<persona>`
+  tools, `current_view_context`, and `open_chart`.
 - Do not let HTTP, CLI, and Python semantics drift away from the same capability layer.
 - Do not treat chart-opening as a toy path if agents can create chart artifacts.
 - Do not overbuild remote or multi-agent orchestration before local capability-layer semantics are solid.
 - Do not expose hidden guru roles as a product picker unless the product
   direction explicitly changes.
-- Do not let internal guru orchestration depend on regex recovery from prose;
-  the internal handoff must stay structured.
-- Do not reintroduce a pre-intercept regex router in front of the main
-  assistant — the orchestrator's own LLM decides when to consult a
-  persona via `consult_<persona>` tool-calls.
+- Keep the guru handoff structured. Do not recover it from prose with regex.
+- Do not put a regex router in front of the main assistant. The
+  orchestrator's own LLM decides when to consult a persona.
 
 ## Read next
 

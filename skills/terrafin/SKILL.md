@@ -83,10 +83,8 @@ also defines the `$TF` base URL every example uses.
 
 ### Environment variables
 
-TerraFin reads env vars from the shell or a project-local `.env` (only
-loaded by `terrafin-agent` / `python -m TerraFin.interface.server`, not
-by the Python client directly — export them in your shell for
-`TerraFinAgentClient` use).
+TerraFin reads env vars from the shell or from a `.env` in the current
+directory or the checkout root, on every path including the Python client.
 
 Required for HTTP-only / stateless agent calls: none. The stateless
 `/agent/api/*` routes work out of the box.
@@ -99,8 +97,8 @@ Optional, unlocks additional capabilities:
 Required only for the **hosted TerraFin Agent runtime** (conversational
 UI at `/agent/*`, not the stateless `/agent/api/*` routes):
 
-- `TERRAFIN_AGENT_MODEL_REF` — `provider/model`, e.g. `openai/gpt-4.1` or `google/gemini-2.5-pro`.
-- One of `OPENAI_API_KEY`, `GEMINI_API_KEY` — must match the provider in `TERRAFIN_AGENT_MODEL_REF`.
+- `TERRAFIN_AGENT_MODEL_REF` — `provider/model`, e.g. `openai/gpt-6-luna` or `google/gemini-4-argon`.
+- One of `OPENAI_API_KEY`, `GEMINI_API_KEY`, `ANTHROPIC_API_KEY` — must match the provider in `TERRAFIN_AGENT_MODEL_REF`.
 
 See [.env.example](../../.env.example) and [docs/configuration.md](../../docs/configuration.md) for the full list (MongoDB watchlist, private-access data source, host/port overrides, etc.).
 
@@ -142,7 +140,7 @@ client = TerraFinAgentClient()
 client.market_data("MOH")
 ```
 
-`valuation` has no client method — reach it over HTTP or the CLI (see
+`valuation` has no client or CLI method. Reach it over HTTP (see
 "Choose the entrypoint"). The client covers a subset of the capabilities, so
 check before assuming a method exists; `python -c "from TerraFin.agent import
 TerraFinAgentClient; print([m for m in dir(TerraFinAgentClient) if not
@@ -239,6 +237,7 @@ the request.
 
 Recipes live in reference files — read the one your task needs:
 
+- [references/tool-lookup.md](references/tool-lookup.md) — which tool fits a task, and what not to hand-roll (raw SEC fetches)
 - [references/market-and-indicators.md](references/market-and-indicators.md) — find what a series is called, macro/market history, snapshots, compare, calendar, patterns, similarity, LPPL, sentiment/breadth
 - [references/valuation.md](references/valuation.md) — DCF (forward + turnaround), reverse DCF, S&P 500 DCF, FCF history, beta, fundamentals
 - [references/filings-and-news.md](references/filings-and-news.md) — SEC filings, headlines, forward consensus, claim verification

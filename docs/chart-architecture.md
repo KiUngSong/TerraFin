@@ -10,6 +10,8 @@ read_when:
 
 # Chart Architecture
 
+Package paths on this page drop the leading `src/TerraFin/`: `data/` means `src/TerraFin/data/`.
+
 TerraFin's chart system is built around one shared idea:
 
 - the backend owns session-scoped chart state
@@ -29,7 +31,7 @@ That gives TerraFin one chart engine with different entry points:
 
 ### 1. Session-scoped state is the source of truth
 
-Chart state lives in `src/TerraFin/interface/pages/chart/state.py`.
+Chart state lives in `interface/pages/chart/state.py`.
 
 Each session stores:
 
@@ -65,7 +67,7 @@ remounts as the normal update path.
 
 ### A. Data acquisition
 
-The chart stack uses `DataFactory` from `src/TerraFin/data/factory.py`.
+The chart stack uses `DataFactory` from `data/factory.py`.
 
 There are three important time-series entry points:
 
@@ -102,7 +104,7 @@ that source in session so later view changes can be rebuilt deterministically.
 
 ### D. View transform
 
-`apply_view(...)` in `src/TerraFin/interface/pages/chart/chart_view.py` transforms the
+`apply_view(...)` in `interface/pages/chart/chart_view.py` transforms the
 source payload for the selected timeframe. The transformed payload becomes the
 display payload for the current session.
 
@@ -124,7 +126,7 @@ repeated view rebuilds do not recompute the same indicator stack unnecessarily.
 ### F. Frontend render
 
 The frontend entry point is `ChartComponent` in
-`src/TerraFin/interface/frontend/src/chart/ChartComponent.tsx`.
+`interface/frontend/src/chart/ChartComponent.tsx`.
 
 The main responsibilities are:
 
@@ -138,7 +140,7 @@ The main responsibilities are:
 
 ## Agent consumers use the same optimized history path
 
-The agent layer in `src/TerraFin/agent/service.py` does not bypass chart
+The agent layer in `agent/service/service.py` does not bypass chart
 processing decisions for market and macro series.
 
 Instead, it reuses the same core ingredients:
@@ -166,7 +168,7 @@ Backend routes read `X-Session-ID`. If the header is absent, they use
 ### Frontend session ids
 
 The frontend creates per-tab session ids in
-`src/TerraFin/interface/frontend/src/chart/api.ts`:
+`interface/frontend/src/chart/api.ts`:
 
 - each browser tab gets one tab id
 - each page scope prefixes that tab id, for example `chart-page:<tab-id>`
@@ -184,7 +186,7 @@ embedded or notebook flows that must open a specific pre-seeded backend session.
 
 ### Notebook behavior
 
-`display_chart_notebook(...)` in `src/TerraFin/interface/pages/chart/client.py` now:
+`display_chart_notebook(...)` in `interface/pages/chart/client.py` now:
 
 1. waits for `/ready`
 2. starts the server if needed

@@ -10,8 +10,10 @@ read_when:
 
 # Interface Layer
 
+Package paths on this page drop the leading `src/TerraFin/`: `data/` means `src/TerraFin/data/`.
+
 The interface layer exposes TerraFin through one FastAPI application, six page
-routes, and several API families. It lives under `src/TerraFin/interface/`.
+routes, and several API families. It lives under `interface/`.
 
 The key design choice is that interactive state is session-scoped. Unless a
 request says otherwise, TerraFin uses the `default` session.
@@ -21,7 +23,7 @@ For deployment and upstream data-usage responsibilities, see
 
 ## Server
 
-Source: `src/TerraFin/interface/server.py`
+Source: `interface/server.py`
 
 The server owns:
 
@@ -60,7 +62,7 @@ Run these commands from `src/TerraFin/interface/`.
 | `status` | Show whether the background process is running |
 | `restart` | Stop and start again |
 
-Runtime config comes from `src/TerraFin/interface/core/config.py`.
+Runtime config comes from `interface/core/config.py`.
 
 | Field | Default | Env var | Notes |
 |-------|---------|---------|-------|
@@ -108,7 +110,8 @@ In browser flows, TerraFin usually generates a per-tab session id and sends it
 on every chart request. Notebook and direct Python helpers intentionally use the
 `default` chart session unless an explicit session id is provided.
 
-Use the accessors in `chart/state.py` and `calendar/state.py` instead of
+Use the accessors in `interface/pages/chart/state.py` and
+`interface/pages/calendar/state.py` instead of
 touching their internal storage directly.
 
 ## Page routes
@@ -133,7 +136,7 @@ Each page route respects `TERRAFIN_BASE_PATH`.
 
 ## Chart
 
-Source: `src/TerraFin/interface/pages/chart/`
+Source: `interface/pages/chart/`
 
 The chart is TerraFin's main visualization surface. It stores a session-scoped
 source payload, display payload, named series, pin state, and per-series
@@ -175,11 +178,11 @@ When the payload contains exactly one candlestick series, TerraFin appends:
 | Range Volatility | window 20 (Parkinson) | `range-vol` |
 | Mandelbrot Fractal Dimension | windows 65, 130, 260 | `mfd` |
 
-Indicator adapter source: `src/TerraFin/interface/pages/chart/indicators/adapter.py`.
+Indicator adapter source: `interface/pages/chart/indicators/adapter.py`.
 
 ### Chart client (Python)
 
-Source: `src/TerraFin/interface/pages/chart/client.py`
+Source: `interface/pages/chart/client.py`
 
 | Function | Description |
 |----------|-------------|
@@ -214,7 +217,7 @@ configure()
 
 ## Terminal
 
-Source: `src/TerraFin/interface/pages/terminal/`
+Source: `interface/pages/terminal/`
 
 The dashboard is the main consumer of `PrivateDataService`. It mixes private
 source data, cache status, and a few valuation-style summary endpoints. If the
@@ -252,7 +255,7 @@ The practical rule for future private-source additions is:
 
 ## Calendar
 
-Source: `src/TerraFin/interface/pages/calendar/`
+Source: `interface/pages/calendar/`
 
 The calendar merges private calendar data and TerraFin-fetched macro events into
 one session-aware view. Events are categorized as `earning`, `macro`, or
@@ -275,7 +278,7 @@ source.
 
 ## Market Insights
 
-Source: `src/TerraFin/interface/pages/market_insights/`
+Source: `interface/pages/market_insights/`
 
 Market insights provides higher-level market context and institutional
 positioning. The regime endpoint is currently a static placeholder response;
@@ -341,7 +344,7 @@ routes.
 
 ## Stock Analysis
 
-Source: `src/TerraFin/interface/pages/stock/`
+Source: `interface/pages/stock/`
 
 Stock Analysis combines a chart-first page route with a small API family for
 company profile, earnings history, financials, SEC filings, and search routing.
@@ -481,7 +484,7 @@ and [agent/hosted-runtime.md](./agent/hosted-runtime.md).
 
 ## Watchlist
 
-Source: `src/TerraFin/interface/pages/watchlist/`
+Source: `interface/pages/watchlist/`
 
 The watchlist page is a dedicated personal-management surface. It reuses the
 dashboard watchlist API family rather than exposing a separate `/watchlist/api`
@@ -491,8 +494,7 @@ The per-item bell (🔔) toggles the reserved `monitor` tag. It selects which
 watchlist tickers the **realtime intraday monitor** subscribes to — nothing
 else. EOD signal alerts (daily/weekly/monthly, sent by the DataFactory EOD
 scan) cover the full watchlist regardless of the bell; to stop those for a
-name, remove it from the watchlist. Scope table: DataFactory
-`docs/signal-catalog.md` § Routing policy.
+name, remove it from the watchlist.
 
 ### Page routes
 
@@ -526,10 +528,10 @@ The watchlist frontend uses `@dnd-kit/core` for touch- and pointer-compatible dr
 
 ## Agent API
 
-Source: `src/TerraFin/interface/agent/data_routes.py`
+Source: `interface/agent/data_routes.py`
 
 The Agent API exposes TerraFin's optimized processing pipeline for programmatic
-consumers. It is backed by the shared service in `src/TerraFin/agent/service.py`
+consumers. It is backed by the shared service in `agent/service/service.py`
 rather than a separate simplified path.
 
 That means:
@@ -539,7 +541,7 @@ That means:
 - indicator computation matches chart indicator math
 - every response includes top-level `processing` metadata
 
-For most consumers, prefer the Python client in `src/TerraFin/agent/client.py`
+For most consumers, prefer the Python client in `agent/client.py`
 or the `terrafin-agent` CLI over calling raw routes directly.
 
 ### API endpoints
@@ -636,9 +638,9 @@ reverse-engineering route handlers.
 
 ## Frontend
 
-Source: `src/TerraFin/interface/frontend/`
+Source: `interface/frontend/`
 
-The frontend is a React SPA. Built assets live in `frontend/build/` and are
+The frontend is a React SPA. Built assets live in `interface/frontend/build/` and are
 served directly by FastAPI, so Node.js is only needed when you are editing the
 frontend itself.
 
@@ -655,13 +657,13 @@ run in environments without a frontend toolchain.
 
 ## Signals
 
-Source: `src/TerraFin/signals/` (umbrella for alerting + reports + channels), `src/TerraFin/interface/signals/` (HTTP routes for inbound webhook).
+Source: `interface/infra/monitor/` (inbound webhook), `signals/alerting/cli.py` (scanner CLI), `analytics/reports/` (weekly reports), `interface/infra/channels/` (Telegram sink).
 
-The `signals/` module groups two related output paths:
+TerraFin has two related output paths:
 
-- **`signals/alerting/`** — real-time threshold alerts (RSI, breakout, etc.) pushed when an external monitoring service POSTs to TerraFin.
-- **`signals/reports/`** — scheduled narrative briefings (currently weekly) generated locally and surfaced on the dashboard.
-- **`signals/channels/`** — shared output sinks (Telegram, webhook, stdout) used by both.
+- **Alerting** (`interface/infra/monitor/`) — real-time threshold alerts (RSI, breakout, etc.) pushed when an external monitoring service POSTs to TerraFin. The `terrafin-signals` scanner CLI (`signals/alerting/cli.py`) scans the watchlist with `analytics/reports/scanner.py`.
+- **Reports** (`analytics/reports/`, scheduled by `interface/infra/jobs/weekly_report.py`) — scheduled narrative briefings (currently weekly) generated locally and surfaced on the dashboard.
+- **Channels** (`interface/infra/channels/`) — the Telegram sink used by the monitor webhook and the terminal's monitor toggle.
 
 ### Alerting
 
@@ -743,7 +745,7 @@ TERRAFIN_SIGNALS_WEBHOOK_SECRET=your-hmac-secret
 
 ### Reports
 
-Source: `src/TerraFin/signals/reports/`
+Source: `analytics/reports/`, scheduled by `interface/infra/jobs/weekly_report.py`
 
 The dashboard auto-generates a weekly markdown report every Friday at 16:30 ET (`TERRAFIN_CACHE_TIMEZONE`). Reports persist under `~/.terrafin/reports/weekly/<as_of>.{md,json}` indefinitely — disk cost is negligible and trend stacking is the value.
 
@@ -784,7 +786,7 @@ Server startup registers current watchlist with the external API and starts a 60
 
 ### Extending
 
-To swap the external API provider, implement `AlertProvider` from `data/contracts/alert_provider.py` and replace `HttpAlertProvider` in `server.py`. The inbound webhook and Telegram forwarding are provider-agnostic.
+To swap the external API provider, implement `SignalProvider` from `data/contracts/signal_provider.py` and return it from `get_signal_provider_from_env` (`interface/infra/monitor/http_provider.py`) in place of `HttpSignalProvider`. The inbound webhook and Telegram forwarding are provider-agnostic.
 
 ---
 

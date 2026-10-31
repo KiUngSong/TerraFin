@@ -1,5 +1,5 @@
 site_name: TerraFin Docs
-site_description: Formal documentation for TerraFin's data layer, interface, analytics, and hosted agent runtime.
+site_description: TerraFin is a set of investment-research skills for AI agents, and an agent harness built on those same skills.
 site_url: https://kiungsong.github.io/TerraFin/
 repo_url: https://github.com/KiUngSong/TerraFin
 repo_name: KiUngSong/TerraFin
@@ -59,9 +59,16 @@ markdown_extensions:
   - pymdownx.keys
   - pymdownx.smartsymbols
   - pymdownx.snippets
-  - pymdownx.superfences
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
   - pymdownx.tabbed:
       alternate_style: true
+      slugify: !!python/object/apply:pymdownx.slugs.slugify
+        kwds:
+          case: lower
 
 extra_css:
   - stylesheets/extra.css
@@ -82,16 +89,20 @@ nav:
       - Overview: getting-started.md
       - Configuration: configuration.md
       - Deployment & Operations: deployment.md
-  - Agent Docs:
-      - Overview: agent/index.md
+      - Model Management: agent/models.md
+  - Skills:
+      - Overview: skills/index.md
       - For External Agents: agent/external-agents.md
       - Usage: agent/usage.md
-      - Architecture: agent/architecture.md
+      - API Reference: api-reference.md
+      - Glossary: agent/index.md
+  - Agent Harness Internals:
+      - Overview: harness/index.md
+      - The Agent Loop: harness/loop.md
       - Hosted Runtime: agent/hosted-runtime.md
-      - Model Management: agent/models.md
+      - Architecture and Personas: agent/architecture.md
   - Product Guides:
       - Interface Overview: interface.md
-      - API Reference: api-reference.md
       - Examples & Workflows: examples.md
   - Reference:
       - Architecture Overview: architecture.md

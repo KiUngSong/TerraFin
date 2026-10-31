@@ -10,6 +10,8 @@ read_when:
 
 # Cache System
 
+Package paths on this page drop the leading `src/TerraFin/`: `data/` means `src/TerraFin/data/`.
+
 TerraFin uses two cache layers:
 
 - in-memory cache for fast reuse inside the current process
@@ -35,9 +37,9 @@ register sources ─> start() on app startup ─> daemon thread polls every N se
 
 | Module | Path | Responsibility |
 |--------|------|----------------|
-| `CacheManager` | `src/TerraFin/data/cache/manager.py` | Runs the poll loop, tracks source state |
-| `CachePolicy` | `src/TerraFin/data/cache/policy.py` | Declares default intervals and env-var overrides |
-| Cache registry | `src/TerraFin/data/cache/registry.py` | Wires callbacks, exposes singleton manager |
+| `CacheManager` | `data/cache/manager.py` | Runs the poll loop, tracks source state |
+| `CachePolicy` | `data/cache/policy.py` | Declares default intervals and env-var overrides |
+| Cache registry | `data/cache/registry.py` | Wires callbacks, exposes singleton manager |
 
 The manager persists scheduling state in:
 

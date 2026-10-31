@@ -9,6 +9,8 @@ read_when:
 
 # Agent Model Management
 
+Package paths on this page drop the leading `src/TerraFin/`: `data/` means `src/TerraFin/data/`.
+
 TerraFin's hosted assistant now supports a small built-in model manager through
 the `terrafin-agent models ...` CLI.
 
@@ -34,12 +36,13 @@ The following parts are TerraFin-specific:
 
 Implementation lives in TerraFin's own code:
 
-- `src/TerraFin/agent/models/management.py` (public surface:
+- `agent/models/management.py` (public surface:
   `list_provider_catalog()`, `get_provider_catalog(provider_id)` — do not
   reach into the private `_PROVIDER_CATALOG` dict)
-- `src/TerraFin/agent/models/runtime.py`
-- `src/TerraFin/agent/models/providers/google.py`
-- `src/TerraFin/agent/models/providers/openai.py`
+- `agent/models/runtime.py`
+- `agent/models/providers/anthropic.py`
+- `agent/models/providers/google.py`
+- `agent/models/providers/openai.py`
 
 The old top-level paths (`agent/model_management.py`, `agent/model_runtime.py`,
 `agent/providers/*`) remain as compatibility shims that re-export the new
@@ -47,10 +50,11 @@ locations.
 
 ## What it manages
 
-The model manager currently handles two providers:
+The model manager currently handles three providers:
 
 - `openai/*`
 - `google/*`
+- `anthropic/*` (default `anthropic/claude-opus-5-5`)
 
 It saves state to `.terrafin/agent-models.json` by default. Override that path
 with `TERRAFIN_AGENT_MODELS_PATH` when you want a different location.
@@ -62,11 +66,11 @@ When TerraFin resolves the hosted runtime model, it uses this precedence:
 1. `TERRAFIN_AGENT_MODEL_REF`
 2. saved CLI state from `.terrafin/agent-models.json`
 3. legacy `TERRAFIN_OPENAI_MODEL`
-4. built-in default `openai/gpt-4.1-mini`
+4. built-in default `openai/gpt-6-luna`
 
 Provider credentials follow the same pattern:
 
-1. provider env vars such as `OPENAI_API_KEY` or `GEMINI_API_KEY`
+1. provider env vars such as `OPENAI_API_KEY`, `GEMINI_API_KEY` or `ANTHROPIC_API_KEY`
 2. saved CLI credentials in `.terrafin/agent-models.json`
 
 That means env vars still win when both are present.
@@ -94,7 +98,7 @@ terrafin-agent models current
 Switch the saved default model:
 
 ```bash
-terrafin-agent models use google/gemini-3.1-pro-preview
+terrafin-agent models use google/gemini-4-argon
 ```
 
 Show provider auth status:

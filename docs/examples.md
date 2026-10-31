@@ -54,7 +54,7 @@ terrafin-agent macro-focus "S&P 500" --view weekly
 ```bash
 terrafin-agent models list --all
 terrafin-agent models current
-terrafin-agent models use google/gemini-3.1-pro-preview
+terrafin-agent models use google/gemini-4-argon
 terrafin-agent models auth login --provider google --set-default
 ```
 

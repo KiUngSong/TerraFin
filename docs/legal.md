@@ -41,8 +41,8 @@ caching, redistribution, or other reuse of displayed data.
 
 ## Public Demo Note
 
-The maintainer-operated public demo Space at
-`https://huggingface.co/spaces/sk851/TerraFin` is a public TerraFin deployment.
+The maintainer-operated [public demo Space](https://huggingface.co/spaces/sk851/TerraFin)
+is a public TerraFin deployment.
 Access to that demo does not create any right to upstream data.
 
 ## Related Docs

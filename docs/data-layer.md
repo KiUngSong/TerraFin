@@ -10,7 +10,9 @@ read_when:
 
 # Data Acquisition Layer
 
-The data layer lives under `src/TerraFin/data/`. Its job is to hide provider
+Package paths on this page drop the leading `src/TerraFin/`: `data/` means `src/TerraFin/data/`.
+
+The data layer lives under `data/`. Its job is to hide provider
 differences behind a small set of entry points and return predictable output
 shapes.
 
@@ -47,7 +49,7 @@ These are hard rules. They apply to every provider, every route, every agent
 capability.
 
 - **Contracts are the only return type.** All providers return ONLY a
-  predefined contract from `src/TerraFin/data/contracts/`. No ad-hoc dicts
+  predefined contract from `data/contracts/`. No ad-hoc dicts
   (`{date, cape}` etc.) — ever.
 - **`DataFactory` is the single facade.** Routes, the agent, and the frontend
   never call providers directly. They go through `DataFactory`.
@@ -56,7 +58,7 @@ capability.
 - **`private_access` must shape to TerraFin contracts.** The HTTP server in
   the sibling `~/Downloads/work/DataFactory` repo MUST shape responses to
   match the contracts in this repo. Contract definitions in
-  `src/TerraFin/data/contracts/` are the source of truth.
+  `data/contracts/` are the source of truth.
 - **Adding a new data type is a three-step pattern, no exceptions:**
   1. Define a contract in `data/contracts/` (or reuse an existing one).
   2. Write a provider that returns that contract.
@@ -64,7 +66,7 @@ capability.
 
 ## Contracts
 
-Source: `src/TerraFin/data/contracts/` (canonical list in
+Source: `data/contracts/` (canonical list in
 [`__init__.py`](https://github.com/KiUngSong/TerraFin/blob/main/src/TerraFin/data/contracts/__init__.py))
 
 Every provider's public return type is one of the contracts below. Each entry
@@ -73,7 +75,7 @@ on construction, and one short example.
 
 ### `TimeSeriesDataFrame`
 
-- Location: `src/TerraFin/data/contracts/dataframes.py`
+- Location: `data/contracts/dataframes.py`
 - Subclass of `pd.DataFrame`
 - Columns kept (in order): `time`, `open`, `high`, `low`, `close`, `volume`
 - Validation: `close` is required after normalization; `time` must parse as
@@ -86,7 +88,7 @@ on construction, and one short example.
 
 ### `HistoryChunk`
 
-- Location: `src/TerraFin/data/contracts/history.py`
+- Location: `data/contracts/history.py`
 - Dataclass with `frame: TimeSeriesDataFrame`, `loaded_start`, `loaded_end`,
   `requested_period`, `is_complete`, `has_older`, `source_version`.
 - Used for progressive chart loading. Bounds and flags let the frontend
@@ -96,7 +98,7 @@ on construction, and one short example.
 
 ### `PortfolioDataFrame` and `PortfolioOutput`
 
-- Location: `src/TerraFin/data/contracts/dataframes.py`
+- Location: `data/contracts/dataframes.py`
 - `PortfolioDataFrame` is a `pd.DataFrame` subclass with a `make_figure()`
   method that renders a Plotly treemap of 13F holdings.
 - `PortfolioOutput` (defined alongside `DataFactory`) bundles `info: dict`
@@ -108,7 +110,7 @@ on construction, and one short example.
 
 ### `FinancialStatementFrame`
 
-- Location: `src/TerraFin/data/contracts/statements.py`
+- Location: `data/contracts/statements.py`
 - `pd.DataFrame` subclass. Columns are reporting-period dates (ISO strings or
   `pd.Timestamp`); rows are line items.
 - Required at construction: `statement_type` ∈ {`income`, `balance`,
@@ -120,7 +122,7 @@ on construction, and one short example.
 
 ### `CalendarEvent` and `EventList`
 
-- Location: `src/TerraFin/data/contracts/events.py`
+- Location: `data/contracts/events.py`
 - `CalendarEvent` is a frozen dataclass with `id`, `title`, `start`
   (timezone-aware datetime — enforced), `category` ∈ {`macro`, `earning`,
   `fed`, `dividend`, `ipo`}, `importance` ∈ {`low`, `medium`, `high`},
@@ -132,7 +134,7 @@ on construction, and one short example.
 
 ### `TOCEntry` and `FilingDocument`
 
-- Location: `src/TerraFin/data/contracts/filings.py`
+- Location: `data/contracts/filings.py`
 - `TOCEntry`: frozen dataclass — `id`, `title`, `level`, `anchor`.
 - `FilingDocument`: dataclass with `ticker`, `filing_type` ∈ {`10-K`,
   `10-Q`, `8-K`, `13F`, `S-1`, `DEF 14A`}, `accession`, `filing_date`,
@@ -142,7 +144,7 @@ on construction, and one short example.
 
 ### `IndicatorSnapshot`
 
-- Location: `src/TerraFin/data/contracts/indicators.py`
+- Location: `data/contracts/indicators.py`
 - Frozen dataclass: `name`, `value` (number or string), `as_of`,
   optional `unit`, `change`, `change_pct`, `rating`, `metadata`.
 - Use for single-value scalar indicators (current Fear & Greed score, latest
@@ -153,7 +155,7 @@ on construction, and one short example.
 
 ### `chart_output`
 
-- Location: `src/TerraFin/data/contracts/markers.py`
+- Location: `data/contracts/markers.py`
 - Decorator that normalizes the return of any time-series-shaped
   `DataFactory` method into a `TimeSeriesDataFrame` via `_to_timeseries`,
   tagging the source for cache and debug visibility.
@@ -162,7 +164,7 @@ on construction, and one short example.
 
 ## DataFactory
 
-Source: `src/TerraFin/data/factory.py`
+Source: `data/factory.py`
 
 ```python
 DataFactory(api_keys: dict[str, str] | None = None)
@@ -263,9 +265,9 @@ working with them in practice:
 
 Registry locations:
 
-- Market indicators: `src/TerraFin/data/providers/market/market_indicator.py`
-- Economic indicators: `src/TerraFin/data/providers/economic/registry.py`
-- Guru portfolio registry: `src/TerraFin/data/providers/corporate/filings/sec_edgar/guru_cik.json`
+- Market indicators: `data/providers/market/market_indicator.py`
+- Economic indicators: `data/providers/economic/registry.py`
+- Guru portfolio registry: `data/providers/corporate/filings/sec_edgar/guru_cik.json`
 
 The supported guru names for the 13F feature are maintained in the JSON
 registry above rather than hardcoded inline in Python, so additions and edits
@@ -330,7 +332,7 @@ Configuration via env vars:
 | `TERRAFIN_SEC_USER_AGENT` | Required SEC EDGAR user-agent string for filings and 13F access |
 | `TERRAFIN_MONGODB_URI` / `MONGODB_URI` | Optional MongoDB backend for watchlist write mode |
 
-Implementation lives under `src/TerraFin/data/providers/private_access/`.
+Implementation lives under `data/providers/private_access/`.
 
 The private endpoint currently backs these dashboard and market-insight
 resources:
@@ -417,8 +419,8 @@ has one consistent cache lifecycle.
 
 | Module | Path | Responsibility |
 |--------|------|----------------|
-| Macro calendar | `src/TerraFin/data/providers/economic/macro_calendar.py` | Fetches release dates from FRED API |
-| Macro values | `src/TerraFin/data/providers/economic/macro_values.py` | Enriches events with Latest/Previous from FRED series observations |
+| Macro calendar | `data/providers/economic/macro_calendar.py` | Fetches release dates from FRED API |
+| Macro values | `data/providers/economic/macro_values.py` | Enriches events with Latest/Previous from FRED series observations |
 | Cache source | `private.macro` in CacheManager | Daily refresh via `PrivateDataService.refresh_macro()` |
 
 Current limitation: macro events do not yet carry a reliable consensus

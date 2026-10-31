@@ -5,55 +5,58 @@ summary: Install TerraFin, configure the runtime, and run the first Python, CLI,
 
 # Getting Started
 
-This page is the shortest path from clone to a working TerraFin environment.
+This page is the shortest path from clone to a working TerraFin.
 
 ## Prerequisites
 
 - Python 3.11+
-- A local `.env` file if you want FRED, SEC EDGAR, private-access widgets, or
-  hosted-model credentials
 
 ## Install
 
-Core install:
-
 ```bash
-pip install .
+git clone https://github.com/KiUngSong/TerraFin
+cd TerraFin
+pip install -e .   # the package, the terrafin-agent CLI and the server
+./setup            # links the skill into Claude Code, Codex and opencode on PATH
 ```
 
-Editable install:
+Skip `./setup` if you will not use TerraFin from another agent. Extras:
+`pip install -e ".[dev]"`, `".[db]"`, `".[notebooks]"`.
+
+## What needs a server or a key
+
+| You want | Server | Keys |
+|----------|--------|------|
+| Your agent calls TerraFin through the Python client or the CLI | No | None |
+| Your agent calls the HTTP routes `/agent/api/*`, which cover more, valuation included | Yes | None |
+| TerraFin Terminal, the web dashboard | Yes | None |
+| TerraFin's own agent | Yes for the chat panel, no for the CLI | A model key |
+
+Market data, company data and valuation work with no key. Some sources need one:
+
+| Variable | Adds |
+|----------|------|
+| `FRED_API_KEY` | FRED economic series |
+| `TERRAFIN_SEC_USER_AGENT` | SEC EDGAR filings and guru 13F holdings. SEC requires a name and an email, such as `"Jane Doe jane@example.com"` |
+| `TERRAFIN_AGENT_MODEL_REF` | The model for TerraFin's own agent, as `provider/model`. Default `openai/gpt-6-luna` |
+| `OPENAI_API_KEY` / `GEMINI_API_KEY` / `ANTHROPIC_API_KEY` | The key matching that provider |
+
+Set them in your shell or in `.env` (`cp .env.example .env`). TerraFin reads
+`.env` from the current directory or the checkout root. The full list is in
+[Configuration](configuration.md).
+
+## First DCF
+
+Valuation runs over HTTP, so start the server first (see
+[Run The Interface](#run-the-interface)), then:
 
 ```bash
-pip install -e .
+curl "http://127.0.0.1:8001/agent/api/valuation?ticker=AAPL"
 ```
 
-Useful extras:
-
-```bash
-pip install -e ".[dev]"
-pip install -e ".[db]"
-pip install -e ".[notebooks]"
-```
-
-## Configure The Runtime
-
-Start with the example file:
-
-```bash
-cp .env.example .env
-```
-
-The most common env vars are:
-
-| Variable | Why you care |
-|----------|---------------|
-| `FRED_API_KEY` | Enables FRED-backed economic series |
-| `TERRAFIN_SEC_USER_AGENT` | Required for SEC EDGAR filings and guru 13F holdings |
-| `TERRAFIN_HOST` / `TERRAFIN_PORT` | Server bind address |
-| `TERRAFIN_AGENT_MODEL_REF` | Hosted model ref in `provider/model` format |
-| `TERRAFIN_AGENT_TRANSCRIPT_DIR` | Optional override for local hosted chat history storage |
-
-For the full matrix, read [Configuration](configuration.md).
+The result holds the DCF intrinsic value per share with bear, base and bull
+scenarios, a reverse DCF, and relative multiples. From your own agent, ask
+something like "run a DCF on AAPL with terrafin" while the server runs.
 
 ## First Python Request
 
@@ -75,23 +78,23 @@ terrafin-agent snapshot AAPL
 terrafin-agent macro-focus "S&P 500" --view weekly
 ```
 
-## First Hosted Agent Session
+## First Session With TerraFin's Own Agent
+
+This needs `TERRAFIN_AGENT_MODEL_REF` and its key (see the table above and
+[Model Management](agent/models.md)).
 
 ```bash
 terrafin-agent runtime-create-session terrafin-assistant
 ```
 
-Then send a message:
+Then send a message, using the session id the first command printed:
 
 ```bash
-terrafin-agent runtime-message runtime:example "Give me a compact AAPL market snapshot."
+terrafin-agent runtime-message <session-id> "Give me a compact AAPL market snapshot."
 ```
 
-The hosted assistant can also be used from the browser widget once the
-interface server is running.
-
-Hosted agent chat history is stored locally as transcript files under
-`.terrafin/agent/sessions/` by default.
+The same agent is the chat panel on every page once the interface server is
+running. Chat history is stored locally under `.terrafin/`.
 
 ## Run The Interface
 
@@ -101,22 +104,15 @@ From `src/TerraFin/interface/`:
 python server.py run
 ```
 
-Useful commands:
+`run` stays in the foreground. `start`, `stop`, `status` and `restart`
+manage a background process.
 
-| Command | Behavior |
-|---------|----------|
-| `python server.py run` | Run in the foreground |
-| `python server.py start` | Start in the background |
-| `python server.py stop` | Stop the background process |
-| `python server.py status` | Show whether the background process is running |
-| `python server.py restart` | Restart the background process |
-
-Default pages:
+Pages, on the default local address:
 
 | URL | Purpose |
 |-----|---------|
-| `http://127.0.0.1:8001/chart` | Interactive chart surface |
-| `http://127.0.0.1:8001/terminal` | Terminal and cache status |
+| `http://127.0.0.1:8001/chart` | Interactive chart |
+| `http://127.0.0.1:8001/terminal` | Terminal |
 | `http://127.0.0.1:8001/market-insights` | Macro and portfolio views |
 | `http://127.0.0.1:8001/stock/AAPL` | Stock analysis page |
 | `http://127.0.0.1:8001/calendar` | Earnings and macro calendar |
@@ -142,13 +138,7 @@ Notebook rules and layout guidance live in [Notebooks](notebooks.md).
 - [Configuration](configuration.md)
 - [Deployment & Operations](deployment.md)
 - [Examples & Workflows](examples.md)
-- [Agent Docs](agent/index.md) — both Hosted TerraFin Agent (Mode A) and the
-  external-agent skill / HTTP surface (Mode B).
-- [TerraFin skill on GitHub](https://github.com/KiUngSong/TerraFin/blob/main/skills/terrafin/SKILL.md) —
-  drop-in for Claude Code / Codex. Install it with `./setup` from this checkout
-  (`./setup --host claude` for one host); it symlinks `skills/terrafin/`, so a
-  `git pull` upgrades every host at once. `./setup` refuses to overwrite a real
-  directory left behind by an earlier copy — remove it and re-run. Only on a
-  machine with no checkout, copy the whole `skills/terrafin/` directory:
-  `SKILL.md` alone leaves `references/` behind and the task recipes load from
-  there.
+- [Skills](skills/index.md): use TerraFin from your own agent (Claude Code,
+  Codex, opencode).
+- [Agent Docs](agent/index.md): TerraFin's own agent and the glossary both
+  paths share.

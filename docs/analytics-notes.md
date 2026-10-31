@@ -5,16 +5,18 @@ summary: DCF and beta implementation notes that sit close to the analytics code 
 
 # Analytics Notes
 
+Package paths on this page drop the leading `src/TerraFin/`: `data/` means `src/TerraFin/data/`.
+
 These notes mirror the implementation guidance kept near the analytics code so
 maintainers can reach it from the formal docs site as well.
 
 ## DCF
 
-DCF code lives under `src/TerraFin/analytics/analysis/fundamental/dcf/`.
+DCF code lives under `analytics/analysis/fundamental/dcf/`.
 
 | Model | What it is trying to answer | Main checked-in data |
 |------|------------------------------|----------------------|
-| S&P 500 DCF | A year-end target framework | `fundamental/dcf/sp500_defaults.json` |
+| S&P 500 DCF | A year-end target framework | `analytics/analysis/fundamental/dcf/sp500_defaults.json` |
 | Stock DCF | A spot equity valuation framework | derived from live company inputs plus explicit defaults |
 
 ### S&P 500 DCF
@@ -53,7 +55,7 @@ Why revenue comes before FCF CAGR:
 #### Base FCF source cascade
 
 `Base FCF / Share` is selected by `_select_stock_fcf_base()` in
-`src/TerraFin/analytics/analysis/fundamental/dcf/inputs.py`. Four sources, with
+`analytics/analysis/fundamental/dcf/inputs.py`. Four sources, with
 explicit picks via the `fcf_base_source` override on `StockDCFOverrides`:
 
 | Source | Helper | Notes |
@@ -131,7 +133,7 @@ Use turnaround mode (instead of overrides) when:
 
 ## Beta
 
-Risk code lives under `src/TerraFin/analytics/analysis/risk/`.
+Risk code lives under `analytics/analysis/risk/`.
 
 Current built-in methods:
 
@@ -168,4 +170,4 @@ If TerraFin cannot map a ticker confidently, it returns
 
 The full code-adjacent source remains on GitHub:
 
-[src/TerraFin/analytics/analysis/README.md](https://github.com/KiUngSong/TerraFin/blob/main/src/TerraFin/analytics/analysis/README.md)
+[analytics/analysis/README.md](https://github.com/KiUngSong/TerraFin/blob/main/src/TerraFin/analytics/analysis/README.md)
