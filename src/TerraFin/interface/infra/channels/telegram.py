@@ -11,6 +11,7 @@ Setup flow:
 
 import json
 import logging
+import re
 import time
 from pathlib import Path
 
@@ -23,6 +24,39 @@ _TELEGRAM_API = "https://api.telegram.org/bot{token}/{method}"
 
 def _api_url(token: str, method: str) -> str:
     return _TELEGRAM_API.format(token=token, method=method)
+
+
+_TOKEN_IN_URL = re.compile(r"bot\d+:[A-Za-z0-9_-]+")
+
+
+def redact_token(text: str) -> str:
+    """Mask a bot token embedded in a Telegram API URL."""
+    return _TOKEN_IN_URL.sub("bot<token>", text)
+
+
+class _RedactTokenFilter(logging.Filter):
+    """Mask the bot token in httpx's request log lines (``HTTP Request: POST <url>``)."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        message = record.getMessage()
+        if _TOKEN_IN_URL.search(message):
+            record.msg = redact_token(message)
+            record.args = ()
+        return True
+
+
+_httpx_logger = logging.getLogger("httpx")
+if not any(isinstance(f, _RedactTokenFilter) for f in _httpx_logger.filters):
+    _httpx_logger.addFilter(_RedactTokenFilter())
+
+
+def _send_message(httpx, token: str, payload: dict) -> None:
+    # httpx errors quote the request URL, which carries the bot token. Re-raise
+    # with the token masked, and without the original in the traceback.
+    try:
+        httpx.post(_api_url(token, "sendMessage"), json=payload, timeout=10).raise_for_status()
+    except httpx.HTTPError as exc:
+        raise RuntimeError(f"Telegram sendMessage failed: {redact_token(str(exc))}") from None
 
 
 def load_config(path: Path = _CONFIG_PATH) -> dict:
@@ -57,29 +91,29 @@ class TelegramChannel:
             chunks = _markdown_to_telegram_html(md)
         else:
             text = _format_signal_payload(title, payload.get("signals", []))
-            httpx.post(
-                _api_url(self.token, "sendMessage"),
-                json={
+            _send_message(
+                httpx,
+                self.token,
+                {
                     "chat_id": self.chat_id,
                     "text": text,
                     "parse_mode": "HTML",
                     "disable_web_page_preview": True,
                 },
-                timeout=10,
-            ).raise_for_status()
+            )
             return
 
         for chunk in chunks:
-            httpx.post(
-                _api_url(self.token, "sendMessage"),
-                json={
+            _send_message(
+                httpx,
+                self.token,
+                {
                     "chat_id": self.chat_id,
                     "text": chunk,
                     "parse_mode": "HTML",
                     "disable_web_page_preview": True,
                 },
-                timeout=10,
-            ).raise_for_status()
+            )
 
     def send_text(self, text: str, parse_mode: str = "HTML") -> None:
         """Send a single pre-formatted message. Bypasses the signal formatter.
@@ -91,16 +125,16 @@ class TelegramChannel:
             import httpx
         except ImportError as exc:
             raise RuntimeError("httpx is required: pip install httpx") from exc
-        httpx.post(
-            _api_url(self.token, "sendMessage"),
-            json={
+        _send_message(
+            httpx,
+            self.token,
+            {
                 "chat_id": self.chat_id,
                 "text": text,
                 "parse_mode": parse_mode,
                 "disable_web_page_preview": True,
             },
-            timeout=10,
-        ).raise_for_status()
+        )
 
     @classmethod
     def from_config(cls, path: Path = _CONFIG_PATH) -> "TelegramChannel":
@@ -121,6 +155,7 @@ def _html_escape(s: str) -> str:
 # Severity → emoji. Wire still carries 3 levels (low/med/high) for downstream
 # consumers; rendering is bucketed because most signals fire as "high" anyway.
 _SEVERITY_EMOJI = {"high": "🔴", "med": "🟡", "medium": "🟡", "low": "🟢"}
+
 
 def _signal_direction(signal_dict: dict) -> str:
     direction = signal_dict.get("direction", "neutral")
@@ -202,8 +237,6 @@ def _markdown_to_telegram_html(md: str) -> list[str]:
     Headings/lists are mapped to bold + Unicode bullets. Output is split into
     chunks under the 4096-char per-message limit, breaking on blank lines.
     """
-    import re
-
     out_lines: list[str] = []
     for raw in md.splitlines():
         line = raw
@@ -367,7 +400,7 @@ def cmd_pair(timeout: int = 60) -> None:
                 print("Test with: terrafin-signals telegram test")
                 return
 
-    print("Timeout — no message received. Try again.")
+    raise TimeoutError(f"No message received within {timeout}s. Try again.")
 
 
 def cmd_test() -> None:

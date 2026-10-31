@@ -67,6 +67,14 @@ def is_duplicate(signal: InboundSignal) -> bool:
     return False
 
 
+def forget_signal(signal: InboundSignal) -> None:
+    """Drop a signal_id from the dedup cache so the sender's retry is accepted."""
+    if not signal.signal_id:
+        return
+    with _dedup_lock:
+        _seen_signal_ids.pop(signal.signal_id, None)
+
+
 def check_rate_limit(client_id: str) -> bool:
     """Return True if request is within rate budget. Sliding window per client_id.
 
@@ -99,6 +107,7 @@ def _resolve_ticker_name(ticker: str) -> str:
     when the stored name equals the ticker symbol (sentinel for missing data)."""
     try:
         from TerraFin.data.watchlist_service import get_watchlist_service
+
         svc = get_watchlist_service()
         for item in svc.get_watchlist_snapshot():
             if item.get("symbol") == ticker:
@@ -123,7 +132,9 @@ def forward_to_telegram(signal: InboundSignal) -> None:
     if sev_norm not in {"high", "med"}:
         log.debug(
             "Telegram forward skipped for %s (%s) — severity=%r below threshold",
-            signal.ticker, signal.signal, signal.severity,
+            signal.ticker,
+            signal.signal,
+            signal.severity,
         )
         return
 

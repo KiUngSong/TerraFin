@@ -32,6 +32,7 @@ from fastapi import APIRouter, Response
 from fastapi.responses import HTMLResponse, JSONResponse
 
 from TerraFin.interface.infra.channels.env import signals_env
+from TerraFin.interface.infra.channels.telegram import redact_token
 
 
 log = logging.getLogger(__name__)
@@ -95,7 +96,7 @@ async def _probe_telegram() -> dict[str, Any]:
     except asyncio.TimeoutError:
         return {"status": "down", "detail": f"getMe timeout >{_PROBE_TIMEOUT}s"}
     except Exception as exc:
-        return {"status": "down", "detail": f"getMe error: {exc}"}
+        return {"status": "down", "detail": f"getMe error: {redact_token(str(exc))}"}
 
 
 async def _probe_signals_provider() -> dict[str, Any]:
@@ -135,6 +136,7 @@ async def _probe_private_data() -> dict[str, Any]:
     """
     try:
         from TerraFin.configuration import load_terrafin_config
+
         cfg = load_terrafin_config()
         src = cfg.private_access
         endpoint = src.endpoint or ""
@@ -150,7 +152,7 @@ async def _probe_private_data() -> dict[str, Any]:
 
     headers = {access_key: access_value} if access_key and access_value else {}
     try:
-        from datetime import datetime, timedelta, timezone
+        from datetime import datetime, timezone
 
         import httpx
 

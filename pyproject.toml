@@ -40,6 +40,7 @@ dependencies = [
     "exchange-calendars>=4.13,<5",
     "fastapi>=0.115.0",
     "fredapi",
+    "httpx>=0.28.1",
     "numpy",
     "openai>=2.31.0",
     "pandas",

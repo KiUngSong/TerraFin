@@ -12,6 +12,7 @@ from TerraFin.data.contracts.signal_provider import InboundSignal
 from TerraFin.interface.infra.monitor.webhook import (
     WebhookSecretMissing,
     check_rate_limit,
+    forget_signal,
     forward_to_telegram,
     is_duplicate,
     verify_signature,
@@ -92,11 +93,17 @@ async def _handle_signal(request: Request, x_signature: str):
         log.warning(
             "Inbound signal missing 'direction' field (ticker=%s, signal=%r) — "
             "sender should upgrade to typed direction contract",
-            payload.ticker, payload.signal,
+            payload.ticker,
+            payload.signal,
         )
 
     log.info("Signal received: %s — %s", payload.ticker, payload.signal)
-    forward_to_telegram(payload)
+    try:
+        forward_to_telegram(payload)
+    except Exception:
+        # Delivery failed, so the sender's retry must not be reported as a duplicate.
+        forget_signal(payload)
+        raise
     return {"status": "ok"}
 
 
