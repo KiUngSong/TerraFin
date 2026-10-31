@@ -62,6 +62,22 @@ _PROVIDER_CATALOG: dict[str, TerraFinProviderCatalogEntry] = {
         auth_kind="api-key",
         notes="Canonical refs stay in the form provider/model.",
     ),
+    "anthropic": TerraFinProviderCatalogEntry(
+        provider_id="anthropic",
+        provider_label="Anthropic",
+        description="Claude models through the Anthropic Messages API.",
+        default_model_ref="anthropic/claude-opus-5-5",
+        featured_model_refs=(
+            "anthropic/claude-opus-5-5",
+            "anthropic/claude-sonnet-5-5",
+            "anthropic/claude-haiku-5-5",
+        ),
+        auth_env_vars=("ANTHROPIC_API_KEY",),
+        auth_field="apiKey",
+        auth_prompt="Anthropic API key",
+        auth_kind="api-key",
+        notes="Env vars still win over saved local credentials.",
+    ),
 }
 
 

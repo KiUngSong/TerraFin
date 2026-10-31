@@ -503,6 +503,7 @@ class TerraFinHostedAgentLoop:
                     call_id=tool_call.call_id,
                     tool_name=tool_call.tool_name,
                     arguments=tool_call.arguments,
+                    provider_data=tool_call.provider_data,
                 )
                 for tool_call in tool_calls
             ),

@@ -34,6 +34,8 @@ class TerraFinToolCall:
     call_id: str
     tool_name: str
     arguments: dict[str, Any] = field(default_factory=dict)
+    # Opaque data the provider requires back verbatim when the call is replayed.
+    provider_data: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)
@@ -74,15 +76,16 @@ def make_tool_use_block(
     call_id: str,
     tool_name: str,
     arguments: Mapping[str, Any] | None = None,
+    provider_data: Mapping[str, Any] | None = None,
 ) -> TerraFinMessageBlock:
-    return TerraFinMessageBlock(
-        kind="tool_use",
-        payload={
-            "callId": str(call_id or ""),
-            "toolName": str(tool_name or ""),
-            "arguments": dict(arguments or {}),
-        },
-    )
+    payload: dict[str, Any] = {
+        "callId": str(call_id or ""),
+        "toolName": str(tool_name or ""),
+        "arguments": dict(arguments or {}),
+    }
+    if provider_data:
+        payload["providerData"] = dict(provider_data)
+    return TerraFinMessageBlock(kind="tool_use", payload=payload)
 
 
 def make_tool_result_block(

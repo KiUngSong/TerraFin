@@ -5,6 +5,7 @@ from threading import Lock
 from TerraFin.env import resolve_state_dir
 
 from ..contracts.definitions import build_default_agent_definition_registry
+from ..models.providers.anthropic import TerraFinAnthropicMessagesProvider
 from ..models.providers.google import TerraFinGoogleResponsesProvider
 from ..models.providers.openai import TerraFinOpenAIResponsesProvider
 from ..models.runtime import TerraFinModelProviderRegistry, TerraFinProviderRoutedModelClient
@@ -24,6 +25,7 @@ def build_hosted_model_provider_registry() -> TerraFinModelProviderRegistry:
     registry = TerraFinModelProviderRegistry()
     registry.register(TerraFinOpenAIResponsesProvider())
     registry.register(TerraFinGoogleResponsesProvider())
+    registry.register(TerraFinAnthropicMessagesProvider())
     return registry
 
 

@@ -44,6 +44,7 @@ def is_prompt_budget_error(error: Exception) -> bool:
             "maximum context length",
             "context_length_exceeded",
             "max prompt tokens",
+            "prompt is too long",
         )
     )
 
