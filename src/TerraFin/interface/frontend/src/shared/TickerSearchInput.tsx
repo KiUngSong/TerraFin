@@ -165,12 +165,12 @@ const TickerSearchInput: React.FC<TickerSearchInputProps> = ({
         <ul style={dropdownStyle}>
           {local.translated && (
             <li style={translatedRowStyle}>
-              한국어 → <strong>{local.translated}</strong>
+              Korean → <strong>{local.translated}</strong>
             </li>
           )}
           {hits.length > 0 && renderGrouped(hits, activeIdx, handleSelect)}
           {loading && hits.length === 0 && (
-            <li style={loadingRowStyle}>검색 중…</li>
+            <li style={loadingRowStyle}>Searching…</li>
           )}
         </ul>
       )}
@@ -188,7 +188,7 @@ function renderGrouped(
   const out: React.ReactNode[] = [];
   let idx = 0;
   if (indicators.length > 0) {
-    out.push(<li key="hdr-i" style={headerStyle}>지표 / Indicators</li>);
+    out.push(<li key="hdr-i" style={headerStyle}>Indicators</li>);
     indicators.forEach((h) => {
       const i = idx++;
       out.push(
@@ -208,7 +208,7 @@ function renderGrouped(
     });
   }
   if (stocks.length > 0) {
-    out.push(<li key="hdr-s" style={headerStyle}>종목 / Stocks</li>);
+    out.push(<li key="hdr-s" style={headerStyle}>Stocks</li>);
     stocks.forEach((h) => {
       const i = idx++;
       out.push(
