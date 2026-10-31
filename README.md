@@ -136,5 +136,8 @@ the software only. It does not grant rights to upstream market data, filings,
 content, trademarks, or services accessed through this project.
 
 Operator-managed deployments remain responsible for the sources they enable and
-their own compliance/privacy posture. For the full notice, read
+their own compliance/privacy posture. The maintainer-operated
+[public demo Space](https://huggingface.co/spaces/sk851/TerraFin) is a public
+TerraFin deployment. Access to that demo does not create any right to upstream
+data. For the full notice, read
 <https://kiungsong.github.io/TerraFin/legal/> and [LICENSE](LICENSE).
