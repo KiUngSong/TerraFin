@@ -84,10 +84,10 @@ def test_cli_models_list_all_reports_featured_models(monkeypatch, tmp_path) -> N
     monkeypatch.delenv("TERRAFIN_OPENAI_MODEL", raising=False)
 
     payload = agent_cli._models_list_payload(include_models=True)
-    assert payload["current"]["modelRef"] == "openai/gpt-4.1-mini"
+    assert payload["current"]["modelRef"] == "openai/gpt-6-luna"
     assert any(provider["providerId"] == "google" for provider in payload["providers"])
     assert any(
-        model["modelRef"] == "google/gemini-3.1-pro-preview"
+        model["modelRef"] == "google/gemini-4-argon"
         for provider in payload["providers"]
         if provider["providerId"] == "google"
         for model in provider["models"]
@@ -103,12 +103,12 @@ def test_cli_models_list_all_human_output_is_table(monkeypatch, capsys, tmp_path
 
     captured = capsys.readouterr()
     assert exit_code == 0
-    assert captured.out.startswith("Current: openai/gpt-4.1-mini")
+    assert captured.out.startswith("Current: openai/gpt-6-luna")
     assert "Model" in captured.out
     assert "Auth" in captured.out
     assert "Local" in captured.out
-    assert "openai/gpt-4.1-mini" in captured.out
-    assert "google/gemini-3.1-pro-preview" in captured.out
+    assert "openai/gpt-6-luna" in captured.out
+    assert "google/gemini-4-argon" in captured.out
     assert not captured.out.lstrip().startswith("{")
 
 
@@ -145,10 +145,10 @@ def test_cli_models_auth_login_saves_token_and_default(monkeypatch, capsys, tmp_
     saved = json.loads((tmp_path / "agent-models.json").read_text(encoding="utf-8"))
     assert exit_code == 0
     assert "Saved Google AI Studio credentials (token)." in captured.out
-    assert "Default model: google/gemini-3.1-pro-preview" in captured.out
+    assert "Default model: google/gemini-4-argon" in captured.out
     assert saved["auth"]["google"]["authMode"] == "token"
     assert saved["auth"]["google"]["apiKey"] == "AIza_saved_token"
-    assert saved["defaultModelRef"] == "google/gemini-3.1-pro-preview"
+    assert saved["defaultModelRef"] == "google/gemini-4-argon"
 
 
 def test_cli_models_auth_login_rejects_device_method(capsys, monkeypatch, tmp_path) -> None:

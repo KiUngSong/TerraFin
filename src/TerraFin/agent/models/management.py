@@ -10,7 +10,7 @@ from TerraFin.env import resolve_state_dir
 
 MODEL_STATE_PATH_ENV = "TERRAFIN_AGENT_MODELS_PATH"
 DEFAULT_MODEL_STATE_FILENAME = "agent-models.json"
-DEFAULT_OPENAI_MODEL_REF = "openai/gpt-4.1-mini"
+DEFAULT_OPENAI_MODEL_REF = "openai/gpt-6-luna"
 
 
 @dataclass(frozen=True, slots=True)
@@ -33,12 +33,12 @@ _PROVIDER_CATALOG: dict[str, TerraFinProviderCatalogEntry] = {
         provider_id="openai",
         provider_label="OpenAI",
         description="Hosted OpenAI Responses models.",
-        default_model_ref="openai/gpt-4.1-mini",
+        default_model_ref="openai/gpt-6-luna",
         featured_model_refs=(
-            "openai/gpt-4.1-mini",
-            "openai/gpt-4.1",
-            "openai/gpt-4o",
-            "openai/gpt-5",
+            "openai/gpt-6-luna",
+            "openai/gpt-6.1-terra",
+            "openai/gpt-6.1-sol",
+            "openai/gpt-6-astra",
         ),
         auth_env_vars=("OPENAI_API_KEY",),
         auth_field="apiKey",
@@ -50,11 +50,11 @@ _PROVIDER_CATALOG: dict[str, TerraFinProviderCatalogEntry] = {
         provider_id="google",
         provider_label="Google AI Studio",
         description="Gemini API-key backed models.",
-        default_model_ref="google/gemini-3.1-pro-preview",
+        default_model_ref="google/gemini-4-argon",
         featured_model_refs=(
-            "google/gemini-3.1-pro-preview",
-            "google/gemini-3.1-flash",
-            "google/gemini-2.5-pro-preview",
+            "google/gemini-4-argon",
+            "google/gemini-3.8-flash",
+            "google/gemini-3.5-flash-lite",
         ),
         auth_env_vars=("GEMINI_API_KEY", "GOOGLE_API_KEY"),
         auth_field="apiKey",

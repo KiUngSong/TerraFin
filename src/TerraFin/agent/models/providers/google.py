@@ -32,7 +32,7 @@ from ...tools import TerraFinToolDefinition
 
 
 DEFAULT_GOOGLE_BASE_URL = "https://generativelanguage.googleapis.com/v1beta"
-DEFAULT_GOOGLE_MODEL = "gemini-3.1-pro-preview"
+DEFAULT_GOOGLE_MODEL = "gemini-4-argon"
 DEFAULT_GOOGLE_TIMEOUT_SECONDS = 60.0
 DEFAULT_GOOGLE_MAX_RETRIES = 2
 _GOOGLE_MODEL_RE = re.compile(r"^(gemini|gemma)-[a-z0-9][a-z0-9.-]*$", re.IGNORECASE)
@@ -112,7 +112,7 @@ class TerraFinGoogleResponsesProvider(TerraFinModelProvider):
             raise TerraFinGoogleModelConfigError("Gemini model ids must not be empty.")
         if not _GOOGLE_MODEL_RE.match(normalized):
             raise TerraFinGoogleModelConfigError(
-                f"Unsupported Gemini model id '{normalized}'. Use canonical refs like 'google/gemini-3.1-pro-preview'."
+                f"Unsupported Gemini model id '{normalized}'. Use canonical refs like 'google/gemini-4-argon'."
             )
         return TerraFinRuntimeModel(
             model_ref=f"{self.provider_id}/{normalized}",

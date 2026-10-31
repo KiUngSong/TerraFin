@@ -141,7 +141,7 @@ def test_complete_parses_function_calls_from_openai_response() -> None:
     assert turn.tool_calls[0].arguments == {"name": "AAPL"}
 
     payload = fake_client.responses.calls[0]
-    assert payload["model"] == "gpt-4.1-mini"
+    assert payload["model"] == "gpt-6-luna"
     assert payload["tools"][0]["type"] == "function"
     assert payload["tools"][0]["name"] == "market_snapshot"
     assert payload["input"][0]["role"] == "system"
