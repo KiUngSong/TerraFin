@@ -6,6 +6,8 @@ It has four parts:
 - **Skills** that give any AI agent (Claude Code, Codex, opencode) a
   financial analyst's toolkit.
 - **TerraFin Terminal**, a web dashboard for browsing markets and companies.
+    - Try it on the [public demo Space](https://huggingface.co/spaces/sk851/TerraFin),
+      a maintainer-operated deployment.
 - **Its own agent**, built on the same skills, that sees what you have open in
   the dashboard.
     - Ask "is this cheap?" on a stock page and it knows which ticker you mean.
@@ -136,8 +138,6 @@ the software only. It does not grant rights to upstream market data, filings,
 content, trademarks, or services accessed through this project.
 
 Operator-managed deployments remain responsible for the sources they enable and
-their own compliance/privacy posture. The maintainer-operated
-[public demo Space](https://huggingface.co/spaces/sk851/TerraFin) is a public
-TerraFin deployment. Access to that demo does not create any right to upstream
-data. For the full notice, read
+their own compliance/privacy posture. Access to the public demo does not create
+any right to upstream data. For the full notice, read
 <https://kiungsong.github.io/TerraFin/legal/> and [LICENSE](LICENSE).

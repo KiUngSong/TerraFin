@@ -10,6 +10,8 @@ It has four parts:
 - **Skills** that give any AI agent (Claude Code, Codex, opencode) a
   financial analyst's toolkit.
 - **TerraFin Terminal**, a web dashboard for browsing markets and companies.
+    - Try it on the [public demo Space](https://huggingface.co/spaces/sk851/TerraFin),
+      a maintainer-operated deployment.
 - **Its own agent**, built on the same skills, that sees what you have open in
   the dashboard.
     - Ask "is this cheap?" on a stock page and it knows which ticker you mean.
