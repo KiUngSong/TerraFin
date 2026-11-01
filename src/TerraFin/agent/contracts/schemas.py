@@ -411,6 +411,12 @@ class HostedAgentSessionDeleteResponse(BaseModel):
     deletedAt: str
 
 
+class HostedTurnInterruptResponse(BaseModel):
+    sessionId: str
+    # False when no turn was running, so nothing was recorded.
+    interruptRequested: bool
+
+
 class HostedTaskSummaryResponse(BaseModel):
     taskId: str
     status: str

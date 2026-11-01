@@ -1,11 +1,9 @@
-from fastapi import APIRouter, HTTPException, Query
-
-from TerraFin.agent.contracts.conversation import is_internal_only_message
 from threading import Lock
 
-from TerraFin.agent.runtime import inflight
+from fastapi import APIRouter, HTTPException, Query
 
 from TerraFin.agent.contracts.conversation import (
+    is_internal_only_message,
     iter_tool_result_blocks,
     iter_tool_use_blocks,
 )
@@ -41,6 +39,7 @@ from TerraFin.agent.models import (
     HostedTaskSummaryResponse,
     HostedToolDefinitionResponse,
     HostedToolInvocationResponse,
+    HostedTurnInterruptResponse,
     HostedViewContextResponse,
     HostedViewContextUpdateRequest,
     IndicatorSearchResponse,
@@ -57,7 +56,7 @@ from TerraFin.agent.models import (
 )
 from TerraFin.agent.models.providers.openai import TerraFinOpenAIConfigError, TerraFinOpenAIResponseError
 from TerraFin.agent.models.runtime import TerraFinModelConfigError, TerraFinModelResponseError
-from TerraFin.agent.runtime import TerraFinArtifact, TerraFinCapabilityCall, TerraFinTaskRecord
+from TerraFin.agent.runtime import TerraFinArtifact, TerraFinCapabilityCall, TerraFinTaskRecord, inflight
 from TerraFin.agent.runtime.hosted import (
     TerraFinAgentApprovalRequiredError,
     TerraFinAgentPolicyError,
@@ -364,6 +363,49 @@ def _turn_in_flight(session_id: str) -> bool:
     return _turn_state(session_id) == inflight.CONTENDED
 
 
+def _answered_call_ids(messages: tuple) -> set[str]:
+    answered: set[str] = set()
+    for message in messages:
+        for block in iter_tool_result_blocks(message):
+            call_id = str((block.payload or {}).get("callId") or "").strip()
+            if call_id:
+                answered.add(call_id)
+        call_id = str(getattr(message, "tool_call_id", "") or "").strip()
+        if call_id and message.role == "tool":
+            answered.add(call_id)
+    return answered
+
+
+def _running_tool_calls(messages: tuple) -> list[dict]:
+    """The newest turn's tool calls that have no result yet, oldest first.
+
+    Labels only, never liveness: an abandoned call is durable and never answered,
+    so the walk stops at the turn's user message and the caller serves the list
+    only while a turn is in flight.
+    """
+    answered = _answered_call_ids(messages)
+    running: list[dict] = []
+    for message in reversed(messages):
+        for block in reversed(iter_tool_use_blocks(message)):
+            payload = block.payload or {}
+            call_id = str(payload.get("callId") or "").strip()
+            if not call_id or call_id in answered:
+                continue
+            ticker = (payload.get("arguments") or {}).get("ticker")
+            running.append(
+                {
+                    "callId": call_id,
+                    "toolName": str(payload.get("toolName") or ""),
+                    "startedAt": message.created_at.isoformat(),
+                    "ticker": ticker if isinstance(ticker, str) and ticker.strip() else None,
+                }
+            )
+        if message.role == "user" and not is_internal_only_message(message):
+            break
+    running.reverse()
+    return running
+
+
 def _turn_unfinished(messages: tuple) -> str | None:
     """How the newest turn died, or None if it produced an answer.
 
@@ -382,15 +424,7 @@ def _turn_unfinished(messages: tuple) -> str | None:
     """
     if not messages:
         return None
-    answered: set[str] = set()
-    for message in messages:
-        for block in iter_tool_result_blocks(message):
-            call_id = str((block.payload or {}).get("callId") or "").strip()
-            if call_id:
-                answered.add(call_id)
-        call_id = str(getattr(message, "tool_call_id", "") or "").strip()
-        if call_id and message.role == "tool":
-            answered.add(call_id)
+    answered = _answered_call_ids(messages)
 
     saw_tool_use = False
     for message in reversed(messages):
@@ -544,9 +578,8 @@ def _session_response(
             # (capability.py:116-120), so `calledAt` cannot tell a client that a
             # tool is running right now. Unanswered tool_use blocks can.
             "turnInFlight": turn_state == inflight.CONTENDED,
-            "turnUnfinished": _reportable_death(
-                record.session_id, state=turn_state, messages=messages_snapshot
-            ),
+            "turnUnfinished": _reportable_death(record.session_id, state=turn_state, messages=messages_snapshot),
+            "runningToolCalls": _running_tool_calls(messages_snapshot) if turn_state == inflight.CONTENDED else [],
         },
         runtimeModel=runtime_model,
         policy=HostedSessionPolicyResponse(**session_policy) if session_policy else None,
@@ -559,9 +592,7 @@ def _session_response(
         tools=[_tool_response(tool) for tool in tools],
         messages=[]
         if conversation is None
-        else [
-            _message_response(message) for message in messages_snapshot if not is_internal_only_message(message)
-        ],
+        else [_message_response(message) for message in messages_snapshot if not is_internal_only_message(message)],
     )
 
 
@@ -857,6 +888,24 @@ def create_agent_data_router() -> APIRouter:
                 loop=loop,
                 tools=loop.tool_adapter.list_tools_for_session(session_id),
             )
+        except Exception as exc:
+            _raise_http_error(exc)
+
+    @router.post(
+        f"{AGENT_API_PREFIX}/runtime/sessions/{{session_id}}/interrupt",
+        response_model=HostedTurnInterruptResponse,
+    )
+    def api_hosted_agent_interrupt_turn(session_id: str):
+        try:
+            loop = get_hosted_agent_loop()
+            _get_public_session_record(loop, session_id)
+            # Recorded unless the session is demonstrably idle. The running turn
+            # reads it from the store between steps and between tool calls, and
+            # a later turn ignores it.
+            requested = _turn_state(session_id) != inflight.FREE
+            if requested:
+                loop.runtime.request_turn_interrupt(session_id)
+            return HostedTurnInterruptResponse(sessionId=session_id, interruptRequested=requested)
         except Exception as exc:
             _raise_http_error(exc)
 

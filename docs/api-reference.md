@@ -156,6 +156,7 @@ Core routes:
 - `GET /agent/api/runtime/sessions/{session_id}`
 - `DELETE /agent/api/runtime/sessions/{session_id}` — archive session
 - `POST /agent/api/runtime/sessions/{session_id}/messages`
+- `POST /agent/api/runtime/sessions/{session_id}/interrupt`: stop the running turn: no further tool runs, and the next model call writes the answer
 - `GET /agent/api/runtime/sessions/{session_id}/tasks`
 - `GET /agent/api/runtime/sessions/{session_id}/approvals`
 - `GET /agent/api/runtime/tasks/{task_id}`

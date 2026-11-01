@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any, Protocol
 from TerraFin.env import ensure_runtime_env_loaded
 
 from ..contracts.conversation_state import RUNTIME_MODEL_METADATA_KEY
+from ..contracts.model_client import TerraFinTurnOptions
 from .management import DEFAULT_OPENAI_MODEL_REF, get_saved_default_model_ref
 
 
@@ -79,6 +80,7 @@ class TerraFinModelProvider(Protocol):
         conversation: "TerraFinHostedConversation",
         messages: tuple["TerraFinConversationMessage", ...],
         tools: tuple[Any, ...],
+        options: TerraFinTurnOptions | None = None,
     ) -> "TerraFinModelTurn": ...
 
 
@@ -228,6 +230,7 @@ class TerraFinProviderRoutedModelClient:
         conversation: "TerraFinHostedConversation",
         messages: tuple["TerraFinConversationMessage", ...],
         tools: tuple[Any, ...],
+        options: TerraFinTurnOptions | None = None,
     ) -> "TerraFinModelTurn":
         runtime_model = self.describe_runtime_model(session=session)
         session.metadata[RUNTIME_MODEL_METADATA_KEY] = runtime_model.to_payload()
@@ -240,4 +243,5 @@ class TerraFinProviderRoutedModelClient:
             conversation=conversation,
             messages=messages,
             tools=tools,
+            options=options,
         )

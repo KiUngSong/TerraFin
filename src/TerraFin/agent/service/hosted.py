@@ -29,7 +29,7 @@ def build_hosted_model_provider_registry() -> TerraFinModelProviderRegistry:
     return registry
 
 
-def build_hosted_agent_loop() -> TerraFinHostedAgentLoop:
+def build_hosted_agent_loop(*, claim_foreign_tasks: bool = True) -> TerraFinHostedAgentLoop:
     model_registry = build_hosted_model_provider_registry()
     default_model = model_registry.resolve_default_model_ref()
     service = TerraFinAgentService()
@@ -59,6 +59,7 @@ def build_hosted_agent_loop() -> TerraFinHostedAgentLoop:
         default_runtime_model=default_model,
         default_require_human_approval_for_side_effects=True,
         default_require_human_approval_for_background_tasks=False,
+        claim_foreign_tasks=claim_foreign_tasks,
     )
     model_client = TerraFinProviderRoutedModelClient(
         registry=model_registry,
@@ -80,7 +81,10 @@ def _sync_hosted_agent_loop_defaults(loop: TerraFinHostedAgentLoop) -> TerraFinH
     return loop
 
 
-def get_hosted_agent_loop() -> TerraFinHostedAgentLoop:
+def get_hosted_agent_loop(*, claim_foreign_tasks: bool = True) -> TerraFinHostedAgentLoop:
+    # `claim_foreign_tasks` applies only when this call builds the loop. A process
+    # that only issues short client calls passes False, so its dispatcher runs
+    # the tasks it starts and leaves every other task to the server.
     global _HOSTED_AGENT_LOOP
 
     if _HOSTED_AGENT_LOOP is not None:
@@ -88,7 +92,7 @@ def get_hosted_agent_loop() -> TerraFinHostedAgentLoop:
 
     with _HOSTED_AGENT_LOOP_LOCK:
         if _HOSTED_AGENT_LOOP is None:
-            _HOSTED_AGENT_LOOP = build_hosted_agent_loop()
+            _HOSTED_AGENT_LOOP = build_hosted_agent_loop(claim_foreign_tasks=claim_foreign_tasks)
         return _sync_hosted_agent_loop_defaults(_HOSTED_AGENT_LOOP)
 
 

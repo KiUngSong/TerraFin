@@ -84,6 +84,10 @@ Hosted-runtime-only tools (no stateless HTTP route):
   `set_form_state` tool exists today; the agent suggests values in
   conversation and the user applies them manually. This gap is tracked.
 - `open_chart(...)` — creates a chart artifact bound to the session.
+- `read_tool_result(call_id, offset, limit)`: reads the exact text of an
+  earlier tool result in the same session, one slice at a time, when the
+  prompt shows it cut.
+  **Read-only.**
 
 ## Persona allowlists
 

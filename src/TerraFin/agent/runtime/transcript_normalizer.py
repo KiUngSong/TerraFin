@@ -81,6 +81,14 @@ class TranscriptNormalizer:
                         arguments = dict(record.get("arguments", {}))
                     if not tool_name:
                         continue
+                    block = make_tool_use_block(
+                        call_id=call_id,
+                        tool_name=tool_name,
+                        arguments=arguments,
+                    )
+                    if record is not None:
+                        # Keys this layer does not know (provider call data) ride along.
+                        block = replace(block, payload={**record, **block.payload})
                     synthetic_tool_use = TerraFinConversationMessage(
                         role="assistant",
                         content="",
@@ -90,13 +98,7 @@ class TranscriptNormalizer:
                         # non-monotonic — the one source of it in the tree.
                         created_at=message.created_at,
                         metadata={"internalOnly": True, "internalToolUse": True},
-                        blocks=(
-                            make_tool_use_block(
-                                call_id=call_id,
-                                tool_name=tool_name,
-                                arguments=arguments,
-                            ),
-                        ),
+                        blocks=(block,),
                     )
                     normalized.append(synthetic_tool_use)
                     seen_call_ids.add(call_id)
@@ -122,6 +124,7 @@ class TranscriptNormalizer:
                     continue
                 history.append(
                     {
+                        **block.payload,
                         "callId": call_id,
                         "toolName": tool_name,
                         "arguments": dict(block.payload.get("arguments", {})),

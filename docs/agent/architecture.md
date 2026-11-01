@@ -291,7 +291,7 @@ Paths are under `src/TerraFin/`. New code should import from these packages.
 - Do not fork financial logic away from the product path.
 - Keep every financial capability reachable by external agents. Only tools
   that need a live hosted session are hosted-only: the `consult_<persona>`
-  tools, `current_view_context`, and `open_chart`.
+  tools, `current_view_context`, `open_chart`, and `read_tool_result`.
 - Do not let HTTP, CLI, and Python semantics drift away from the same capability layer.
 - Do not treat chart-opening as a toy path if agents can create chart artifacts.
 - Do not overbuild remote or multi-agent orchestration before local capability-layer semantics are solid.

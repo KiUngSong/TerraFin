@@ -1,10 +1,11 @@
 import json
-
-import pytest
 from datetime import UTC, datetime, timedelta
 
+import pytest
 from openai import APIError
 
+from TerraFin.agent.contracts.conversation import TerraFinTokenUsage
+from TerraFin.agent.contracts.model_client import TOOL_ARGUMENTS_INVALID_KEY, TerraFinTurnOptions
 from TerraFin.agent.definitions import TerraFinAgentDefinition
 from TerraFin.agent.loop import TerraFinConversationMessage, TerraFinHostedConversation
 from TerraFin.agent.openai_model import (
@@ -149,6 +150,102 @@ def test_complete_parses_function_calls_from_openai_response() -> None:
     assert conversation.metadata["openai_response_id"] == "resp_1"
 
 
+def _one_call_response(arguments: str) -> _FakeResponse:
+    return _FakeResponse(
+        {
+            "id": "resp_call",
+            "output": [
+                {"type": "function_call", "call_id": "call_1", "name": "market_snapshot", "arguments": arguments}
+            ],
+        }
+    )
+
+
+def _complete_once(fake_client: _FakeClient, options: TerraFinTurnOptions | None = None):
+    client = TerraFinOpenAIResponsesModelClient(
+        config=TerraFinOpenAIModelConfig(api_key="test-key"), client=fake_client
+    )
+    conversation = TerraFinHostedConversation(
+        session_id="conv_opts",
+        agent_name="market-researcher",
+        messages=[TerraFinConversationMessage(role="user", content="AAPL?")],
+    )
+    turn = client.complete(
+        agent=_agent_definition(),
+        session=TerraFinAgentSession(session_id="conv_opts"),
+        conversation=conversation,
+        messages=conversation.snapshot(),
+        tools=(_tool(),),
+        options=options,
+    )
+    return turn, conversation
+
+
+def test_turn_options_reach_the_request_and_never_the_conversation() -> None:
+    fake_client = _FakeClient([_one_call_response(json.dumps({"name": "AAPL"}))])
+
+    _, conversation = _complete_once(
+        fake_client, TerraFinTurnOptions(tool_choice="none", pinned_context="Wrap up from what you have.")
+    )
+
+    payload = fake_client.responses.calls[0]
+    assert payload["tool_choice"] == "none"
+    assert payload["tools"][0]["name"] == "market_snapshot"
+    assert payload["instructions"].endswith("\n\nWrap up from what you have.")
+    assert all("Wrap up" not in message.content for message in conversation.messages)
+
+
+def test_undecodable_arguments_flag_the_call_instead_of_raising() -> None:
+    fake_client = _FakeClient([_one_call_response('{"name": "AA')])
+
+    turn, _ = _complete_once(fake_client)
+
+    assert turn.tool_calls[0].arguments == {}
+    assert turn.tool_calls[0].provider_data == {TOOL_ARGUMENTS_INVALID_KEY: True}
+
+
+def test_complete_reads_responses_usage() -> None:
+    fake_client = _FakeClient(
+        [
+            _FakeResponse(
+                {
+                    "id": "resp_usage",
+                    "output": [
+                        {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "Ok."}]}
+                    ],
+                    "usage": {
+                        "input_tokens": 900,
+                        "input_tokens_details": {"cached_tokens": 600},
+                        "output_tokens": 40,
+                        "output_tokens_details": {"reasoning_tokens": 25},
+                        "total_tokens": 940,
+                    },
+                }
+            )
+        ]
+    )
+    client = TerraFinOpenAIResponsesModelClient(
+        config=TerraFinOpenAIModelConfig(api_key="test-key"),
+        client=fake_client,
+    )
+    conversation = TerraFinHostedConversation(
+        session_id="conv_usage",
+        agent_name="market-researcher",
+        messages=[TerraFinConversationMessage(role="user", content="AAPL?")],
+    )
+
+    turn = client.complete(
+        agent=_agent_definition(),
+        session=TerraFinAgentSession(session_id="conv_usage"),
+        conversation=conversation,
+        messages=conversation.snapshot(),
+        tools=(_tool(),),
+    )
+
+    assert turn.assistant_message.content == "Ok."
+    assert turn.usage == TerraFinTokenUsage(input=900, output=40, cache_read=600)
+
+
 def test_complete_uses_previous_response_id_and_tool_outputs_on_followup() -> None:
     fake_client = _FakeClient(
         [
@@ -205,7 +302,7 @@ def test_complete_uses_previous_response_id_and_tool_outputs_on_followup() -> No
     assert turn.assistant_message.content == "Snapshot complete."
     payload = fake_client.responses.calls[0]
     assert payload["previous_response_id"] == "resp_1"
-    assert "instructions" not in payload
+    assert "instructions" in payload, "the API does not carry instructions over a chain"
     assert payload["input"] == [
         {
             "type": "function_call_output",
@@ -217,17 +314,12 @@ def test_complete_uses_previous_response_id_and_tool_outputs_on_followup() -> No
 
 def _responses(count: int) -> "_FakeClient":
     return _FakeClient(
-        [
-            _FakeResponse({"id": f"resp_new{i}", "output": [], "output_text": "Done."})
-            for i in range(1, count + 1)
-        ]
+        [_FakeResponse({"id": f"resp_new{i}", "output": [], "output_text": "Done."}) for i in range(1, count + 1)]
     )
 
 
 def _client(fake: _FakeClient) -> TerraFinOpenAIResponsesModelClient:
-    return TerraFinOpenAIResponsesModelClient(
-        config=TerraFinOpenAIModelConfig(api_key="test-key"), client=fake
-    )
+    return TerraFinOpenAIResponsesModelClient(config=TerraFinOpenAIModelConfig(api_key="test-key"), client=fake)
 
 
 def _run(client, conversation) -> None:
@@ -296,7 +388,7 @@ def test_fresh_chain_keeps_tool_output_as_text() -> None:
         if item.get("type") == "message"
         for block in item.get("content", [])
     ]
-    assert any('[tool result: resolve]' in text and '{"ok":true}' in text for text in texts)
+    assert any("[tool result: resolve]" in text and '{"ok":true}' in text for text in texts)
 
 
 def test_next_turn_resumes_normally_after_an_abandonment() -> None:
@@ -306,9 +398,7 @@ def test_next_turn_resumes_normally_after_an_abandonment() -> None:
     conversation = _poisoned_conversation()
     _run(client, conversation)
 
-    conversation.messages.append(
-        TerraFinConversationMessage(role="assistant", content="Here is the answer.")
-    )
+    conversation.messages.append(TerraFinConversationMessage(role="assistant", content="Here is the answer."))
     conversation.messages.append(TerraFinConversationMessage(role="user", content="And TLT?"))
     _run(client, conversation)
 
@@ -321,9 +411,14 @@ def test_refusal_response_does_not_replay_a_consumed_tool_output() -> None:
     """
     fake = _FakeClient(
         [
-            _FakeResponse({"id": "resp_call", "output": [
-                {"type": "function_call", "call_id": "call_A", "name": "market_snapshot", "arguments": "{}"}
-            ]}),
+            _FakeResponse(
+                {
+                    "id": "resp_call",
+                    "output": [
+                        {"type": "function_call", "call_id": "call_A", "name": "market_snapshot", "arguments": "{}"}
+                    ],
+                }
+            ),
             _FakeResponse({"id": "resp_refusal", "output": [], "output_text": ""}),
             _FakeResponse({"id": "resp_final", "output": [], "output_text": "Done."}),
         ]
@@ -340,17 +435,13 @@ def test_refusal_response_does_not_replay_a_consumed_tool_output() -> None:
     )
     _run(client, conversation)  # asks for call_A
     conversation.messages.append(
-        TerraFinConversationMessage(
-            role="tool", name="market_snapshot", tool_call_id="call_A", content='{"px":1}'
-        )
+        TerraFinConversationMessage(role="tool", name="market_snapshot", tool_call_id="call_A", content='{"px":1}')
     )
     _run(client, conversation)  # refusal: no text, no calls, nothing appended
     conversation.messages.append(TerraFinConversationMessage(role="user", content="and TLT?"))
     _run(client, conversation)
 
-    replayed = [
-        item for item in fake.responses.calls[2]["input"] if item.get("type") == "function_call_output"
-    ]
+    replayed = [item for item in fake.responses.calls[2]["input"] if item.get("type") == "function_call_output"]
     assert not replayed, f"re-sent an already-consumed tool output: {replayed}"
     assert fake.responses.calls[2]["previous_response_id"] == "resp_refusal"
 
@@ -358,10 +449,15 @@ def test_refusal_response_does_not_replay_a_consumed_tool_output() -> None:
 def test_open_call_ids_are_recorded_from_the_response_that_made_them() -> None:
     fake = _FakeClient(
         [
-            _FakeResponse({"id": "resp_call", "output": [
-                {"type": "function_call", "call_id": "call_A", "name": "market_snapshot", "arguments": "{}"},
-                {"type": "function_call", "call_id": "call_B", "name": "market_snapshot", "arguments": "{}"},
-            ]})
+            _FakeResponse(
+                {
+                    "id": "resp_call",
+                    "output": [
+                        {"type": "function_call", "call_id": "call_A", "name": "market_snapshot", "arguments": "{}"},
+                        {"type": "function_call", "call_id": "call_B", "name": "market_snapshot", "arguments": "{}"},
+                    ],
+                }
+            )
         ]
     )
     conversation = TerraFinHostedConversation(
@@ -408,25 +504,19 @@ def test_over_budget_resume_sends_the_approved_copy_not_the_raw_one() -> None:
     """
     from TerraFin.agent.models.providers.openai_compatible import OpenAICompatibleResponsesRunner
 
-    runner = OpenAICompatibleResponsesRunner(
-        provider_id="openai", max_retries=0, response_error_cls=RuntimeError
-    )
+    runner = OpenAICompatibleResponsesRunner(provider_id="openai", max_retries=0, response_error_cls=RuntimeError)
     raw = '{"payload":"' + "x" * 20000 + '"}'
     conversation = TerraFinHostedConversation(
         session_id="conv_big",
         agent_name="market-researcher",
         messages=[
             TerraFinConversationMessage(role="user", content="30Y?"),
-            TerraFinConversationMessage(
-                role="tool", name="market_snapshot", tool_call_id="call_A", content=raw
-            ),
+            TerraFinConversationMessage(role="tool", name="market_snapshot", tool_call_id="call_A", content=raw),
         ],
         metadata={
             "openai_response_id": "resp_1",
             "openai_message_cursor": 1,
-            "providerState": {
-                "openai": {"responseId": "resp_1", "openCallIds": ["call_A"]}
-            },
+            "providerState": {"openai": {"responseId": "resp_1", "openCallIds": ["call_A"]}},
         },
     )
     _watermark_after(conversation, 0)
@@ -460,15 +550,11 @@ def test_in_budget_resume_still_continues_the_chain() -> None:
     """The gate must not abandon every chain: identical content resumes normally."""
     from TerraFin.agent.models.providers.openai_compatible import OpenAICompatibleResponsesRunner
 
-    runner = OpenAICompatibleResponsesRunner(
-        provider_id="openai", max_retries=0, response_error_cls=RuntimeError
-    )
+    runner = OpenAICompatibleResponsesRunner(provider_id="openai", max_retries=0, response_error_cls=RuntimeError)
     # Stamp explicitly: default created_at follows construction order, and building
     # the tool message first would date it before the user turn.
     user_message = _stamped("user", "30Y?", 10)
-    tool_message = _stamped(
-        "tool", '{"px":1}', 20, name="market_snapshot", tool_call_id="call_A"
-    )
+    tool_message = _stamped("tool", '{"px":1}', 20, name="market_snapshot", tool_call_id="call_A")
     conversation = TerraFinHostedConversation(
         session_id="conv_ok",
         agent_name="market-researcher",
@@ -476,9 +562,7 @@ def test_in_budget_resume_still_continues_the_chain() -> None:
         metadata={
             "openai_response_id": "resp_1",
             "openai_message_cursor": 1,
-            "providerState": {
-                "openai": {"responseId": "resp_1", "messageCursor": 1, "openCallIds": ["call_A"]}
-            },
+            "providerState": {"openai": {"responseId": "resp_1", "messageCursor": 1, "openCallIds": ["call_A"]}},
         },
     )
     _watermark_after(conversation, 0)
@@ -502,16 +586,10 @@ def test_in_budget_resume_still_continues_the_chain() -> None:
 def test_fresh_chain_replays_assistant_turns_in_the_assistant_role() -> None:
     fake = _responses(1)
     conversation = _poisoned_conversation()
-    conversation.messages.insert(
-        4, TerraFinConversationMessage(role="assistant", content="ANSWER-ONE: 30Y at 4.7%.")
-    )
+    conversation.messages.insert(4, TerraFinConversationMessage(role="assistant", content="ANSWER-ONE: 30Y at 4.7%."))
     _run(_client(fake), conversation)
 
-    replayed = [
-        item["content"]
-        for item in fake.responses.calls[0]["input"]
-        if item.get("role") == "assistant"
-    ]
+    replayed = [item["content"] for item in fake.responses.calls[0]["input"] if item.get("role") == "assistant"]
     assert "ANSWER-ONE: 30Y at 4.7%." in replayed, "assistant history erased on a fresh chain"
     assert all(item for item in replayed), "empty assistant turns must not be replayed"
 
@@ -554,15 +632,13 @@ def _stamped(role: str, content: str, second: int, **kw):
 def _runner():
     from TerraFin.agent.models.providers.openai_compatible import OpenAICompatibleResponsesRunner
 
-    return OpenAICompatibleResponsesRunner(
-        provider_id="openai", max_retries=0, response_error_cls=RuntimeError
-    )
+    return OpenAICompatibleResponsesRunner(provider_id="openai", max_retries=0, response_error_cls=RuntimeError)
 
 
 def test_in_place_note_deletion_does_not_drop_a_message_from_the_resume() -> None:
-    """loop.py:511-516 deletes the prior working-memory note from conversation.messages in
-    place, so an absolute index omits one message — a deferred research report, which is
-    never redelivered once its marker clears.
+    """The loop deletes hook-owned messages from conversation.messages in place, so an
+    absolute index omits one message: a deferred research report, which is never
+    redelivered once its marker clears.
     """
     report = _stamped("user", "[BACKGROUND REPORT] deep research finished", 30)
     messages = [
@@ -643,9 +719,9 @@ def test_dead_chain_is_classified_structurally_not_by_provider_prose() -> None:
     a request that carried previous_response_id is what makes it recoverable."""
     runner = _runner()
     assert runner._is_dead_chain_error(_FakeAPIError("Error code: 400 - anything", 400), sent_chain=True)
-    assert not runner._is_dead_chain_error(
-        _FakeAPIError("Error code: 400 - anything", 400), sent_chain=False
-    ), "a 400 with no chain to abandon is not a chain error"
+    assert not runner._is_dead_chain_error(_FakeAPIError("Error code: 400 - anything", 400), sent_chain=False), (
+        "a 400 with no chain to abandon is not a chain error"
+    )
     assert not runner._is_dead_chain_error(
         _FakeAPIError("Error code: 500 - No tool output found for function call call_A", 500),
         sent_chain=True,
@@ -661,17 +737,12 @@ def test_recovery_strikes_survive_a_turn_that_did_not_resume() -> None:
     # The next turn cannot resume (the recovery cleared the chain), so the count
     # must hold — decaying it here would mean the limit is never reachable.
     assert (
-        runner._next_recoveries(
-            {"chainRecoveries": after_recovery}, attempted_resume=False, recovered_chain=False
-        )
+        runner._next_recoveries({"chainRecoveries": after_recovery}, attempted_resume=False, recovered_chain=False)
         == after_recovery
     ), "a non-resumed success must not clear the strikes"
     # A resume that actually ran and worked clears it.
     assert (
-        runner._next_recoveries(
-            {"chainRecoveries": after_recovery}, attempted_resume=True, recovered_chain=False
-        )
-        == 0
+        runner._next_recoveries({"chainRecoveries": after_recovery}, attempted_resume=True, recovered_chain=False) == 0
     )
 
 
@@ -748,20 +819,16 @@ def test_turn_unfinished_is_scoped_to_the_newest_turn() -> None:
             role="tool", name="market_snapshot", tool_call_id=call_id, content='{"px":1}'
         )
 
-    plain = TerraFinConversationMessage(
-        role="assistant", content="Done.", blocks=(make_text_block("Done."),)
-    )
+    plain = TerraFinConversationMessage(role="assistant", content="Done.", blocks=(make_text_block("Done."),))
 
     assert _turn_unfinished(_Conv([asked("c1")])), "a turn that died mid-tool must be visible"
     assert not _turn_unfinished(_Conv([asked("c1"), answered("c1")]))
     assert not _turn_unfinished(_Conv([plain]))
     assert not _turn_unfinished(None)
     # An old orphan followed by a healthy call must not report interrupted.
-    assert not _turn_unfinished(
-        _Conv([asked("old"), asked("c2"), answered("c2"), plain])
-    ), "an old abandoned call must not pin this true"
-
-
+    assert not _turn_unfinished(_Conv([asked("old"), asked("c2"), answered("c2"), plain])), (
+        "an old abandoned call must not pin this true"
+    )
 
 
 def test_a_turn_that_answered_is_not_reported_unfinished() -> None:
@@ -791,16 +858,18 @@ def test_a_turn_that_answered_is_not_reported_unfinished() -> None:
         blocks=(make_text_block("I could not complete that lookup, here is what I have."),),
     )
 
-    assert _turn_unfinished(
-        _Conv([TerraFinConversationMessage(role="user", content="Q"), asked_two, answered_a])
-    ), "a genuine death mid-tool must still be reported"
+    assert _turn_unfinished(_Conv([TerraFinConversationMessage(role="user", content="Q"), asked_two, answered_a])), (
+        "a genuine death mid-tool must still be reported"
+    )
     assert not _turn_unfinished(
-        _Conv([
-            TerraFinConversationMessage(role="user", content="Q"),
-            asked_two,
-            answered_a,
-            fallback,
-        ])
+        _Conv(
+            [
+                TerraFinConversationMessage(role="user", content="Q"),
+                asked_two,
+                answered_a,
+                fallback,
+            ]
+        )
     ), "an answered turn must not be branded interrupted"
 
 
@@ -828,13 +897,11 @@ def test_unfinished_detection_uses_the_real_carrier_shape() -> None:
     result = TerraFinConversationMessage(
         role="tool", name="market_snapshot", tool_call_id="call_A", content='{"px":1}'
     )
-    answer = TerraFinConversationMessage(
-        role="assistant", content="5.27%.", blocks=(make_text_block("5.27%."),)
-    )
+    answer = TerraFinConversationMessage(role="assistant", content="5.27%.", blocks=(make_text_block("5.27%."),))
 
-    assert _turn_unfinished(
-        _Conv([question, preamble, carrier])
-    ), "died after the carrier was persisted and before its result"
+    assert _turn_unfinished(_Conv([question, preamble, carrier])), (
+        "died after the carrier was persisted and before its result"
+    )
     assert not _turn_unfinished(_Conv([question, preamble, carrier, result, answer]))
 
 
@@ -861,14 +928,12 @@ def test_a_turn_that_died_between_tool_cycles_is_reported_unfinished() -> None:
     result = TerraFinConversationMessage(
         role="tool", name="market_snapshot", tool_call_id="call_A", content='{"px":1}'
     )
-    answer = TerraFinConversationMessage(
-        role="assistant", content="5.27%.", blocks=(make_text_block("5.27%."),)
-    )
+    answer = TerraFinConversationMessage(role="assistant", content="5.27%.", blocks=(make_text_block("5.27%."),))
 
     # Every call answered, but the turn never produced an answer.
-    assert _turn_unfinished(
-        _Conv([question, preamble, carrier, result])
-    ), "a death between tool cycles must be reported"
+    assert _turn_unfinished(_Conv([question, preamble, carrier, result])), (
+        "a death between tool cycles must be reported"
+    )
     assert not _turn_unfinished(_Conv([question, preamble, carrier, result, answer]))
 
 
@@ -895,9 +960,7 @@ def test_turn_unfinished_names_which_death() -> None:
     result = TerraFinConversationMessage(
         role="tool", name="market_snapshot", tool_call_id="call_A", content='{"px":1}'
     )
-    answer = TerraFinConversationMessage(
-        role="assistant", content="5.27%.", blocks=(make_text_block("5.27%."),)
-    )
+    answer = TerraFinConversationMessage(role="assistant", content="5.27%.", blocks=(make_text_block("5.27%."),))
 
     assert _turn_unfinished(_Conv([question, preamble, carrier])) == "mid-tool"
     assert _turn_unfinished(_Conv([question, preamble, carrier, result])) == "mid-turn"

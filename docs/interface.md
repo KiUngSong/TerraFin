@@ -566,6 +566,7 @@ or the `terrafin-agent` CLI over calling raw routes directly.
 | `GET` | `/agent/api/runtime/sessions/{session_id}` | - | Read hosted runtime session state, transcript-derived message history, and tools |
 | `DELETE` | `/agent/api/runtime/sessions/{session_id}` | - | Archive a hosted session transcript and remove it from active history |
 | `POST` | `/agent/api/runtime/sessions/{session_id}/messages` | body: `content` | Append a user turn and run the hosted model/tool loop |
+| `POST` | `/agent/api/runtime/sessions/{session_id}/interrupt` | - | Stop the running turn: no further tool runs, and the next model call writes the answer, marked `turnEnding: interrupted`. A no-op when no turn is running |
 | `GET` | `/agent/api/runtime/sessions/{session_id}/tasks` | - | List background tasks for a hosted session |
 | `GET` | `/agent/api/runtime/sessions/{session_id}/approvals` | - | List approval requests for a hosted session |
 | `GET` | `/agent/api/runtime/tasks/{task_id}` | - | Read a hosted background task |

@@ -1,9 +1,17 @@
 import json
+import threading
+import time
+from dataclasses import replace
 
 import pytest
 from fakes import BaseFakeService as _FakeService
 from fakes import fake_chart_opener as _fake_chart_opener
 
+from TerraFin.agent.contracts.conversation import (
+    TOKEN_USAGE_METADATA_KEY,
+    TerraFinHostedConversation,
+    TerraFinTokenUsage,
+)
 from TerraFin.agent.conversation import is_internal_only_message
 from TerraFin.agent.definitions import (
     DEFAULT_HOSTED_AGENT_NAME,
@@ -16,7 +24,6 @@ from TerraFin.agent.guru import (
     _build_guru_research_prompt,
     _persona_fit_feedback,
     _select_guru_worker_tools,
-    run_guru_consult,
 )
 from TerraFin.agent.hosted_runtime import TerraFinHostedAgentRuntime
 from TerraFin.agent.loop import (
@@ -27,6 +34,8 @@ from TerraFin.agent.loop import (
 )
 from TerraFin.agent.personas import build_default_persona_registry
 from TerraFin.agent.runtime import build_default_capability_registry
+from TerraFin.agent.runtime.context_budget import ContextBudgetManager
+from TerraFin.agent.runtime.transcript_normalizer import TranscriptNormalizer
 from TerraFin.agent.session_store import SQLiteHostedSessionStore
 from TerraFin.agent.transcript_store import HostedTranscriptStore
 
@@ -58,8 +67,10 @@ def _sqlite_loop(model_client, *, db_path, max_steps: int = 8) -> TerraFinHosted
     return TerraFinHostedAgentLoop(runtime=runtime, model_client=model_client, max_steps=max_steps)
 
 
-def _loop_with_gurus(model_client, *, max_steps: int = 8) -> TerraFinHostedAgentLoop:
-    service = _FakeService()
+def _loop_with_gurus(
+    model_client, *, max_steps: int = 8, service: _FakeService | None = None
+) -> TerraFinHostedAgentLoop:
+    service = service or _FakeService()
     registry = build_default_capability_registry(service, chart_opener=_fake_chart_opener)
     runtime = TerraFinHostedAgentRuntime(
         service=service,
@@ -110,8 +121,12 @@ class _DirectAnswerModel:
 
 
 class _LoopingModel:
-    def complete(self, *, messages, tools, **kwargs):
+    def __init__(self) -> None:
+        self.options = []
+
+    def complete(self, *, messages, tools, options=None, **kwargs):
         _ = messages, tools, kwargs
+        self.options.append(options)
         return TerraFinModelTurn(
             assistant_message=TerraFinConversationMessage(role="assistant", content="Still working."),
             tool_calls=(TerraFinToolCall(call_id="loop", tool_name="market_snapshot", arguments={"name": "MSFT"}),),
@@ -548,12 +563,24 @@ def test_submit_user_message_persists_assistant_reply_even_if_session_cache_is_r
     ]
 
 
-def test_submit_user_message_raises_when_model_never_finishes() -> None:
-    loop = _loop(_LoopingModel(), max_steps=2)
+def test_the_last_step_answers_without_tools_instead_of_raising() -> None:
+    model = _LoopingModel()
+    loop = _loop(model, max_steps=2)
     conversation = loop.create_session(DEFAULT_HOSTED_AGENT_NAME, session_id="loop:max-steps")
 
-    with pytest.raises(RuntimeError, match="exceeded max_steps=2"):
-        loop.submit_user_message(conversation.session_id, "keep going")
+    result = loop.submit_user_message(conversation.session_id, "keep going")
+
+    assert result.final_message is not None
+    assert result.final_message.content == "Still working."
+    assert result.steps == 2
+    assert model.options[0] is None
+    wrap_up = model.options[-1]
+    assert wrap_up.tool_choice == "none"
+    assert "still missing" in wrap_up.pinned_context
+    messages = loop.get_conversation(conversation.session_id).snapshot()
+    assert all(wrap_up.pinned_context not in message.content for message in messages)
+    # The last step's call is dropped unrun, so only step 1's call has a result.
+    assert [message.tool_call_id for message in messages if message.role == "tool"] == ["loop"]
 
 
 def test_loop_guard_short_circuits_identical_tool_calls() -> None:
@@ -572,9 +599,9 @@ def test_loop_guard_short_circuits_identical_tool_calls() -> None:
     conversation = loop.create_session(DEFAULT_HOSTED_AGENT_NAME, session_id="loop:guarded")
 
     # LoopingModel always returns the same (tool_name, args). Without the guard
-    # this would execute market_snapshot 6 times (once per step).
-    with pytest.raises(RuntimeError, match="exceeded max_steps=6"):
-        loop.submit_user_message(conversation.session_id, "loop on me")
+    # this would execute market_snapshot 5 times (once per step but the last).
+    result = loop.submit_user_message(conversation.session_id, "loop on me")
+    assert result.steps == 6
 
     # Guard fires on the 3rd call → only the first 2 actually execute.
     assert call_count["market_snapshot"] == 2, f"expected 2 real executions, got {call_count['market_snapshot']}"
@@ -688,6 +715,193 @@ def test_submit_user_message_returns_clean_fallback_after_repeated_recoverable_t
     assert any(tool_result.is_error for tool_result in result.tool_results)
 
 
+class _ParallelSharedMistakeModel:
+    """Step 1: two calls sharing one retryable error plus a good call. Step 2: answers."""
+
+    def complete(self, *, messages, tools, **kwargs):
+        _ = tools, kwargs
+        if any(message.role == "tool" for message in messages):
+            return TerraFinModelTurn(
+                assistant_message=TerraFinConversationMessage(role="assistant", content="Answered after the batch."),
+            )
+        return TerraFinModelTurn(
+            tool_calls=(
+                TerraFinToolCall(
+                    call_id="bad-1", tool_name="market_snapshot", arguments={"name": "CURRENT MARKET STATE"}
+                ),
+                TerraFinToolCall(
+                    call_id="bad-2", tool_name="market_snapshot", arguments={"name": "CURRENT MARKET STATE"}
+                ),
+                TerraFinToolCall(call_id="good", tool_name="market_snapshot", arguments={"name": "SPY"}),
+            ),
+            stop_reason="tool_calls",
+        )
+
+
+def test_recovery_counts_a_batch_as_one_round_and_answers_every_call() -> None:
+    loop = _loop(_ParallelSharedMistakeModel(), service=_CurrentMarketStateFailureService())
+    conversation = loop.create_session(DEFAULT_HOSTED_AGENT_NAME, session_id="loop:recovery-round")
+
+    result = loop.submit_user_message(conversation.session_id, "How does the market look?")
+
+    assert result.final_message is not None
+    assert result.final_message.content == "Answered after the batch."
+    messages = loop.get_conversation(conversation.session_id).snapshot()
+    assert [message.tool_call_id for message in messages if message.role == "tool"] == ["bad-1", "bad-2", "good"]
+
+
+class _CutOffToolCallModel:
+    """Step 1: a call in a reply cut at the output limit. Step 2: answers."""
+
+    def complete(self, *, messages, tools, **kwargs):
+        _ = tools, kwargs
+        if any(message.role == "tool" for message in messages):
+            return TerraFinModelTurn(
+                assistant_message=TerraFinConversationMessage(role="assistant", content="Answered after the cut."),
+            )
+        return TerraFinModelTurn(
+            tool_calls=(TerraFinToolCall(call_id="cut", tool_name="market_snapshot", arguments={"name": "AA"}),),
+            stop_reason="length",
+        )
+
+
+def test_tool_calls_in_a_cut_off_reply_are_answered_without_running() -> None:
+    call_count = {"market_snapshot": 0}
+
+    class _CountingService(_FakeService):
+        def market_snapshot(self, name: str, *, depth: str = "auto", view: str = "daily") -> dict[str, object]:
+            call_count["market_snapshot"] += 1
+            return super().market_snapshot(name, depth=depth, view=view)
+
+    loop = _loop(_CutOffToolCallModel(), service=_CountingService())
+    conversation = loop.create_session(DEFAULT_HOSTED_AGENT_NAME, session_id="loop:cut-off-call")
+
+    result = loop.submit_user_message(conversation.session_id, "AA snapshot")
+
+    assert call_count["market_snapshot"] == 0
+    assert [(r.error_code, r.retryable) for r in result.tool_results] == [("tool_arguments_truncated", True)]
+    assert result.final_message.content == "Answered after the cut."
+
+
+class _AlwaysCutOffModel:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def complete(self, *, messages, tools, **kwargs):
+        _ = messages, tools, kwargs
+        self.calls += 1
+        return TerraFinModelTurn(
+            assistant_message=TerraFinConversationMessage(role="assistant", content=f"part {self.calls}"),
+            stop_reason="length",
+        )
+
+
+def test_three_cut_off_replies_get_two_nudges_then_return_the_partial() -> None:
+    model = _AlwaysCutOffModel()
+    loop = _loop(model)
+    conversation = loop.create_session(DEFAULT_HOSTED_AGENT_NAME, session_id="loop:cut-off-text")
+
+    result = loop.submit_user_message(conversation.session_id, "write a long brief")
+
+    assert model.calls == 3
+    assert all(part in result.final_message.content for part in ("part 1", "part 2", "part 3"))
+    assert result.final_message.metadata["truncated"] is True
+    nudges = [message for message in result.messages_added if message.metadata.get("internalContinuation")]
+    assert len(nudges) == 2
+    assert all(message.role == "user" and is_internal_only_message(message) for message in nudges)
+
+
+class _EmptyReplyModel:
+    def complete(self, *, messages, tools, **kwargs):
+        _ = messages, tools, kwargs
+        return TerraFinModelTurn(stop_reason="content_filter")
+
+
+def test_an_empty_model_reply_is_an_error_not_a_silent_finish() -> None:
+    from TerraFin.agent.models.runtime import TerraFinModelResponseError
+
+    loop = _loop(_EmptyReplyModel())
+    conversation = loop.create_session(DEFAULT_HOSTED_AGENT_NAME, session_id="loop:empty-reply")
+
+    with pytest.raises(TerraFinModelResponseError, match="empty reply"):
+        loop.submit_user_message(conversation.session_id, "hello")
+
+
+def test_session_cap_is_checked_at_turn_start_never_mid_turn() -> None:
+    loop = _loop(_SnapshotThenSummarizeModel())
+    conversation = loop.create_session(DEFAULT_HOSTED_AGENT_NAME, session_id="loop:cap")
+    loop.max_messages_per_session = len(conversation.messages) + 1
+
+    # Room for the user message at the start, so the whole tool turn runs.
+    result = loop.submit_user_message(conversation.session_id, "Give me the latest AAPL snapshot.")
+    assert result.final_message is not None
+    assert result.final_message.content == "AAPL snapshot retrieved."
+
+    before = len(loop.get_conversation(conversation.session_id).messages)
+    with pytest.raises(RuntimeError, match="max_messages_per_session"):
+        loop.submit_user_message(conversation.session_id, "again")
+    assert len(loop.get_conversation(conversation.session_id).messages) == before
+
+
+def test_a_turn_written_by_another_process_is_seen_before_the_next_turn(tmp_path) -> None:
+    db_path = tmp_path / "hosted-loop.sqlite3"
+    server = _sqlite_loop(_DirectAnswerModel(), db_path=db_path)
+    cli = _sqlite_loop(_DirectAnswerModel(), db_path=db_path)
+    conversation = server.create_session(DEFAULT_HOSTED_AGENT_NAME, session_id="loop:two-writers")
+    server.submit_user_message(conversation.session_id, "turn one")
+
+    cli.submit_user_message(conversation.session_id, "turn two from the CLI")
+    server.submit_user_message(conversation.session_id, "turn three")
+
+    user_texts = [
+        message.content
+        for message in server.get_conversation(conversation.session_id).snapshot()
+        if message.role == "user" and not is_internal_only_message(message)
+    ]
+    assert user_texts == ["turn one", "turn two from the CLI", "turn three"]
+
+
+def test_normalizer_keeps_unknown_tool_use_payload_keys() -> None:
+    from TerraFin.agent.contracts.conversation import (
+        TerraFinHostedConversation,
+        TerraFinMessageBlock,
+        make_tool_result_block,
+    )
+    from TerraFin.agent.contracts.conversation_state import TOOL_CALL_HISTORY_METADATA_KEY
+    from TerraFin.agent.runtime.transcript_normalizer import TranscriptNormalizer
+
+    payload = {"callId": "c1", "toolName": "market_snapshot", "arguments": {}, "providerData": {"sig": "x"}}
+    conversation = TerraFinHostedConversation(
+        session_id="s",
+        agent_name="a",
+        messages=[
+            TerraFinConversationMessage(
+                role="assistant", content="", blocks=(TerraFinMessageBlock("tool_use", payload),)
+            ),
+            TerraFinConversationMessage(
+                role="tool",
+                content="{}",
+                tool_call_id="c1",
+                blocks=(
+                    make_tool_result_block(
+                        call_id="c1",
+                        tool_name="market_snapshot",
+                        capability_name="market_snapshot",
+                        execution_mode="invoke",
+                        payload={},
+                    ),
+                ),
+            ),
+        ],
+    )
+    normalizer = TranscriptNormalizer()
+
+    model_messages = normalizer.normalize_for_model(conversation)
+    assert model_messages[0].blocks[0].payload["providerData"] == {"sig": "x"}
+    normalizer.normalize_loaded_conversation(conversation)
+    assert conversation.metadata[TOOL_CALL_HISTORY_METADATA_KEY][0]["providerData"] == {"sig": "x"}
+
+
 def test_submit_user_message_retries_with_compacted_context_when_provider_hits_prompt_limit() -> None:
     model = _PromptBudgetRetryModel()
     loop = _loop(model)
@@ -743,6 +957,241 @@ def test_submit_user_message_raises_friendly_error_when_all_prompt_budget_retrie
         loop.submit_user_message(conversation.session_id, "Please summarize everything.")
 
     assert "prompt token count" not in str(exc_info.value)
+
+
+def _tool_burst(call_ids, *, content="{}"):
+    from TerraFin.agent.contracts.conversation import make_tool_result_block, make_tool_use_block
+
+    return [
+        TerraFinConversationMessage(
+            role="assistant",
+            content="",
+            blocks=tuple(make_tool_use_block(call_id=call_id, tool_name="market_snapshot") for call_id in call_ids),
+        ),
+        *(
+            TerraFinConversationMessage(
+                role="tool",
+                name="market_snapshot",
+                content=content,
+                tool_call_id=call_id,
+                blocks=(
+                    make_tool_result_block(
+                        call_id=call_id,
+                        tool_name="market_snapshot",
+                        capability_name="market_snapshot",
+                        execution_mode="invoke",
+                        payload=json.loads(content),
+                    ),
+                ),
+            )
+            for call_id in call_ids
+        ),
+    ]
+
+
+def test_minimal_window_keeps_the_current_turn_and_its_tool_results() -> None:
+    loop = _loop(_DirectAnswerModel())
+    conversation = loop.create_session(DEFAULT_HOSTED_AGENT_NAME, session_id="loop:pin-current-turn")
+    for index in range(20):
+        conversation.messages.append(TerraFinConversationMessage(role="user", content=f"Older question {index}"))
+        conversation.messages.append(TerraFinConversationMessage(role="assistant", content=f"Older answer {index}"))
+    question = "Current question " + "Q" * 2000
+    conversation.messages.append(TerraFinConversationMessage(role="user", content=question))
+    conversation.messages.extend(_tool_burst(["now-1", "now-2", "now-3"]))
+
+    prepared = loop.context_budget_manager.prepare_messages(conversation, level="minimal")
+
+    assert [message.content for message in prepared if message.role == "user"] == [question]
+    assert [message.tool_call_id for message in prepared if message.role == "tool"] == ["now-1", "now-2", "now-3"]
+
+
+def test_prepared_window_never_opens_on_a_cut_tool_result() -> None:
+    loop = _loop(_DirectAnswerModel())
+    conversation = loop.create_session(DEFAULT_HOSTED_AGENT_NAME, session_id="loop:pair-safe-window")
+    for index in range(10):
+        conversation.messages.append(TerraFinConversationMessage(role="user", content=f"Question {index}"))
+        conversation.messages.extend(_tool_burst([f"c{index}-{call}" for call in range(3)]))
+        conversation.messages.append(TerraFinConversationMessage(role="assistant", content=f"Answer {index}"))
+    conversation.messages.append(TerraFinConversationMessage(role="user", content="Current question"))
+
+    for level in ("default", "aggressive", "minimal"):
+        prepared = loop.context_budget_manager.prepare_messages(conversation, level=level)
+        window = [message for message in prepared if message.role != "system"]
+        assert window[0].role != "tool", level
+        open_call_ids: set[str] = set()
+        for message in window:
+            open_call_ids.update(
+                str(block.payload.get("callId")) for block in message.blocks if block.kind == "tool_use"
+            )
+            if message.role == "tool":
+                assert message.tool_call_id in open_call_ids, level
+
+
+def _conversation_with_large_tool_result(loop, session_id):
+    conversation = loop.create_session(DEFAULT_HOSTED_AGENT_NAME, session_id=session_id)
+    tool_content = json.dumps({"filing": "".join(f"line {index:05d}. " for index in range(1700))})
+    assert len(tool_content) > 20000
+    conversation.messages.append(TerraFinConversationMessage(role="user", content="Earlier question"))
+    conversation.messages.extend(_tool_burst(["big-1"], content=tool_content))
+    conversation.messages.append(TerraFinConversationMessage(role="user", content="Quote the filing"))
+    return conversation, tool_content
+
+
+def test_cut_tool_result_carries_a_pointer_to_the_full_result() -> None:
+    loop = _loop(_DirectAnswerModel())
+    conversation, tool_content = _conversation_with_large_tool_result(loop, "loop:spill-pointer")
+
+    for level in ("default", "aggressive", "minimal"):
+        prepared = loop.context_budget_manager.prepare_messages(conversation, level=level)
+        (tool_message,) = [message for message in prepared if message.role == "tool"]
+        pointer = f"[full result: call_id=big-1, {len(tool_content)} chars; read_tool_result(call_id, offset, limit)]"
+        assert tool_message.content.endswith(pointer), level
+        assert len(tool_message.content) <= loop.context_budget_manager._tool_budget(level), level
+        (tool_block,) = tool_message.blocks
+        assert tool_block.payload["payload"]["_fullResult"] == pointer, level
+
+
+def test_read_tool_result_returns_the_exact_slice() -> None:
+    loop = _loop(_DirectAnswerModel())
+    conversation, tool_content = _conversation_with_large_tool_result(loop, "loop:spill-read")
+
+    first = loop.tool_adapter.run_tool(conversation.session_id, "read_tool_result", {"call_id": "big-1"})
+    assert first.is_error is False
+    assert first.payload["text"] == tool_content[:8000]
+    assert first.payload["totalChars"] == len(tool_content)
+    assert first.payload["nextOffset"] == 8000
+
+    last = loop.tool_adapter.run_tool(
+        conversation.session_id, "read_tool_result", {"call_id": "big-1", "offset": 19000, "limit": 5000}
+    )
+    assert last.payload["text"] == tool_content[19000:24000]
+    assert last.payload["nextOffset"] is None
+
+
+def test_read_tool_result_refuses_another_sessions_call_id() -> None:
+    loop = _loop(_DirectAnswerModel())
+    _conversation_with_large_tool_result(loop, "loop:spill-owner")
+    other = loop.create_session(DEFAULT_HOSTED_AGENT_NAME, session_id="loop:spill-other")
+
+    result = loop.tool_adapter.run_tool(other.session_id, "read_tool_result", {"call_id": "big-1"})
+
+    assert result.payload["found"] is False
+    assert "text" not in result.payload
+
+
+class _RecordingAnswerModel:
+    def __init__(self) -> None:
+        self.calls: list[tuple[TerraFinConversationMessage, ...]] = []
+
+    def complete(self, *, messages, tools, **kwargs):
+        _ = tools, kwargs
+        self.calls.append(tuple(messages))
+        return TerraFinModelTurn(assistant_message=TerraFinConversationMessage(role="assistant", content="Done."))
+
+
+def test_small_conversation_goes_out_at_full_level_uncut() -> None:
+    model = _RecordingAnswerModel()
+    loop = _loop(model)
+    conversation = loop.create_session(DEFAULT_HOSTED_AGENT_NAME, session_id="loop:full-level")
+    tool_content = json.dumps({"notes": "N" * 3000, "series": list(range(30))})
+    conversation.messages.append(TerraFinConversationMessage(role="user", content="Earlier question"))
+    conversation.messages.extend(_tool_burst(["early-1"], content=tool_content))
+    conversation.messages.append(TerraFinConversationMessage(role="assistant", content="Earlier answer"))
+
+    assert loop.context_budget_manager.choose_level(conversation) == "full"
+    loop.submit_user_message(conversation.session_id, "Follow-up question")
+
+    (sent,) = model.calls
+    (tool_message,) = [message for message in sent if message.role == "tool"]
+    assert tool_message.content == tool_content
+    (result_block,) = [block for block in tool_message.blocks if block.kind == "tool_result"]
+    assert result_block.payload["payload"] == json.loads(tool_content)
+
+
+class _MeteredAnswerModel:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def complete(self, *, messages, tools, **kwargs):
+        _ = messages, tools, kwargs
+        self.calls += 1
+        return TerraFinModelTurn(
+            assistant_message=TerraFinConversationMessage(role="assistant", content=f"Answer {self.calls}."),
+            usage=TerraFinTokenUsage(input=1000 * self.calls, output=50, cache_read=400),
+        )
+
+
+def test_usage_is_stamped_on_the_reply_and_totalled_across_turns() -> None:
+    loop = _loop(_MeteredAnswerModel())
+    conversation = loop.create_session(DEFAULT_HOSTED_AGENT_NAME, session_id="loop:usage-totals")
+
+    first = loop.submit_user_message(conversation.session_id, "First question")
+    loop.submit_user_message(conversation.session_id, "Second question")
+
+    assert first.final_message.metadata[TOKEN_USAGE_METADATA_KEY] == {
+        "input": 1000,
+        "output": 50,
+        "cacheRead": 400,
+        "cacheWrite": 0,
+        "promptLevel": "full",
+    }
+    assert loop.get_conversation(conversation.session_id).metadata["usageTotals"] == {
+        "input": 3000,
+        "output": 100,
+        "cacheRead": 800,
+        "cacheWrite": 0,
+    }
+
+
+def test_measured_prompt_size_overrides_the_character_estimate() -> None:
+    loop = _loop(_DirectAnswerModel())
+    conversation = loop.create_session(DEFAULT_HOSTED_AGENT_NAME, session_id="loop:usage-anchor")
+    answer = TerraFinConversationMessage(role="assistant", content="Earlier answer")
+    conversation.messages.extend(
+        [
+            TerraFinConversationMessage(role="user", content="Earlier question"),
+            answer,
+            TerraFinConversationMessage(role="user", content="Current question"),
+        ]
+    )
+    manager = loop.context_budget_manager
+    assert manager.choose_level(conversation) == "full"
+
+    conversation.messages[-2] = replace(
+        answer, metadata={TOKEN_USAGE_METADATA_KEY: {"input": 60000, "promptLevel": "full"}}
+    )
+    # With no known window the budget is in chars//4 units and ignores the measurement.
+    assert manager.choose_level(conversation) == "full"
+
+    conversation.metadata["runtimeModel"] = {"modelRef": "openai/gpt-6-luna", "metadata": {"context_window": 64000}}
+    assert manager.choose_level(conversation) == "default"
+
+    # A provider that reported no prompt count leaves the character estimate in charge.
+    conversation.messages[-2] = replace(
+        answer, metadata={TOKEN_USAGE_METADATA_KEY: {"input": 0, "promptLevel": "full"}}
+    )
+    assert manager.choose_level(conversation) == "full"
+
+    # A size measured on a windowed prompt does not describe the full transcript.
+    conversation.messages[-2] = replace(
+        answer, metadata={TOKEN_USAGE_METADATA_KEY: {"input": 60000, "promptLevel": "default"}}
+    )
+    assert manager.choose_level(conversation) == "full"
+
+
+def test_prompt_budget_follows_a_known_context_window_and_otherwise_stays_52000() -> None:
+    manager = ContextBudgetManager(normalizer=TranscriptNormalizer())
+    conversation = TerraFinHostedConversation(session_id="budget", agent_name="agent")
+    assert manager.prompt_token_budget(conversation) == 52000
+
+    model_metadata: dict = {}
+    conversation.metadata["runtimeModel"] = {"modelRef": "openai/gpt-6-luna", "metadata": model_metadata}
+    assert manager.prompt_token_budget(conversation) == 52000
+
+    model_metadata["context_window"] = 200000
+    assert manager.prompt_token_budget(conversation) == 170000
+    model_metadata["context_window"] = 64000
+    assert manager.prompt_token_budget(conversation) == 48000
 
 
 def test_create_session_binds_guru_persona_prompt_without_manual_override() -> None:
@@ -1263,3 +1712,333 @@ def test_submit_user_message_no_longer_pre_intercepts_with_guru_router() -> None
     assert result.final_message.content == "No tool call needed for this greeting."
     # No hidden intercept — `selectedGurus` metadata key is not present.
     assert (result.final_message.metadata or {}).get("selectedGurus") is None
+
+
+class _RecordingHook:
+    def __init__(self) -> None:
+        self.events: list[tuple[str, str]] = []
+
+    def before_turn(self, session_id, content, conversation):
+        self.events.append(("before_turn", content))
+
+    def after_tool(self, session_id, invocation):
+        self.events.append(("after_tool", invocation.tool_name))
+
+    def after_completion(self, session_id, marker, result):
+        self.events.append(("after_completion", result["title"]))
+
+    def owned_metadata_tags(self):
+        return frozenset()
+
+
+class _RaisingHook:
+    def before_turn(self, session_id, content, conversation):
+        raise RuntimeError("before_turn boom")
+
+    def after_tool(self, session_id, invocation):
+        raise RuntimeError("after_tool boom")
+
+    def after_completion(self, session_id, marker, result):
+        raise RuntimeError("after_completion boom")
+
+    def owned_metadata_tags(self):
+        raise RuntimeError("owned_metadata_tags boom")
+
+
+def _hooked_loop(*hooks) -> TerraFinHostedAgentLoop:
+    service = _FakeService()
+    registry = build_default_capability_registry(service, chart_opener=_fake_chart_opener)
+    runtime = TerraFinHostedAgentRuntime(service=service, capability_registry=registry)
+    return TerraFinHostedAgentLoop(runtime=runtime, model_client=_SnapshotThenSummarizeModel(), hooks=hooks)
+
+
+def _queue_completion(loop, session_id) -> None:
+    loop.runtime.session_store.append_pending_completion(
+        session_id,
+        marker={"taskId": "t1", "capabilityName": "deep_research", "result": {"title": "AAPL deep dive"}},
+    )
+
+
+def test_turn_hooks_fire_in_lifecycle_order() -> None:
+    recorder = _RecordingHook()
+    loop = _hooked_loop(recorder)
+    conversation = loop.create_session(DEFAULT_HOSTED_AGENT_NAME, session_id="loop:hooks-order")
+    _queue_completion(loop, conversation.session_id)
+
+    loop.submit_user_message(conversation.session_id, "Check AAPL")
+
+    assert recorder.events == [
+        ("after_completion", "AAPL deep dive"),
+        ("before_turn", "Check AAPL"),
+        ("after_tool", "market_snapshot"),
+    ]
+
+
+def test_raising_turn_hook_is_logged_and_does_not_fail_the_turn(caplog) -> None:
+    recorder = _RecordingHook()
+    loop = _hooked_loop(_RaisingHook(), recorder)
+    conversation = loop.create_session(DEFAULT_HOSTED_AGENT_NAME, session_id="loop:hooks-raise")
+    _queue_completion(loop, conversation.session_id)
+
+    result = loop.submit_user_message(conversation.session_id, "Check AAPL")
+
+    assert result.final_message is not None
+    assert result.final_message.content == "AAPL snapshot retrieved."
+    assert [event for event, _ in recorder.events] == ["after_completion", "before_turn", "after_tool"]
+    assert sum("_RaisingHook" in record.getMessage() for record in caplog.records) == 4
+
+
+class _GuruBatchModel:
+    """Persona turns issue `batches` in order, then end without a memo.
+
+    Keeps the guru conversation so a test can read every result it holds.
+    """
+
+    def __init__(self, *batches) -> None:
+        self.batches = list(batches)
+        self.guru_conversation = None
+
+    def complete(self, *, conversation, tools, **kwargs):
+        _ = kwargs
+        if not any(tool.name == "submit_guru_research_memo" for tool in tools):
+            return TerraFinModelTurn(assistant_message=TerraFinConversationMessage(role="assistant", content="noop"))
+        self.guru_conversation = conversation
+        if not self.batches:
+            return TerraFinModelTurn(assistant_message=TerraFinConversationMessage(role="assistant", content="done"))
+        names = self.batches.pop(0)
+        return TerraFinModelTurn(
+            tool_calls=tuple(
+                TerraFinToolCall(call_id=f"c{index}", tool_name="market_snapshot", arguments={"name": name})
+                for index, name in enumerate(names)
+            ),
+            stop_reason="tool_calls",
+        )
+
+
+def _tool_results(conversation):
+    return [message for message in conversation.snapshot() if message.role == "tool"]
+
+
+def test_a_guru_batch_over_max_tool_calls_still_answers_every_call() -> None:
+    model = _GuruBatchModel(("AAPL", "MSFT", "NVDA"))
+    loop = _loop_with_gurus(model)
+    loop.max_tool_calls = 2
+    parent = loop.create_session(DEFAULT_HOSTED_AGENT_NAME, session_id="loop:guru-limit")
+
+    result = loop.consult_guru(parent.session_id, "warren-buffett", "Is Apple a good business?")
+
+    assert result["status"] == "failed"
+    assert "max_tool_calls=2" in result["reason"]
+    results = _tool_results(model.guru_conversation)
+    assert [message.tool_call_id for message in results] == ["c0", "c1", "c2"]
+    assert [message.metadata["errorCode"] for message in results] == [None, None, "tool_call_unresolved"]
+
+
+def test_a_fatal_guru_tool_still_answers_every_call() -> None:
+    model = _GuruBatchModel(("SPY", "Crude Oil", "QQQ"))
+    loop = _loop_with_gurus(model, service=_OneGoodThenFatalService())
+    parent = loop.create_session(DEFAULT_HOSTED_AGENT_NAME, session_id="loop:guru-fatal")
+
+    result = loop.consult_guru(parent.session_id, "warren-buffett", "Is Apple a good business?")
+
+    assert result["status"] == "failed"
+    assert "Cannot pass DataFrame" in result["reason"]
+    results = _tool_results(model.guru_conversation)
+    assert [message.tool_call_id for message in results] == ["c0", "c1", "c2"]
+    assert [message.metadata["errorCode"] for message in results] == [
+        None,
+        "tool_call_unresolved",
+        "tool_call_unresolved",
+    ]
+    assert json.loads(results[2].content)["payload"]["error"]["message"].startswith("Never executed:")
+
+
+def test_a_guru_repeating_one_call_gets_the_loop_guard() -> None:
+    model = _GuruBatchModel(("AAPL",), ("AAPL",), ("AAPL",))
+    loop = _loop_with_gurus(model)
+    parent = loop.create_session(DEFAULT_HOSTED_AGENT_NAME, session_id="loop:guru-guard")
+
+    loop.consult_guru(parent.session_id, "warren-buffett", "Is Apple a good business?")
+
+    results = _tool_results(model.guru_conversation)
+    assert [message.metadata["errorCode"] for message in results] == [None, None, "tool_call_loop_guard"]
+
+
+class _ConcurrencyService(_FakeService):
+    """Each snapshot takes 0.2s and records how many ran at once."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._lock = threading.Lock()
+        self.running = 0
+        self.peak = 0
+
+    def market_snapshot(self, name: str, *, depth: str = "auto", view: str = "daily") -> dict[str, object]:
+        with self._lock:
+            self.running += 1
+            self.peak = max(self.peak, self.running)
+        time.sleep(0.2)
+        with self._lock:
+            self.running -= 1
+        return super().market_snapshot(name, depth=depth, view=view)
+
+
+class _OneBatchModel:
+    def __init__(self, *tool_calls) -> None:
+        self.tool_calls = tool_calls
+
+    def complete(self, *, messages, tools, **kwargs):
+        _ = tools, kwargs
+        if any(message.role == "tool" for message in messages):
+            return TerraFinModelTurn(assistant_message=TerraFinConversationMessage(role="assistant", content="Done."))
+        return TerraFinModelTurn(tool_calls=self.tool_calls, stop_reason="tool_calls")
+
+
+def test_parallel_read_only_calls_overlap_and_answer_in_call_order() -> None:
+    service = _ConcurrencyService()
+    model = _OneBatchModel(
+        TerraFinToolCall(call_id="a", tool_name="market_snapshot", arguments={"name": "AAPL"}),
+        TerraFinToolCall(call_id="b", tool_name="market_snapshot", arguments={"name": "MSFT"}),
+    )
+    loop = _loop(model, service=service)
+    loop.max_parallel_tool_calls = 4
+    conversation = loop.create_session(DEFAULT_HOSTED_AGENT_NAME, session_id="loop:parallel")
+
+    result = loop.submit_user_message(conversation.session_id, "AAPL and MSFT")
+
+    assert service.peak == 2
+    results = _tool_results(loop.get_conversation(conversation.session_id))
+    assert [message.tool_call_id for message in results] == ["a", "b"]
+    assert [json.loads(message.content)["payload"]["ticker"] for message in results] == ["AAPL", "MSFT"]
+    assert [invocation.tool_name for invocation in result.tool_results] == ["market_snapshot"] * 2
+    # Each thread recorded on a scratch activity; both reach the session record.
+    calls = loop.runtime.get_session(conversation.session_id).session.capability_calls
+    assert [call.inputs["name"] for call in calls] == ["AAPL", "MSFT"]
+
+
+def test_a_side_effecting_call_keeps_the_batch_serial() -> None:
+    service = _ConcurrencyService()
+    model = _OneBatchModel(
+        TerraFinToolCall(call_id="a", tool_name="market_snapshot", arguments={"name": "AAPL"}),
+        TerraFinToolCall(call_id="chart", tool_name="open_chart", arguments={"data_or_names": ["AAPL"]}),
+        TerraFinToolCall(call_id="b", tool_name="market_snapshot", arguments={"name": "MSFT"}),
+    )
+    loop = _loop(model, service=service)
+    loop.max_parallel_tool_calls = 4
+    conversation = loop.create_session(DEFAULT_HOSTED_AGENT_NAME, session_id="loop:serial")
+
+    loop.submit_user_message(conversation.session_id, "AAPL, a chart, then MSFT")
+
+    assert service.peak == 1
+    results = _tool_results(loop.get_conversation(conversation.session_id))
+    assert [message.tool_call_id for message in results] == ["a", "chart", "b"]
+
+
+class _StopOnSecondStepService(_FakeService):
+    """Records each snapshot, and requests a stop from inside the call named `stop_on`."""
+
+    def __init__(self, stop_on: str) -> None:
+        super().__init__()
+        self.stop_on = stop_on
+        self.request_stop = lambda: None
+        self.names: list[str] = []
+
+    def market_snapshot(self, name: str, *, depth: str = "auto", view: str = "daily") -> dict[str, object]:
+        self.names.append(name)
+        if name == self.stop_on:
+            self.request_stop()
+        return super().market_snapshot(name, depth=depth, view=view)
+
+
+class _ToolEveryStepModel:
+    """One call on step 1, two on every later step, and text once tools are off."""
+
+    def __init__(self) -> None:
+        self.options = []
+
+    def complete(self, *, messages, tools, options=None, **kwargs):
+        _ = tools, kwargs
+        self.options.append(options)
+        if options is not None and options.tool_choice == "none":
+            return TerraFinModelTurn(
+                assistant_message=TerraFinConversationMessage(role="assistant", content="Partial answer.")
+            )
+        step = len(self.options)
+        names = ("AAPL",) if step == 1 else (f"MSFT{step}", f"NVDA{step}")
+        return TerraFinModelTurn(
+            tool_calls=tuple(
+                TerraFinToolCall(call_id=f"{name}-call", tool_name="market_snapshot", arguments={"name": name})
+                for name in names
+            ),
+            stop_reason="tool_calls",
+        )
+
+
+def test_a_stop_during_step_two_ends_the_turn_after_that_batch() -> None:
+    from TerraFin.agent.runtime.tool_batch import INTERRUPTED_REASON
+
+    model = _ToolEveryStepModel()
+    service = _StopOnSecondStepService(stop_on="MSFT2")
+    loop = _loop(model, service=service)
+    conversation = loop.create_session(DEFAULT_HOSTED_AGENT_NAME, session_id="loop:stopped")
+    service.request_stop = lambda: loop.runtime.request_turn_interrupt(conversation.session_id)
+
+    result = loop.submit_user_message(conversation.session_id, "AAPL, then MSFT and NVDA")
+
+    # Step 2's second call never ran, and step 3 was the wrap-up with tools off.
+    assert service.names == ["AAPL", "MSFT2"]
+    assert result.steps == 3
+    assert model.options[-1].tool_choice == "none"
+    assert result.final_message.content == "Partial answer."
+    assert result.final_message.metadata["turnEnding"] == "interrupted"
+    results = _tool_results(loop.get_conversation(conversation.session_id))
+    assert [message.tool_call_id for message in results] == ["AAPL-call", "MSFT2-call", "NVDA2-call"]
+    assert json.loads(results[-1].content)["errorMessage"] == INTERRUPTED_REASON
+
+
+class _ToolsEvenWhenOffModel:
+    """One call on every step, the tools-off wrap-up included, and never any text."""
+
+    def __init__(self) -> None:
+        self.options = []
+
+    def complete(self, *, messages, tools, options=None, **kwargs):
+        _ = messages, tools, kwargs
+        self.options.append(options)
+        name = f"MSFT{len(self.options)}"
+        return TerraFinModelTurn(
+            tool_calls=(
+                TerraFinToolCall(call_id=f"{name}-call", tool_name="market_snapshot", arguments={"name": name}),
+            ),
+            stop_reason="tool_calls",
+        )
+
+
+def test_a_stopped_wrap_up_that_only_calls_tools_ends_on_the_stopped_text() -> None:
+    from TerraFin.agent.runtime.loop import _STOPPED_TEXT
+
+    model = _ToolsEvenWhenOffModel()
+    service = _StopOnSecondStepService(stop_on="MSFT1")
+    loop = _loop(model, service=service)
+    conversation = loop.create_session(DEFAULT_HOSTED_AGENT_NAME, session_id="loop:stopped-tools-only")
+    service.request_stop = lambda: loop.runtime.request_turn_interrupt(conversation.session_id)
+
+    result = loop.submit_user_message(conversation.session_id, "MSFT")
+
+    # Step 2 was the wrap-up: its call was dropped unrun and the turn did not raise.
+    assert service.names == ["MSFT1"]
+    assert result.steps == 2
+    assert model.options[-1].tool_choice == "none"
+    assert result.final_message.content == _STOPPED_TEXT
+    assert result.final_message.metadata["turnEnding"] == "interrupted"
+
+
+def test_a_stop_left_by_an_earlier_turn_does_not_stop_the_next() -> None:
+    loop = _loop(_SnapshotThenSummarizeModel())
+    conversation = loop.create_session(DEFAULT_HOSTED_AGENT_NAME, session_id="loop:stale-stop")
+    loop.runtime.request_turn_interrupt(conversation.session_id)
+
+    result = loop.submit_user_message(conversation.session_id, "AAPL")
+
+    assert result.final_message.content == "AAPL snapshot retrieved."
+    assert "turnEnding" not in result.final_message.metadata

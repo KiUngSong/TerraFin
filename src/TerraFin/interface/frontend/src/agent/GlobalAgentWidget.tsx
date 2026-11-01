@@ -2,6 +2,16 @@ import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from '
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { AgentShellDrawer } from './layout';
+import { TurnActivityGroup, TurnFooter } from './TurnActivityGroup';
+import {
+  buildTurnActivities,
+  formatTurnFooter,
+  sessionTokens,
+  summarizeTurn,
+  TurnActivity,
+  turnEndingRow,
+  unlandedPending,
+} from './turnActivity';
 import { getAgentViewContextId } from './viewContext';
 import { useTerminalStore } from '../terminal/store';
 
@@ -87,11 +97,32 @@ interface HostedToolResult {
   } | null;
 }
 
+interface HostedArtifact {
+  artifactId: string;
+  kind: string;
+  title: string;
+  capabilityName: string;
+  createdAt: string;
+  payload: Record<string, unknown>;
+}
+
+interface HostedCapabilityCall {
+  capabilityName: string;
+  calledAt: string;
+  inputs: Record<string, unknown>;
+  outputKeys: string[];
+  focusItems: string[];
+  artifactIds: string[];
+}
+
 interface HostedAgentSession {
   sessionId: string;
   agentName: string;
   metadata: Record<string, unknown>;
   runtimeModel?: HostedRuntimeModel | null;
+  focusItems: string[];
+  artifacts: HostedArtifact[];
+  capabilityCalls: HostedCapabilityCall[];
   tools: HostedToolDefinition[];
   messages: HostedConversationMessage[];
   tasks: HostedTask[];
@@ -516,6 +547,113 @@ const formatTaskDetail = (task: HostedTask) => {
   return 'Running in the background.';
 };
 
+interface RunningToolCall {
+  callId: string;
+  toolName: string;
+  startedAt: string;
+  ticker: string | null;
+}
+
+// Names the call executing now, timed from its own start. capabilityCalls
+// cannot: a call is recorded only once its handler returns. Label only, never
+// liveness.
+const runningCallStatus = (metadata: Record<string, unknown> | undefined): string | null => {
+  const calls = metadata?.runningToolCalls as RunningToolCall[] | undefined;
+  if (!Array.isArray(calls) || calls.length === 0) {
+    return null;
+  }
+  // The server lists calls oldest first.
+  const newest = calls[calls.length - 1];
+  const elapsed = Math.max(0, Math.floor((Date.now() - new Date(newest.startedAt).getTime()) / 1000));
+  const label = newest.ticker ? `${newest.toolName} · ${newest.ticker}` : newest.toolName;
+  return `Running ${label}… (${elapsed}s)`;
+};
+
+const TASK_END_WORD: Record<string, string> = {
+  completed: 'Finished',
+  failed: 'Failed',
+  cancelled: 'Cancelled',
+};
+
+const CANCEL_CONFIRM_MS = 3000;
+
+const formatElapsed = (seconds: number) => {
+  if (seconds < 60) {
+    return `${seconds}s`;
+  }
+  if (seconds < 3600) {
+    return `${Math.floor(seconds / 60)}m${String(seconds % 60).padStart(2, '0')}s`;
+  }
+  return `${Math.floor(seconds / 3600)}h${String(Math.floor((seconds % 3600) / 60)).padStart(2, '0')}m`;
+};
+
+// One line per running task, with its own clock so the tick re-renders only
+// this strip. Cancel takes a second press within CANCEL_CONFIRM_MS.
+const BackgroundTaskCapsule = ({
+  tasks,
+  acceptedLabel,
+  onCancel,
+}: {
+  tasks: HostedTask[];
+  acceptedLabel: string | null;
+  onCancel: (taskId: string) => void;
+}) => {
+  const [now, setNow] = useState(() => Date.now());
+  const [armedTaskId, setArmedTaskId] = useState<string | null>(null);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
+    if (!armedTaskId) {
+      return undefined;
+    }
+    const timer = window.setTimeout(() => setArmedTaskId(null), CANCEL_CONFIRM_MS);
+    return () => window.clearTimeout(timer);
+  }, [armedTaskId]);
+
+  return (
+    <div className="tf-agent-task-capsule" role="region" aria-label="Running background tasks">
+      {tasks.map((task) => {
+        const startedAt = new Date(task.startedAt || task.createdAt).getTime();
+        const elapsed = Math.max(0, Math.floor((now - startedAt) / 1000));
+        const stage = task.progress?.stage;
+        const armed = armedTaskId === task.taskId;
+        return (
+          <div key={task.taskId} className="tf-agent-task-capsule__row">
+            <span className="tf-agent-task-capsule__text">
+              {formatTaskLabel(task)} · {typeof stage === 'string' && stage.trim() ? stage : task.status}
+            </span>
+            <span className="tf-agent-task-capsule__elapsed">{formatElapsed(elapsed)}</span>
+            <button
+              type="button"
+              className={`tf-agent-task-card__cancel ${armed ? 'tf-agent-task-card__cancel--armed' : ''}`}
+              aria-label={`${armed ? 'Confirm cancel' : 'Cancel'} ${formatTaskLabel(task)}`}
+              onClick={() => {
+                if (armed) {
+                  setArmedTaskId(null);
+                  onCancel(task.taskId);
+                } else {
+                  setArmedTaskId(task.taskId);
+                }
+              }}
+            >
+              {armed ? 'Confirm cancel' : 'Cancel'}
+            </button>
+          </div>
+        );
+      })}
+      {tasks.length === 0 && acceptedLabel ? (
+        <div className="tf-agent-task-capsule__row">
+          <span className="tf-agent-task-capsule__text">{acceptedLabel} · waiting for the runtime</span>
+        </div>
+      ) : null}
+    </div>
+  );
+};
+
 const formatApprovalLabel = (approval: HostedApproval) => {
   const target = approval.inputPayload?.name || approval.inputPayload?.ticker || approval.inputPayload?.data_or_names;
   if (Array.isArray(target) && target.length > 0) {
@@ -609,6 +747,14 @@ const GlobalAgentWidget: React.FC = () => {
   const [sessionHistory, setSessionHistory] = useState<HostedSessionSummary[]>([]);
   const [toolResults, setToolResults] = useState<HostedToolResult[]>([]);
   const [draft, setDraft] = useState('');
+  const [denyNote, setDenyNote] = useState<{ approvalId: string; text: string } | null>(null);
+  // Approvals with a decision POST in flight. The backend accepts a second
+  // decision on a resolved approval, so the UI must not send one.
+  const [decidingApprovalIds, setDecidingApprovalIds] = useState<Set<string>>(() => new Set());
+  // The card whose action button takes focus when it next mounts: Deny after the
+  // note closes, Resend after an approve lands.
+  const refocusApprovalRef = useRef<string | null>(null);
+  const composerRef = useRef<HTMLTextAreaElement | null>(null);
   const [loadingCatalog, setLoadingCatalog] = useState(false);
   const [catalogRequested, setCatalogRequested] = useState(false);
   const [historyRequested, setHistoryRequested] = useState(false);
@@ -620,9 +766,17 @@ const GlobalAgentWidget: React.FC = () => {
   const [showPromptSuggestions, setShowPromptSuggestions] = useState(false);
   const [creatingSession, setCreatingSession] = useState(false);
   const [sending, setSending] = useState(false);
+  // The session the in-flight send posted to, which is the one Stop interrupts.
+  const [runningSessionId, setRunningSessionId] = useState<string | null>(null);
+  const [stopping, setStopping] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [pendingMessages, setPendingMessages] = useState<HostedConversationMessage[]>([]);
+  const [pendingMessages, setPendingMessages] = useState<
+    Array<HostedConversationMessage & { userTurnsBefore: number }>
+  >([]);
   const [sendStatus, setSendStatus] = useState<SendStatusState>(null);
+  // The running turn's tool rows, read from polls that leave the session as it is.
+  const [liveTurn, setLiveTurn] = useState<TurnActivity | null>(null);
+  const openActivityKeysRef = useRef<Set<string>>(new Set());
   const transcriptRef = useRef<HTMLDivElement | null>(null);
   // Whether the transcript is scrolled to the bottom. Every auto-scroll is gated
   // on it so a user reading earlier output is never dragged down.
@@ -655,9 +809,33 @@ const GlobalAgentWidget: React.FC = () => {
     [activeSession]
   );
   const displayedMessages = useMemo(
-    () => mergeMessages(visibleMessages, pendingMessages),
+    () => mergeMessages(visibleMessages, unlandedPending(visibleMessages, pendingMessages)),
     [pendingMessages, visibleMessages]
   );
+  const turnActivities = useMemo(() => {
+    const turns = buildTurnActivities(activeSession?.messages || [], activeSession?.capabilityCalls);
+    const meta = activeSession?.metadata || {};
+    // A turn still running or one that died has no answer to put a footer under.
+    const lastTurnOpen = meta.turnInFlight === true || typeof meta.turnUnfinished === 'string';
+    const answered = turns.filter((turn, index) => turn.answeredAt && !(lastTurnOpen && index === turns.length - 1));
+    return {
+      byUserMessage: new Map(turns.map((turn) => [turn.key, turn])),
+      byAnswer: new Map(answered.map((turn) => [turn.answeredAt as string, turn])),
+      // The session total rides on the newest footer only.
+      lastAnswerAt: answered[answered.length - 1]?.answeredAt ?? null,
+      sessionTokens: sessionTokens(activeSession?.messages || []),
+    };
+  }, [activeSession]);
+  // A dead turn's divider stays until the next turn starts, which `sending` and a
+  // pending message mark before the server's next payload arrives.
+  const turnDeath =
+    typeof activeSession?.metadata?.turnUnfinished === 'string' && !sending && pendingMessages.length === 0
+      ? TURN_DEATH_MESSAGE[activeSession.metadata.turnUnfinished] ?? TURN_DEATH_MESSAGE['no-answer']
+      : null;
+  const sessionModelLabel = activeSession?.runtimeModel
+    ? `${activeSession.runtimeModel.providerLabel} / ${activeSession.runtimeModel.modelId}`
+    : '';
+  const shownLiveTurn = sendStatus?.kind === 'working' ? liveTurn : null;
   const visibleMessageEntries = useMemo(
     () =>
       displayedMessages.map((message, index) => ({
@@ -678,6 +856,26 @@ const GlobalAgentWidget: React.FC = () => {
     () => orderedTasks.filter((task) => !isTerminalTaskStatus(task.status)),
     [orderedTasks]
   );
+  // Each ended task sits after the last message sent before it ended.
+  const taskNoticesByMessage = useMemo(() => {
+    const notices = new Map<string, HostedTask[]>();
+    if (visibleMessageEntries.length === 0) {
+      return notices;
+    }
+    for (const task of [...orderedTasks].reverse()) {
+      if (!isTerminalTaskStatus(task.status)) {
+        continue;
+      }
+      const completedAt = new Date(task.completedAt || task.createdAt).getTime();
+      let index = visibleMessageEntries.length - 1;
+      while (index > 0 && new Date(visibleMessageEntries[index].message.createdAt).getTime() > completedAt) {
+        index -= 1;
+      }
+      const key = visibleMessageEntries[index].key;
+      notices.set(key, [...(notices.get(key) || []), task]);
+    }
+    return notices;
+  }, [orderedTasks, visibleMessageEntries]);
   const recentTaskResults = useMemo(
     () => toolResults.filter((result) => result.executionMode === 'task'),
     [toolResults]
@@ -690,10 +888,23 @@ const GlobalAgentWidget: React.FC = () => {
       return rightTime - leftTime;
     });
   }, [activeSession]);
-  const pendingApprovals = useMemo(
-    () => orderedApprovals.filter((approval) => approval.status === 'pending'),
-    [orderedApprovals]
-  );
+  // Pending approvals sit in the dock above the composer, and so does an approved
+  // one until the user sends again. The Activity drawer keeps the rest.
+  const { dockApprovals, resolvedApprovals } = useMemo(() => {
+    const lastUserMessageAt = Math.max(
+      0,
+      ...(activeSession?.messages || [])
+        .filter((message) => message.role === 'user' && !isInternalOnly(message))
+        .map((message) => new Date(message.createdAt).getTime())
+    );
+    const inDock = (approval: HostedApproval) =>
+      approval.status === 'pending' ||
+      (approval.status === 'approved' && new Date(approval.createdAt).getTime() >= lastUserMessageAt);
+    return {
+      dockApprovals: orderedApprovals.filter(inDock),
+      resolvedApprovals: orderedApprovals.filter((approval) => !inDock(approval)),
+    };
+  }, [activeSession, orderedApprovals]);
   const needsLocalSetup = useMemo(
     () => !isRuntimeConfigured || error === LOCAL_SETUP_MESSAGE || error === runtimeSetupMessage,
     [error, isRuntimeConfigured, runtimeSetupMessage]
@@ -703,8 +914,8 @@ const GlobalAgentWidget: React.FC = () => {
     [recentTaskResults]
   );
   const visibleTaskCount = activeTasks.length > 0 ? activeTasks.length : hasPendingTaskRequest ? 1 : 0;
-  const activityCount = pendingApprovals.length + visibleTaskCount;
-  const hasActivity = orderedApprovals.length > 0 || orderedTasks.length > 0 || recentTaskResults.length > 0;
+  const activityCount = visibleTaskCount;
+  const hasActivity = resolvedApprovals.length > 0 || orderedTasks.length > 0 || recentTaskResults.length > 0;
   const currentSessionSummary = useMemo(
     () => sessionHistory.find((item) => item.sessionId === activeSessionId) || null,
     [activeSessionId, sessionHistory]
@@ -992,15 +1203,7 @@ const GlobalAgentWidget: React.FC = () => {
         return;
       }
       ticks += 1;
-      let payload:
-        | (HostedAgentSession & {
-            capabilityCalls?: Array<{
-              capabilityName: string;
-              calledAt: string;
-              inputs?: Record<string, unknown>;
-            }>;
-          })
-        | null = null;
+      let payload: HostedAgentSession | null = null;
       try {
         payload = await fetchSessionPayload(activeSessionId);
       } catch {
@@ -1045,15 +1248,13 @@ const GlobalAgentWidget: React.FC = () => {
           stop();
           return;
         }
-        // Nothing is running and the newest tool call has no result: the turn died
-        // between appending the call and appending its result. Without this, a
-        // restart mid-tool showed the model's preamble as the finished answer.
-        setSendStatus({
-          kind: 'error',
-          content: TURN_DEATH_MESSAGE[death] ?? TURN_DEATH_MESSAGE['no-answer'],
-          createdAt: new Date().toISOString(),
-          retiredBy: 'turn-end',
-        });
+        // Nothing is running and the turn has no answer: it died. The divider
+        // under the transcript reads the death from the session payload, so the
+        // payload is kept and no status line is shown.
+        if (!grew) {
+          setSession(payload);
+        }
+        setSendStatus(null);
         stop();
         return;
       }
@@ -1072,6 +1273,11 @@ const GlobalAgentWidget: React.FC = () => {
         // turnUnfinished is excluded above: a turn that died leaves the model's
         // preamble as the last visible message, so this branch would read it as a
         // finished answer and erase the send error along with it.
+        // The footer gate reads turnInFlight from the stored session, so a stored
+        // copy that still says in flight is replaced even when nothing grew.
+        if (!grew && activeSessionRef.current?.metadata?.turnInFlight === true) {
+          setSession(payload);
+        }
         const failed = sendStatusRef.current?.kind === 'error' ? sendStatusRef.current : null;
         if (answerContradictsErrorRef.current && grew) {
           // `grew` is load-bearing: this branch fires for any session with
@@ -1106,8 +1312,11 @@ const GlobalAgentWidget: React.FC = () => {
         const turnCalls = (payload.capabilityCalls || []).filter(
           (call) => new Date(call.calledAt).getTime() >= turnStartedAt
         );
+        const running = runningCallStatus(meta);
         let content: string;
-        if (turnCalls.length === 0) {
+        if (running) {
+          content = running;
+        } else if (turnCalls.length === 0) {
           content = `Thinking… (${elapsed}s)`;
         } else {
           const latest = turnCalls[turnCalls.length - 1];
@@ -1132,6 +1341,8 @@ const GlobalAgentWidget: React.FC = () => {
           stop();
           return;
         }
+        const turns = buildTurnActivities(payload.messages, payload.capabilityCalls);
+        setLiveTurn(turns[turns.length - 1] || null);
         if (sendStatusRef.current?.content !== content) {
           setSendStatus({ kind: 'working', content, createdAt: new Date().toISOString() });
         }
@@ -1403,9 +1614,12 @@ const GlobalAgentWidget: React.FC = () => {
           setSession(payload);
           writeStoredActiveSessionId(payload.sessionId);
           setPendingMessages([]);
-          if (newVisibleMessages.some((message) => message.role === 'assistant')) {
+          // Narration written beside tool calls is visible before the turn ends, so
+          // the reply counts only once the server says no turn is in flight.
+          const reply = newVisibleMessages.filter((message) => message.role === 'assistant').pop();
+          if (reply && payload.metadata?.turnInFlight !== true) {
             setSendStatus(null);
-            return true;
+            return reply;
           }
         } catch {
           // Best effort reconciliation only.
@@ -1417,12 +1631,13 @@ const GlobalAgentWidget: React.FC = () => {
         writeStoredActiveSessionId(latestPayload.sessionId);
       }
       setPendingMessages([]);
-      return false;
+      return null;
     },
     [fetchSessionPayload]
   );
 
-  const handleSend = async (content: string) => {
+  // fromComposer false sends text that is not the draft, so the draft stays.
+  const handleSend = async (content: string, fromComposer = true) => {
     const trimmedContent = content.trim();
     // Sending is intent: never leave the user's own turn below the fold.
     pinnedRef.current = true;
@@ -1446,8 +1661,16 @@ const GlobalAgentWidget: React.FC = () => {
     setSending(true);
     useTerminalStore.getState().setAgentActivity('streaming');
     setError(null);
-    setDraft('');
-    setPendingMessages([buildEphemeralMessage('user', trimmedContent, optimisticCreatedAt)]);
+    if (fromComposer) {
+      setDraft('');
+    }
+    setPendingMessages([
+      {
+        ...buildEphemeralMessage('user', trimmedContent, optimisticCreatedAt),
+        userTurnsBefore: visibleMessages.filter((message) => message.role === 'user').length,
+      },
+    ]);
+    setLiveTurn(null);
     setSendStatus({
       kind: 'working',
       content: 'Thinking…',
@@ -1465,13 +1688,9 @@ const GlobalAgentWidget: React.FC = () => {
         if (pollingSessionId !== sessionId) {
           return;
         }
-        let detail: (HostedAgentSession & {
-          capabilityCalls?: Array<{ capabilityName: string; calledAt: string; inputs?: Record<string, unknown> }>;
-        }) | null = null;
+        let detail: HostedAgentSession | null = null;
         try {
-          detail = await fetchRuntimeJson<HostedAgentSession & {
-            capabilityCalls?: Array<{ capabilityName: string; calledAt: string; inputs?: Record<string, unknown> }>;
-          }>(
+          detail = await fetchRuntimeJson<HostedAgentSession>(
             `/agent/api/runtime/sessions/${encodeURIComponent(sessionId)}`,
             {},
             'Polling assistant progress'
@@ -1485,8 +1704,14 @@ const GlobalAgentWidget: React.FC = () => {
         const calls = detail?.capabilityCalls || [];
         const newCalls = calls.slice(baselineCallCount);
         const elapsed = Math.max(0, Math.floor((Date.now() - startedAt) / 1000));
+        // Only a turn newer than the baseline is this send's; before the
+        // server appends the message, the last turn is the previous answer.
+        const landed = baselineUserTurns !== null && countUserTurns(detail.messages) > baselineUserTurns;
+        const running = landed ? runningCallStatus(detail.metadata) : null;
         let content: string;
-        if (newCalls.length === 0) {
+        if (running) {
+          content = running;
+        } else if (newCalls.length === 0) {
           content = `Thinking… (${elapsed}s)`;
         } else {
           const latest = newCalls[newCalls.length - 1];
@@ -1500,6 +1725,8 @@ const GlobalAgentWidget: React.FC = () => {
           content,
           createdAt: new Date().toISOString(),
         });
+        const turns = buildTurnActivities(detail.messages, detail.capabilityCalls);
+        setLiveTurn(landed ? turns[turns.length - 1] || null : null);
       };
       void tick();
       toolPollTimer = window.setInterval(() => {
@@ -1526,9 +1753,7 @@ const GlobalAgentWidget: React.FC = () => {
       let baseline = 0;
       sentToSessionId = session.sessionId;
       try {
-        const initial = await fetchRuntimeJson<HostedAgentSession & {
-          capabilityCalls?: unknown[];
-        }>(
+        const initial = await fetchRuntimeJson<HostedAgentSession>(
           `/agent/api/runtime/sessions/${encodeURIComponent(session.sessionId)}`,
           {},
           'Reading session baseline'
@@ -1539,6 +1764,7 @@ const GlobalAgentWidget: React.FC = () => {
         baseline = 0;
       }
       startToolPolling(session.sessionId, baseline);
+      setRunningSessionId(session.sessionId);
       const run = (await fetchRuntimeJson<HostedRunResponse>(
         `/agent/api/runtime/sessions/${encodeURIComponent(session.sessionId)}/messages`,
         {
@@ -1564,6 +1790,14 @@ const GlobalAgentWidget: React.FC = () => {
       setPendingMessages([]);
       setSendStatus(null);
       setShowPromptSuggestions(false);
+      // A stopped turn hands its text back to an empty composer so it can be edited and resent.
+      if (
+        fromComposer &&
+        run.finalMessage?.metadata?.turnEnding === 'interrupted' &&
+        activeSessionRef.current?.sessionId === sentToSessionId
+      ) {
+        setDraft((current) => (current.trim() ? current : trimmedContent));
+      }
       if (
         !run.finalMessage &&
         (run.toolResults || []).length === 0 &&
@@ -1582,8 +1816,15 @@ const GlobalAgentWidget: React.FC = () => {
             content: 'Still waiting for the assistant…',
             createdAt: new Date(Date.now() + 2).toISOString(),
           });
-          const reconciled = await reconcileTimedOutSend(sessionId, baselineVisibleCount);
-          if (reconciled) {
+          const reply = await reconcileTimedOutSend(sessionId, baselineVisibleCount);
+          if (reply) {
+            if (
+              fromComposer &&
+              reply.metadata?.turnEnding === 'interrupted' &&
+              activeSessionRef.current?.sessionId === sentToSessionId
+            ) {
+              setDraft((current) => (current.trim() ? current : trimmedContent));
+            }
             return;
           }
         } else {
@@ -1655,7 +1896,39 @@ const GlobalAgentWidget: React.FC = () => {
     } finally {
       stopToolPolling();
       setSending(false);
+      setRunningSessionId(null);
+      setStopping(false);
       useTerminalStore.getState().setAgentActivity('idle');
+    }
+  };
+
+  // The turn ends at its next step boundary, so a recorded request keeps the
+  // button on 'Stopping…' until the send returns.
+  const handleStop = async () => {
+    if (!runningSessionId) {
+      return;
+    }
+    setStopping(true);
+    let requested = false;
+    try {
+      const result = await fetchRuntimeJson<{ interruptRequested: boolean }>(
+        `/agent/api/runtime/sessions/${encodeURIComponent(runningSessionId)}/interrupt`,
+        { method: 'POST' },
+        'Stopping the reply'
+      );
+      requested = result.interruptRequested;
+      // False while the send is in flight means the server held no turn: it had not started or had just ended.
+      if (!requested && sendingRef.current) {
+        setError('Nothing was stopped: the reply had not started yet or had just finished. Press Stop again if it is still running.');
+      }
+    } catch (payload) {
+      // Once the send has returned there is no Stop button, so the error would point at nothing.
+      if (sendingRef.current) {
+        setError(parseRuntimeError(payload, 'Failed to stop the reply. Press Stop again.'));
+      }
+    }
+    if (!requested) {
+      setStopping(false);
     }
   };
 
@@ -1749,6 +2022,7 @@ const GlobalAgentWidget: React.FC = () => {
             tasks: current.tasks.map((existing) => (existing.taskId === task.taskId ? task : existing)),
           };
         });
+        setToolResults((current) => syncToolResultsWithTasks(current, [task]));
       } catch (payload) {
         setError(parseRuntimeError(payload, 'Failed to cancel the background task.'));
       }
@@ -1757,17 +2031,18 @@ const GlobalAgentWidget: React.FC = () => {
   );
 
   const handleApprovalDecision = useCallback(
-    async (approvalId: string, decision: 'approve' | 'deny') => {
-      if (!activeSessionId) {
-        return;
+    async (approvalId: string, decision: 'approve' | 'deny', note: string | null = null) => {
+      if (!activeSessionId || decidingApprovalIds.has(approvalId)) {
+        return false;
       }
+      setDecidingApprovalIds((current) => new Set(current).add(approvalId));
       try {
         const approval = await fetchRuntimeJson<HostedApproval>(
           `/agent/api/runtime/approvals/${encodeURIComponent(approvalId)}/${decision}`,
           {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ note: null }),
+            body: JSON.stringify({ note }),
           },
           `${decision === 'approve' ? 'Approving' : 'Denying'} assistant action`
         );
@@ -1783,12 +2058,74 @@ const GlobalAgentWidget: React.FC = () => {
           };
         });
         setError(null);
+        return true;
       } catch (payload) {
         setError(parseRuntimeError(payload, 'Failed to record the approval decision.'));
+        return false;
+      } finally {
+        setDecidingApprovalIds((current) => {
+          const next = new Set(current);
+          next.delete(approvalId);
+          return next;
+        });
       }
     },
-    [activeSessionId]
+    [activeSessionId, decidingApprovalIds]
   );
+
+  // The request that raised an approval is the last user message at or before it.
+  const requestForApproval = (approval: HostedApproval) => {
+    const raisedAt = new Date(approval.createdAt).getTime();
+    return (activeSession?.messages || [])
+      .filter(
+        (message) =>
+          message.role === 'user' && !isInternalOnly(message) && new Date(message.createdAt).getTime() <= raisedAt
+      )
+      .pop()?.content;
+  };
+  // A decision moves focus only if the user left it where the decision started.
+  const focusStayed = (origin: Element | null) =>
+    document.activeElement === origin || document.activeElement === document.body;
+  // On touch, focusing the composer opens the soft keyboard, so only a fine pointer gets it.
+  const focusComposer = () => {
+    if (window.matchMedia('(pointer: fine)').matches) {
+      composerRef.current?.focus();
+    }
+  };
+  // The note stays open until the deny lands, so a failed POST keeps what was typed.
+  // A landed deny removes the card, so focus moves to the composer.
+  const submitDeny = async () => {
+    if (!denyNote) {
+      return;
+    }
+    const { approvalId } = denyNote;
+    const origin = document.activeElement;
+    if (await handleApprovalDecision(approvalId, 'deny', denyNote.text.trim() || null)) {
+      setDenyNote((current) => (current?.approvalId === approvalId ? null : current));
+      if (focusStayed(origin)) {
+        focusComposer();
+      }
+    }
+  };
+  const submitApprove = async (approvalId: string) => {
+    const origin = document.activeElement;
+    if ((await handleApprovalDecision(approvalId, 'approve')) && focusStayed(origin)) {
+      refocusApprovalRef.current = approvalId;
+    }
+  };
+  // A card's button takes focus as it mounts. One render later, a claim nobody
+  // took (the button is disabled or the card left the dock) goes to the composer.
+  useEffect(() => {
+    if (refocusApprovalRef.current) {
+      refocusApprovalRef.current = null;
+      focusComposer();
+    }
+  });
+  // Closing the note unmounts the focused input, so focus goes back to Deny.
+  const closeDenyNote = (approvalId: string) => {
+    refocusApprovalRef.current = approvalId;
+    setDenyNote(null);
+  };
 
   const canClear = Boolean(draft.trim() || activeSession || error);
   const runtimeState = currentAgent
@@ -1884,7 +2221,7 @@ const GlobalAgentWidget: React.FC = () => {
                 type="button"
                 className={`tf-agent-widget__meta-pill tf-agent-widget__meta-pill--button ${
                   isActivityDrawerOpen ? 'tf-agent-widget__meta-pill--active' : ''
-                } ${pendingApprovals.length > 0 ? 'tf-agent-widget__meta-pill--attention' : ''}`}
+                }`}
                 onClick={() => toggleDrawer('activity')}
               >
                 Activity{activityCount > 0 ? ` ${activityCount}` : ''}
@@ -1961,16 +2298,14 @@ const GlobalAgentWidget: React.FC = () => {
 
           {isActivityDrawerOpen ? (
             <div className="tf-agent-widget__drawer" aria-label="Activity">
-              {orderedApprovals.length > 0 ? (
+              {resolvedApprovals.length > 0 ? (
                 <div className="tf-agent-widget__drawer-section">
                   <div className="tf-agent-widget__drawer-header">
                     <div className="tf-agent-widget__drawer-title">Approval requests</div>
-                    <div className="tf-agent-widget__drawer-copy">
-                      {pendingApprovals.length > 0 ? `${pendingApprovals.length} pending` : 'Resolved'}
-                    </div>
+                    <div className="tf-agent-widget__drawer-copy">{resolvedApprovals.length} resolved</div>
                   </div>
                   <div className="tf-agent-approval-list">
-                    {orderedApprovals.map((approval) => (
+                    {resolvedApprovals.map((approval) => (
                       <div
                         key={approval.approvalId}
                         className={`tf-agent-approval-card tf-agent-approval-card--${approval.status}`}
@@ -1984,32 +2319,13 @@ const GlobalAgentWidget: React.FC = () => {
                         <div className="tf-agent-approval-card__detail">{approval.reason}</div>
                         <div className="tf-agent-approval-card__actions">
                           <span className="tf-agent-approval-card__capability">{approval.action}</span>
-                          {approval.status === 'pending' ? (
-                            <div className="tf-agent-approval-card__buttons">
-                              <button
-                                type="button"
-                                className="tf-agent-approval-card__button tf-agent-approval-card__button--approve"
-                                onClick={() => void handleApprovalDecision(approval.approvalId, 'approve')}
-                              >
-                                Approve
-                              </button>
-                              <button
-                                type="button"
-                                className="tf-agent-approval-card__button tf-agent-approval-card__button--deny"
-                                onClick={() => void handleApprovalDecision(approval.approvalId, 'deny')}
-                              >
-                                Deny
-                              </button>
-                            </div>
-                          ) : (
-                            <span className="tf-agent-approval-card__hint">
-                              {approval.status === 'approved'
-                                ? 'Resend the request to continue.'
-                                : approval.status === 'consumed'
-                                  ? 'Already used.'
-                                  : 'Request was declined.'}
-                            </span>
-                          )}
+                          <span className="tf-agent-approval-card__hint">
+                            {approval.status === 'approved'
+                              ? 'Resend the request to continue.'
+                              : approval.status === 'consumed'
+                                ? 'Already used.'
+                                : 'Request was declined.'}
+                          </span>
                         </div>
                       </div>
                     ))}
@@ -2037,15 +2353,6 @@ const GlobalAgentWidget: React.FC = () => {
                         <div className="tf-agent-task-card__detail">{formatTaskDetail(task)}</div>
                         <div className="tf-agent-task-card__actions">
                           <span className="tf-agent-task-card__capability">{task.capabilityName}</span>
-                          {!isTerminalTaskStatus(task.status) ? (
-                            <button
-                              type="button"
-                              className="tf-agent-task-card__cancel"
-                              onClick={() => void handleCancelTask(task.taskId)}
-                            >
-                              Cancel
-                            </button>
-                          ) : null}
                         </div>
                       </div>
                     ))}
@@ -2068,29 +2375,6 @@ const GlobalAgentWidget: React.FC = () => {
           {error ? <div className="tf-agent-error-banner">{error}</div> : null}
 
           <div className="tf-agent-chat-shell">
-            {hasActivity && !isActivityDrawerOpen ? (
-              <div className="tf-agent-widget__notice-row">
-                {pendingApprovals.length > 0 ? (
-                  <button
-                    type="button"
-                    className="tf-agent-widget__notice tf-agent-widget__notice--attention"
-                    onClick={() => toggleDrawer('activity')}
-                  >
-                    {pendingApprovals.length} approval{pendingApprovals.length === 1 ? '' : 's'} waiting
-                  </button>
-                ) : null}
-                {visibleTaskCount > 0 ? (
-                  <button
-                    type="button"
-                    className="tf-agent-widget__notice"
-                    onClick={() => toggleDrawer('activity')}
-                  >
-                    {visibleTaskCount} background task{visibleTaskCount === 1 ? '' : 's'} running
-                  </button>
-                ) : null}
-              </div>
-            ) : null}
-
             <div
               ref={transcriptRef}
               className={`tf-agent-transcript tf-agent-transcript--widget ${
@@ -2099,21 +2383,74 @@ const GlobalAgentWidget: React.FC = () => {
                   : 'tf-agent-transcript--idle'
               }`}
             >
-              {visibleMessageEntries.map(({ key, message }) => (
-                <AgentMessageItem key={key} message={message} messageKey={key} />
-              ))}
+              {visibleMessageEntries.map(({ key, message }) => {
+                const turn =
+                  message.role === 'user' ? turnActivities.byUserMessage.get(message.createdAt) : undefined;
+                const answered =
+                  message.role === 'assistant' ? turnActivities.byAnswer.get(message.createdAt) : undefined;
+                const answeredIsLive = answered && answered.key === shownLiveTurn?.key;
+                return (
+                  <React.Fragment key={key}>
+                    <AgentMessageItem message={message} messageKey={key} />
+                    {turnEndingRow(message) ? (
+                      <div className="tf-agent-turn tf-agent-task-notice">{turnEndingRow(message)}</div>
+                    ) : null}
+                    {turn && turn.calls.length > 0 && turn.key !== shownLiveTurn?.key ? (
+                      <TurnActivityGroup
+                        turn={turn}
+                        summary={summarizeTurn(turn)}
+                        openKeys={openActivityKeysRef.current}
+                      />
+                    ) : null}
+                    {answered && !answeredIsLive ? (
+                      <TurnFooter
+                        text={formatTurnFooter(
+                          answered,
+                          sessionModelLabel,
+                          answered.answeredAt === turnActivities.lastAnswerAt ? turnActivities.sessionTokens : null
+                        )}
+                        sources={(activeSession?.artifacts || []).filter((artifact) =>
+                          answered.calls.some((call) => call.artifactIds.includes(artifact.artifactId))
+                        )}
+                      />
+                    ) : null}
+                    {(taskNoticesByMessage.get(key) || []).map((task) => (
+                      <div
+                        key={task.taskId}
+                        className={`tf-agent-turn tf-agent-task-notice tf-agent-task-notice--${task.status}`}
+                      >
+                        {TASK_END_WORD[task.status]} · {formatTaskLabel(task)}
+                        {task.status === 'failed' && task.error ? ` · ${task.error}` : ''}
+                      </div>
+                    ))}
+                  </React.Fragment>
+                );
+              })}
+              {turnDeath ? <div className="tf-agent-turn-divider">{turnDeath}</div> : null}
               {sendStatus ? (
                 <div
                   className={`tf-agent-message tf-agent-message--assistant tf-agent-message--status tf-agent-message--status-${sendStatus.kind}`}
                 >
-                  <div className="tf-agent-message__status">
-                    {sendStatus.kind === 'working' ? (
-                      <span className="tf-agent-message__status-spinner" aria-hidden="true" />
-                    ) : null}
-                    <span className="tf-agent-message__status-copy">{sendStatus.content}</span>
-                  </div>
+                  {shownLiveTurn && shownLiveTurn.calls.length > 0 ? (
+                    <TurnActivityGroup
+                      turn={shownLiveTurn}
+                      summary={sendStatus.content}
+                      live
+                      openKeys={openActivityKeysRef.current}
+                    />
+                  ) : (
+                    <div className="tf-agent-message__status">
+                      {sendStatus.kind === 'working' ? (
+                        <span className="tf-agent-message__status-spinner" aria-hidden="true" />
+                      ) : null}
+                      <span className="tf-agent-message__status-copy">{sendStatus.content}</span>
+                    </div>
+                  )}
                 </div>
               ) : null}
+              <span className="tf-agent-sr-only" aria-live="polite">
+                {shownLiveTurn?.calls[shownLiveTurn.calls.length - 1]?.label ?? ''}
+              </span>
               {visibleMessageEntries.length === 0 && !sendStatus && loadingCatalog ? (
                 <div className="tf-agent-widget__placeholder">
                   <div className="tf-agent-widget__placeholder-spinner" aria-hidden="true" />
@@ -2168,11 +2505,132 @@ const GlobalAgentWidget: React.FC = () => {
               ) : null}
             </div>
 
+            {dockApprovals.length > 0 ? (
+              <div className="tf-agent-approval-list tf-agent-approval-dock" role="region" aria-label="Approval requests">
+                {dockApprovals.map((approval) => {
+                  const request = approval.status === 'approved' ? requestForApproval(approval) : undefined;
+                  const noting =
+                    approval.status === 'pending' && denyNote?.approvalId === approval.approvalId ? denyNote : null;
+                  const deciding = decidingApprovalIds.has(approval.approvalId);
+                  return (
+                    <div
+                      key={approval.approvalId}
+                      className={`tf-agent-approval-card tf-agent-approval-card--${approval.status}`}
+                    >
+                      <div className="tf-agent-approval-card__meta">
+                        <div className="tf-agent-approval-card__label">{formatApprovalLabel(approval)}</div>
+                        <span className={`tf-agent-approval-badge tf-agent-approval-badge--${approval.status}`}>
+                          {approval.status}
+                        </span>
+                      </div>
+                      <div className="tf-agent-approval-card__detail">{approval.reason}</div>
+                      {noting ? (
+                        <input
+                          type="text"
+                          className="tf-agent-approval-card__note"
+                          value={noting.text}
+                          onChange={(event) => setDenyNote({ approvalId: approval.approvalId, text: event.target.value })}
+                          onKeyDown={(event) => {
+                            if (event.key === 'Enter' && !event.nativeEvent.isComposing) {
+                              void submitDeny();
+                            } else if (event.key === 'Escape') {
+                              // Keep the widget's window-level Escape from closing the panel.
+                              event.stopPropagation();
+                              closeDenyNote(approval.approvalId);
+                            }
+                          }}
+                          placeholder="Optional note for the agent"
+                          aria-label="Deny note"
+                          autoFocus
+                        />
+                      ) : null}
+                      <div className="tf-agent-approval-card__actions">
+                        <span className="tf-agent-approval-card__capability">{approval.action}</span>
+                        <div className="tf-agent-approval-card__buttons">
+                          {approval.status === 'approved' ? (
+                            <button
+                              type="button"
+                              className="tf-agent-approval-card__button tf-agent-approval-card__button--approve"
+                              onClick={() => request && void handleSend(request, false)}
+                              disabled={!request || !chatAvailable || sending || creatingSession || loadingCatalog}
+                              ref={(node) => {
+                                if (node && !node.disabled && refocusApprovalRef.current === approval.approvalId) {
+                                  refocusApprovalRef.current = null;
+                                  node.focus();
+                                }
+                              }}
+                            >
+                              Resend
+                            </button>
+                          ) : noting ? (
+                            <>
+                              <button
+                                type="button"
+                                className="tf-agent-approval-card__button tf-agent-approval-card__button--deny"
+                                onClick={() => void submitDeny()}
+                                disabled={deciding}
+                              >
+                                Deny
+                              </button>
+                              <button
+                                type="button"
+                                className="tf-agent-approval-card__button"
+                                onClick={() => closeDenyNote(approval.approvalId)}
+                              >
+                                Cancel
+                              </button>
+                            </>
+                          ) : (
+                            <>
+                              <button
+                                type="button"
+                                className="tf-agent-approval-card__button tf-agent-approval-card__button--approve"
+                                onClick={() => void submitApprove(approval.approvalId)}
+                                disabled={deciding}
+                              >
+                                Approve
+                              </button>
+                              <button
+                                type="button"
+                                className="tf-agent-approval-card__button tf-agent-approval-card__button--deny"
+                                onClick={() => setDenyNote({ approvalId: approval.approvalId, text: '' })}
+                                disabled={deciding}
+                                ref={(node) => {
+                                  if (node && refocusApprovalRef.current === approval.approvalId) {
+                                    refocusApprovalRef.current = null;
+                                    node.focus();
+                                  }
+                                }}
+                              >
+                                Deny
+                              </button>
+                            </>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : null}
+
+            {visibleTaskCount > 0 ? (
+              <BackgroundTaskCapsule
+                tasks={activeTasks}
+                acceptedLabel={
+                  recentTaskResults.find((result) => result.task && !isTerminalTaskStatus(result.task.status))?.task
+                    ?.description || null
+                }
+                onCancel={(taskId) => void handleCancelTask(taskId)}
+              />
+            ) : null}
+
             <div className="tf-agent-composer">
               <textarea
                 value={draft}
                 onChange={(event) => setDraft(event.target.value)}
                 onKeyDown={handleComposerKeyDown}
+                ref={composerRef}
                 placeholder={
                   chatAvailable
                     ? 'Ask about a stock, portfolio, DCF, chart, or macro setup.'
@@ -2225,14 +2683,25 @@ const GlobalAgentWidget: React.FC = () => {
                   >
                     Clear
                   </button>
-                  <button
-                    type="button"
-                    className="tf-agent-primary"
-                    onClick={() => void handleSend(draft)}
-                    disabled={!chatAvailable || !draft.trim() || sending || creatingSession || loadingCatalog}
-                  >
-                    {sending ? 'Running...' : 'Send'}
-                  </button>
+                  {sending ? (
+                    <button
+                      type="button"
+                      className="tf-agent-primary"
+                      onClick={() => void handleStop()}
+                      disabled={stopping || !runningSessionId}
+                    >
+                      {stopping ? 'Stopping…' : 'Stop'}
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      className="tf-agent-primary"
+                      onClick={() => void handleSend(draft)}
+                      disabled={!chatAvailable || !draft.trim() || creatingSession || loadingCatalog}
+                    >
+                      Send
+                    </button>
+                  )}
                 </div>
               </div>
             </div>

@@ -28,7 +28,8 @@ It says what the runtime is made of and where each part lives.
 - a registry of hosted agent definitions
 - a runtime controller that enforces each agent's capability allowlist
 - a tool adapter that turns capabilities into model tools
-- a provider-agnostic loop, with OpenAI and Gemini providers
+- a provider-agnostic loop, with OpenAI, Gemini and Anthropic providers
+- a fixed list of turn hooks that can pin context to each model request
 - Python, CLI, HTTP, notebook, and browser widget adapters over one runtime
 - hidden persona subagents (Buffett, Marks, Druckenmiller) that the main agent
   reaches through `consult_<persona>` tool calls; see
@@ -76,8 +77,8 @@ Behavior that callers rely on:
   read, delete, task, and approval routes
 - deleting a public session also deletes its hidden guru children
 
-Tasks, approvals, audit, and view context live in the session store, not in
-transcripts.
+Tasks, approvals, audit, view context, pending completions, task checkpoints
+and stop requests live in the session store, not in transcripts.
 
 ## Where things live
 
@@ -87,6 +88,10 @@ transcripts.
 | `agent/contracts/definitions.py` | hosted agent definitions and allowlists |
 | `agent/runtime/hosted.py` | session lifecycle, policy enforcement, task dispatch |
 | `agent/runtime/loop.py` | the hosted loop |
+| `agent/runtime/hooks.py` | turn hooks and pinned context |
+| `agent/runtime/tool_batch.py` | one reply's batch of tool calls, for the loop and the persona worker |
+| `agent/runtime/tasks.py` | task records and `TerraFinTaskContext` |
+| `agent/runtime/inflight.py` | the per-session turn lock |
 | `agent/contracts/conversation.py` | internal message and block protocol |
 | `agent/guru/` | persona routing, hidden guru runs, memo synthesis |
 | `agent/tools/` | tool definitions, tool execution, tool results |
@@ -94,7 +99,7 @@ transcripts.
 | `agent/runtime/context_budget.py` | prompt budget and compaction |
 | `agent/runtime/recovery.py` | per-turn recovery policy |
 | `agent/storage/transcript_store.py` | transcripts and the session index |
-| `agent/storage/session_store.py` | tasks, approvals, audit, view context |
+| `agent/storage/session_store.py` | tasks, approvals, audit, view context, pending completions, task checkpoints, stop requests |
 | `agent/models/` | provider registry and provider adapters |
 | `agent/service/client.py` | Python client (`TerraFinAgentClient`) |
 | `agent/cli/` | CLI (`terrafin-agent`) |
@@ -104,9 +109,34 @@ transcripts.
 ## Endpoints
 
 Runtime endpoints live under `/agent/api/runtime/*`: agents, sessions and their
-messages, tasks, approvals, and view contexts. The route list is in
+messages, stop, tasks, approvals, and view contexts. The route list is in
 [api-reference.md](../api-reference.md), and `/openapi.json` on a running server
 is the authority.
+
+- `POST /agent/api/runtime/sessions/{id}/interrupt` stops the running turn.
+  It answers `interruptRequested: false` when no turn is running.
+- `POST /agent/api/runtime/tasks/{id}/cancel` cancels a background task.
+
+### What the widget reads from a session
+
+`GET /agent/api/runtime/sessions/{id}` returns session metadata the widget
+reads:
+
+| Key | What it holds |
+|---|---|
+| `turnInFlight` | A turn is running on this session |
+| `turnUnfinished` | Why the last turn died before answering, or null |
+| `runningToolCalls` | While a turn runs: its calls with no result yet, oldest first, each with `callId`, `toolName`, `startedAt` and `ticker` |
+
+Each message carries metadata the widget reads:
+
+| Key | On | What it holds |
+|---|---|---|
+| `turnEnding` | the final reply | `step_limit`, `length` or `interrupted`, when the turn did not end on its own |
+| `turnTokenUsage` | the final reply | the token usage of every model call in the turn |
+
+Each reply also carries `tokenUsage`, that call's usage and the prompt level.
+The widget does not show it.
 
 The widget, notebook helpers, CLI, and Python client all use this one contract.
 Only public agents appear in the agent catalog, and the session-create route
@@ -129,8 +159,35 @@ built from it.
 
 A capability marked backgroundable can also be offered to the model as
 `start_<capability>_task`. The model starts the task and keeps talking. The
-task runs on a worker under a lease, and a long run renews its lease when it
-reports progress. Callers read task state through the task routes.
+task runs on a worker under a lease. The dispatcher renews the lease of every
+task it runs, and a handler renews it with `task.heartbeat(stage)`. A handler
+also reads a cancel with `task.cancelled()` and keeps resume state with
+`task.save_checkpoint(...)`. Callers read task state through the task routes.
+Details: [The agent loop](../harness/loop.md#background-tasks).
+
+## Chat panel
+
+The widget is `GlobalAgentWidget.tsx`, listed under Where things live.
+
+- **Turn activity.** Each answered turn has a folded row, "Used N tools", that
+  opens to each call's inputs, returned keys and raw output. A failed call
+  shows FAILED with its error line even when folded. While a turn runs, the
+  row names the call running now, from `runningToolCalls`.
+- **Reply footer.** Time taken, tool count, the turn's tokens from
+  `turnTokenUsage`, the session's tokens, and the model.
+- **Turn endings.** A reply with `turnEnding` gets a line under it. The
+  stopped reply, which already says it was stopped, gets none.
+- **Stop.** While a reply is being written, Send becomes Stop. Stop posts to
+  the interrupt route and reads "Stopping…" until the turn returns.
+- **Approval dock.** Pending approvals sit above the composer with Approve and
+  Deny. Deny takes an optional note. An approved request gets a Resend button
+  that sends the request again.
+- **Task capsule.** Running background tasks sit above the composer, one line
+  each, with the stage and the elapsed time. Cancel needs a second press within
+  3 seconds.
+- **Task notices.** A task that ended gets one line in the transcript, after
+  the last message sent before it ended: Finished, Failed with its error, or
+  Cancelled.
 
 ## Regression surfaces
 

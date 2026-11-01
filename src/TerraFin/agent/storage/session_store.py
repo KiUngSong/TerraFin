@@ -1,18 +1,24 @@
 import json
 import sqlite3
-from collections.abc import Mapping
+from collections.abc import Callable, Collection
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from threading import RLock
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, Literal, Mapping
 from uuid import uuid4
 
 from ..contracts.conversation_state import RUNTIME_MODEL_METADATA_KEY
 from ..runtime.artifacts import TerraFinArtifact, TerraFinCapabilityCall
 from ..runtime.context import TerraFinAgentContext, create_agent_context
 from ..runtime.session import TerraFinAgentSession
-from ..runtime.tasks import TerraFinTaskRecord, TerraFinTaskRegistry
+from ..runtime.tasks import (
+    TASK_MAX_ATTEMPTS,
+    TerraFinTaskRecord,
+    TerraFinTaskRegistry,
+    task_lease_expired,
+    task_restart_limit_reached,
+)
 
 
 if TYPE_CHECKING:
@@ -28,6 +34,17 @@ ApprovalStatus = Literal["pending", "approved", "denied", "consumed"]
 
 def _utc_now() -> datetime:
     return datetime.now(UTC)
+
+
+def _row_updated_at(previous: Any) -> datetime:
+    # Stamp a row write from the clock read under the write lock, and never at
+    # or before the row's stored stamp: peers reload a cached record only when
+    # the stored stamp is newer than theirs.
+    now = _utc_now()
+    stored = _parse_datetime(str(previous)) if previous is not None else None
+    if stored is not None and now <= stored:
+        return stored + timedelta(microseconds=1)
+    return now
 
 
 def _isoformat(value: datetime | None) -> str | None:
@@ -141,8 +158,7 @@ class HostedSessionStore:
         metas: list[HostedSessionLightMeta] = []
         for record in self.list():
             hidden = bool(
-                record.context.session.metadata.get("hiddenInternal")
-                or record.metadata.get("hiddenInternal")
+                record.context.session.metadata.get("hiddenInternal") or record.metadata.get("hiddenInternal")
             )
             pending = sum(
                 1
@@ -243,13 +259,42 @@ class HostedSessionStore:
         *,
         worker_id: str,
         lease_seconds: int,
+        task_ids: Collection[str] | None = None,
     ) -> tuple[TerraFinHostedSessionRecord, TerraFinTaskRecord] | None:
+        # `task_ids` limits the claim to those tasks; None claims any task.
+        raise NotImplementedError
+
+    def list_restart_limited_tasks(
+        self,
+        *,
+        task_ids: Collection[str] | None = None,
+    ) -> tuple[tuple[str, str], ...]:
+        # (session_id, task_id) of each task that reached the restart limit and
+        # is no longer claimable. `task_ids` filters as in claim_pending_task.
+        raise NotImplementedError
+
+    def load_task_checkpoint(self, session_id: str, task_id: str) -> dict[str, Any] | None:
+        raise NotImplementedError
+
+    def save_task_checkpoint(self, session_id: str, task_id: str, *, payload: dict[str, Any]) -> None:
+        # Kept apart from the task record, so a progress write or a re-claim
+        # never replaces it.
+        raise NotImplementedError
+
+    def update_task(
+        self,
+        session_id: str,
+        update: Callable[[TerraFinTaskRegistry], TerraFinTaskRecord],
+        *,
+        activity: TerraFinAgentSession | None = None,
+    ) -> TerraFinTaskRecord:
+        # Applies `update` to the session's current stored tasks and writes back
+        # only the task it returns, plus any focus, artifacts and capability calls
+        # recorded on `activity`. Use this instead of persist() for a record held
+        # across a long call, so the write cannot revert concurrent changes.
         raise NotImplementedError
 
     def persist(self, record: TerraFinHostedSessionRecord) -> TerraFinHostedSessionRecord:
-        raise NotImplementedError
-
-    def delete(self, session_id: str) -> TerraFinHostedSessionRecord:
         raise NotImplementedError
 
     def append_pending_completion(
@@ -266,7 +311,20 @@ class HostedSessionStore:
     def clear_pending_completions(self, session_id: str, *, task_ids: tuple[str, ...]) -> None:
         raise NotImplementedError
 
+    def request_turn_interrupt(self, session_id: str) -> None:
+        # Kept apart from the session payload and read fresh, so a turn running
+        # in another worker sees it and a whole-record persist() cannot drop it.
+        raise NotImplementedError
+
+    def turn_interrupt_requested_at(self, session_id: str) -> datetime | None:
+        raise NotImplementedError
+
+    def delete(self, session_id: str) -> TerraFinHostedSessionRecord:
+        raise NotImplementedError
+
     def cleanup_expired(self, *, session_ttl_seconds: int) -> tuple[TerraFinHostedSessionRecord, ...]:
+        # Drops idle sessions from memory and returns them. A durable store keeps
+        # their rows and pending-completion markers.
         raise NotImplementedError
 
 
@@ -363,11 +421,34 @@ def _marker_task_id(marker: Mapping[str, Any]) -> str:
 
 
 def _task_is_claimable(task: TerraFinTaskRecord, *, now: datetime) -> bool:
-    if task.status == "pending":
-        return True
-    if task.status != "running":
+    if task.attempt_count >= TASK_MAX_ATTEMPTS:
         return False
-    return task.lease_expires_at is not None and task.lease_expires_at <= now
+    return task.status == "pending" or task_lease_expired(task, now=now)
+
+
+def _merge_activity(session: TerraFinAgentSession, activity: TerraFinAgentSession | None) -> None:
+    if activity is None:
+        return
+    session.record_focus(*activity.focus_items)
+    session.artifacts.extend(activity.artifacts)
+    session.capability_calls.extend(activity.capability_calls)
+
+
+def _merge_activity_payload(payload: dict[str, Any], activity: TerraFinAgentSession) -> None:
+    session = TerraFinAgentSession(
+        session_id=str(payload["sessionId"]),
+        focus_items=[str(item) for item in payload.get("focusItems", [])],
+    )
+    session.record_focus(*activity.focus_items)
+    payload["focusItems"] = list(session.focus_items)
+    payload["artifacts"] = [
+        *payload.get("artifacts", []),
+        *(_serialize_artifact(artifact) for artifact in activity.artifacts),
+    ]
+    payload["capabilityCalls"] = [
+        *payload.get("capabilityCalls", []),
+        *(_serialize_capability_call(call) for call in activity.capability_calls),
+    ]
 
 
 def _serialize_audit(event: TerraFinHostedPermissionEvent) -> dict[str, Any]:
@@ -536,6 +617,8 @@ class InMemoryHostedSessionStore(HostedSessionStore):
         self._records: dict[str, TerraFinHostedSessionRecord] = {}
         self._view_contexts: dict[str, TerraFinHostedViewContextRecord] = {}
         self._pending_completions: dict[str, list[dict[str, Any]]] = {}
+        self._checkpoints: dict[str, dict[str, dict[str, Any]]] = {}
+        self._turn_interrupts: dict[str, datetime] = {}
         self._lock = RLock()
 
     def create(self, record: TerraFinHostedSessionRecord) -> TerraFinHostedSessionRecord:
@@ -711,12 +794,15 @@ class InMemoryHostedSessionStore(HostedSessionStore):
         *,
         worker_id: str,
         lease_seconds: int,
+        task_ids: Collection[str] | None = None,
     ) -> tuple[TerraFinHostedSessionRecord, TerraFinTaskRecord] | None:
         with self._lock:
             now = _utc_now()
             lease_expires_at = now + timedelta(seconds=max(lease_seconds, 1))
             for record in self._records.values():
                 for task in record.context.task_registry.list_for_session(record.session_id):
+                    if task_ids is not None and task.task_id not in task_ids:
+                        continue
                     if not _task_is_claimable(task, now=now):
                         continue
                     claimed = record.context.task_registry.claim(
@@ -728,6 +814,43 @@ class InMemoryHostedSessionStore(HostedSessionStore):
                     record.touch()
                     return record, claimed
         return None
+
+    def list_restart_limited_tasks(
+        self,
+        *,
+        task_ids: Collection[str] | None = None,
+    ) -> tuple[tuple[str, str], ...]:
+        with self._lock:
+            now = _utc_now()
+            return tuple(
+                (record.session_id, task.task_id)
+                for record in self._records.values()
+                for task in record.context.task_registry.list_for_session(record.session_id)
+                if (task_ids is None or task.task_id in task_ids) and task_restart_limit_reached(task, now=now)
+            )
+
+    def load_task_checkpoint(self, session_id: str, task_id: str) -> dict[str, Any] | None:
+        with self._lock:
+            payload = self._checkpoints.get(session_id, {}).get(task_id)
+            return None if payload is None else dict(payload)
+
+    def save_task_checkpoint(self, session_id: str, task_id: str, *, payload: dict[str, Any]) -> None:
+        with self._lock:
+            self._checkpoints.setdefault(session_id, {})[task_id] = dict(payload)
+
+    def update_task(
+        self,
+        session_id: str,
+        update: Callable[[TerraFinTaskRegistry], TerraFinTaskRecord],
+        *,
+        activity: TerraFinAgentSession | None = None,
+    ) -> TerraFinTaskRecord:
+        with self._lock:
+            record = self._records[session_id]
+            task = update(record.context.task_registry)
+            _merge_activity(record.context.session, activity)
+            record.touch()
+            return task
 
     def persist(self, record: TerraFinHostedSessionRecord) -> TerraFinHostedSessionRecord:
         with self._lock:
@@ -768,9 +891,21 @@ class InMemoryHostedSessionStore(HostedSessionStore):
             else:
                 self._pending_completions.pop(session_id, None)
 
+    def request_turn_interrupt(self, session_id: str) -> None:
+        with self._lock:
+            if session_id not in self._records:
+                raise KeyError(session_id)
+            self._turn_interrupts[session_id] = _utc_now()
+
+    def turn_interrupt_requested_at(self, session_id: str) -> datetime | None:
+        with self._lock:
+            return self._turn_interrupts.get(session_id)
+
     def delete(self, session_id: str) -> TerraFinHostedSessionRecord:
         with self._lock:
             self._pending_completions.pop(session_id, None)
+            self._checkpoints.pop(session_id, None)
+            self._turn_interrupts.pop(session_id, None)
             return self._records.pop(session_id)
 
     def cleanup_expired(self, *, session_ttl_seconds: int) -> tuple[TerraFinHostedSessionRecord, ...]:
@@ -787,6 +922,8 @@ class InMemoryHostedSessionStore(HostedSessionStore):
                 removed.append(record)
                 del self._records[session_id]
                 self._pending_completions.pop(session_id, None)
+                self._checkpoints.pop(session_id, None)
+                self._turn_interrupts.pop(session_id, None)
         return tuple(removed)
 
 
@@ -857,6 +994,25 @@ class SQLiteHostedSessionStore(HostedSessionStore):
                     payload TEXT NOT NULL,
                     created_at TEXT NOT NULL,
                     PRIMARY KEY (session_id, task_id)
+                )
+                """
+            )
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS task_checkpoints (
+                    session_id TEXT NOT NULL,
+                    task_id TEXT NOT NULL,
+                    payload_json TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    PRIMARY KEY (session_id, task_id)
+                )
+                """
+            )
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS hosted_turn_interrupts (
+                    session_id TEXT PRIMARY KEY,
+                    requested_at TEXT NOT NULL
                 )
                 """
             )
@@ -971,14 +1127,27 @@ class SQLiteHostedSessionStore(HostedSessionStore):
             return cached
 
     def list(self) -> tuple[TerraFinHostedSessionRecord, ...]:
+        # A cached record that is as new as its row is reused, so listing never
+        # swaps out an object another caller is still holding and writing to.
         with self._lock:
             with self._connect() as connection:
-                rows = connection.execute("SELECT payload FROM hosted_sessions ORDER BY updated_at DESC").fetchall()
-            records = [
-                _deserialize_record(json.loads(str(row[0])), service=self._service, registry=self._registry)
-                for row in rows
-            ]
-            self._cache = {record.session_id: record for record in records}
+                rows = connection.execute(
+                    "SELECT session_id, payload, updated_at FROM hosted_sessions ORDER BY updated_at DESC"
+                ).fetchall()
+            records: list[TerraFinHostedSessionRecord] = []
+            cache: dict[str, TerraFinHostedSessionRecord] = {}
+            for session_id, payload_json, updated_at in rows:
+                cached = self._cache.get(str(session_id))
+                stored_updated_at = _parse_datetime(str(updated_at))
+                if cached is not None and stored_updated_at is not None and stored_updated_at <= cached.updated_at:
+                    record = cached
+                else:
+                    record = _deserialize_record(
+                        json.loads(str(payload_json)), service=self._service, registry=self._registry
+                    )
+                cache[record.session_id] = record
+                records.append(record)
+            self._cache = cache
             return tuple(records)
 
     def list_light_metadata(self) -> tuple[HostedSessionLightMeta, ...]:
@@ -986,18 +1155,14 @@ class SQLiteHostedSessionStore(HostedSessionStore):
         # agent context per session (which is the dominant cost of `list()`).
         with self._lock:
             with self._connect() as connection:
-                rows = connection.execute(
-                    "SELECT payload FROM hosted_sessions ORDER BY updated_at DESC"
-                ).fetchall()
+                rows = connection.execute("SELECT payload FROM hosted_sessions ORDER BY updated_at DESC").fetchall()
         metas: list[HostedSessionLightMeta] = []
         for row in rows:
             payload = json.loads(str(row[0]))
             session_meta = dict(payload.get("sessionMetadata", payload.get("metadata", {})))
             record_meta = dict(payload.get("metadata", {}))
             hidden = bool(session_meta.get("hiddenInternal") or record_meta.get("hiddenInternal"))
-            runtime_model = session_meta.get(RUNTIME_MODEL_METADATA_KEY) or record_meta.get(
-                RUNTIME_MODEL_METADATA_KEY
-            )
+            runtime_model = session_meta.get(RUNTIME_MODEL_METADATA_KEY) or record_meta.get(RUNTIME_MODEL_METADATA_KEY)
             pending = sum(
                 1
                 for task in payload.get("tasks", [])
@@ -1185,20 +1350,32 @@ class SQLiteHostedSessionStore(HostedSessionStore):
         *,
         worker_id: str,
         lease_seconds: int,
+        task_ids: Collection[str] | None = None,
     ) -> tuple[TerraFinHostedSessionRecord, TerraFinTaskRecord] | None:
         with self._lock:
-            now = _utc_now()
-            lease_expires_at = now + timedelta(seconds=max(lease_seconds, 1))
             with self._connect() as connection:
                 connection.execute("BEGIN IMMEDIATE")
+                now = _utc_now()
+                lease_expires_at = now + timedelta(seconds=max(lease_seconds, 1))
+                # Only rows holding a pending or running task can yield a claim, so only
+                # those are loaded into Python. SQLite still scans every row's payload.
                 rows = connection.execute(
-                    "SELECT session_id, payload FROM hosted_sessions ORDER BY updated_at ASC"
+                    """
+                    SELECT session_id, payload, updated_at FROM hosted_sessions
+                    WHERE EXISTS (
+                        SELECT 1 FROM json_each(payload, '$.tasks')
+                        WHERE json_extract(value, '$.status') IN ('pending', 'running')
+                    )
+                    ORDER BY updated_at ASC
+                    """
                 ).fetchall()
-                for session_id, payload_json in rows:
+                for session_id, payload_json, previous_updated_at in rows:
                     payload = json.loads(str(payload_json))
                     tasks = list(payload.get("tasks", []))
                     for index, task_payload in enumerate(tasks):
                         task = _deserialize_task(task_payload)
+                        if task_ids is not None and task.task_id not in task_ids:
+                            continue
                         if not _task_is_claimable(task, now=now):
                             continue
                         updated_task = replace(
@@ -1212,7 +1389,8 @@ class SQLiteHostedSessionStore(HostedSessionStore):
                         )
                         tasks[index] = _serialize_task(updated_task)
                         payload["tasks"] = tasks
-                        payload["updatedAt"] = now.isoformat()
+                        row_updated_at = _row_updated_at(previous_updated_at)
+                        payload["updatedAt"] = row_updated_at.isoformat()
                         payload["lastAccessedAt"] = payload.get("lastAccessedAt") or now.isoformat()
                         connection.execute(
                             """
@@ -1227,10 +1405,143 @@ class SQLiteHostedSessionStore(HostedSessionStore):
                                 str(session_id),
                             ),
                         )
+                        cached = self._patch_cached_task(
+                            str(session_id),
+                            updated_task,
+                            previous_updated_at=_parse_datetime(str(previous_updated_at)),
+                            updated_at=row_updated_at,
+                        )
+                        if cached is not None:
+                            return cached, updated_task
                         record = _deserialize_record(payload, service=self._service, registry=self._registry)
                         self._cache[record.session_id] = record
                         return record, record.context.task_registry.get(updated_task.task_id)
         return None
+
+    def list_restart_limited_tasks(
+        self,
+        *,
+        task_ids: Collection[str] | None = None,
+    ) -> tuple[tuple[str, str], ...]:
+        with self._lock:
+            with self._connect() as connection:
+                rows = connection.execute(
+                    """
+                    SELECT session_id, payload FROM hosted_sessions
+                    WHERE EXISTS (
+                        SELECT 1 FROM json_each(payload, '$.tasks')
+                        WHERE json_extract(value, '$.status') = 'running'
+                        AND json_extract(value, '$.attemptCount') >= ?
+                    )
+                    """,
+                    (TASK_MAX_ATTEMPTS,),
+                ).fetchall()
+        now = _utc_now()
+        found: list[tuple[str, str]] = []
+        for session_id, payload_json in rows:
+            for task_payload in json.loads(str(payload_json)).get("tasks", []):
+                task = _deserialize_task(task_payload)
+                if task_ids is not None and task.task_id not in task_ids:
+                    continue
+                if task_restart_limit_reached(task, now=now):
+                    found.append((str(session_id), task.task_id))
+        return tuple(found)
+
+    def load_task_checkpoint(self, session_id: str, task_id: str) -> dict[str, Any] | None:
+        with self._lock:
+            with self._connect() as connection:
+                row = connection.execute(
+                    "SELECT payload_json FROM task_checkpoints WHERE session_id = ? AND task_id = ?",
+                    (session_id, task_id),
+                ).fetchone()
+        return None if row is None else json.loads(str(row[0]))
+
+    def save_task_checkpoint(self, session_id: str, task_id: str, *, payload: dict[str, Any]) -> None:
+        with self._lock:
+            with self._connect() as connection:
+                connection.execute(
+                    """
+                    INSERT INTO task_checkpoints(session_id, task_id, payload_json, updated_at)
+                    VALUES (?, ?, ?, ?)
+                    ON CONFLICT(session_id, task_id) DO UPDATE SET
+                        payload_json=excluded.payload_json,
+                        updated_at=excluded.updated_at
+                    """,
+                    (
+                        session_id,
+                        task_id,
+                        json.dumps(payload, ensure_ascii=False, separators=(",", ":")),
+                        _utc_now().isoformat(),
+                    ),
+                )
+
+    def update_task(
+        self,
+        session_id: str,
+        update: Callable[[TerraFinTaskRegistry], TerraFinTaskRecord],
+        *,
+        activity: TerraFinAgentSession | None = None,
+    ) -> TerraFinTaskRecord:
+        with self._lock:
+            with self._connect() as connection:
+                connection.execute("BEGIN IMMEDIATE")
+                row = connection.execute(
+                    "SELECT payload, updated_at FROM hosted_sessions WHERE session_id = ?",
+                    (session_id,),
+                ).fetchone()
+                if row is None:
+                    raise KeyError(session_id)
+                payload = json.loads(str(row[0]))
+                tasks = TerraFinTaskRegistry()
+                for task_payload in payload.get("tasks", []):
+                    task = _deserialize_task(task_payload)
+                    tasks._tasks[task.task_id] = task
+                updated_task = update(tasks)
+                payload["tasks"] = [_serialize_task(task) for task in tasks.list()]
+                if activity is not None:
+                    _merge_activity_payload(payload, activity)
+                now = _row_updated_at(row[1])
+                payload["updatedAt"] = now.isoformat()
+                connection.execute(
+                    "UPDATE hosted_sessions SET payload = ?, updated_at = ? WHERE session_id = ?",
+                    (
+                        json.dumps(payload, ensure_ascii=False, separators=(",", ":")),
+                        payload["updatedAt"],
+                        session_id,
+                    ),
+                )
+            self._patch_cached_task(
+                session_id,
+                updated_task,
+                previous_updated_at=_parse_datetime(str(row[1])),
+                updated_at=now,
+                activity=activity,
+            )
+            return updated_task
+
+    def _patch_cached_task(
+        self,
+        session_id: str,
+        task: TerraFinTaskRecord,
+        *,
+        previous_updated_at: datetime | None,
+        updated_at: datetime,
+        activity: TerraFinAgentSession | None = None,
+    ) -> TerraFinHostedSessionRecord | None:
+        # Patch the cached record in place rather than replacing it: a caller
+        # holding that object keeps its own unsaved changes and sees this write,
+        # so its next persist() carries the task forward instead of reverting it.
+        # The cache stays current only if no other writer touched the row since.
+        cached = self._cache.get(session_id)
+        if cached is None:
+            return None
+        registry = cached.context.task_registry
+        with registry._lock:
+            registry._tasks[task.task_id] = task
+        _merge_activity(cached.context.session, activity)
+        if previous_updated_at is not None and previous_updated_at <= cached.updated_at:
+            cached.updated_at = updated_at
+        return cached
 
     def persist(self, record: TerraFinHostedSessionRecord) -> TerraFinHostedSessionRecord:
         with self._lock:
@@ -1293,25 +1604,57 @@ class SQLiteHostedSessionStore(HostedSessionStore):
                     (session_id, *task_ids),
                 )
 
+    def request_turn_interrupt(self, session_id: str) -> None:
+        with self._lock:
+            with self._connect() as connection:
+                connection.execute("BEGIN IMMEDIATE")
+                exists = connection.execute(
+                    "SELECT 1 FROM hosted_sessions WHERE session_id = ?",
+                    (session_id,),
+                ).fetchone()
+                if exists is None:
+                    raise KeyError(session_id)
+                connection.execute(
+                    """
+                    INSERT INTO hosted_turn_interrupts(session_id, requested_at)
+                    VALUES (?, ?)
+                    ON CONFLICT(session_id) DO UPDATE SET requested_at=excluded.requested_at
+                    """,
+                    (session_id, _utc_now().isoformat()),
+                )
+
+    def turn_interrupt_requested_at(self, session_id: str) -> datetime | None:
+        with self._lock:
+            with self._connect() as connection:
+                row = connection.execute(
+                    "SELECT requested_at FROM hosted_turn_interrupts WHERE session_id = ?",
+                    (session_id,),
+                ).fetchone()
+        return None if row is None else datetime.fromisoformat(str(row[0]))
+
     def delete(self, session_id: str) -> TerraFinHostedSessionRecord:
         with self._lock:
             record = self.get(session_id)
             with self._connect() as connection:
                 connection.execute("DELETE FROM hosted_sessions WHERE session_id = ?", (session_id,))
                 connection.execute("DELETE FROM hosted_pending_completions WHERE session_id = ?", (session_id,))
+                connection.execute("DELETE FROM task_checkpoints WHERE session_id = ?", (session_id,))
+                connection.execute("DELETE FROM hosted_turn_interrupts WHERE session_id = ?", (session_id,))
             self._cache.pop(session_id, None)
             return record
 
     def cleanup_expired(self, *, session_ttl_seconds: int) -> tuple[TerraFinHostedSessionRecord, ...]:
         if session_ttl_seconds <= 0:
             return ()
+        # Expiry only evicts the cached record. The row, its transcript link and
+        # its pending-completion markers stay, and the next get() reloads it.
         cutoff = _utc_now() - timedelta(seconds=session_ttl_seconds)
         removed: list[TerraFinHostedSessionRecord] = []
         with self._lock:
-            for record in list(self.list()):
+            for session_id, record in list(self._cache.items()):
                 if record.last_accessed_at >= cutoff:
                     continue
                 if record.context.task_registry.has_active_tasks():
                     continue
-                removed.append(self.delete(record.session_id))
+                removed.append(self._cache.pop(session_id))
         return tuple(removed)

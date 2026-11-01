@@ -1,18 +1,25 @@
 import json
+from collections.abc import Mapping
 from dataclasses import replace
 from typing import Any, Literal
 
 from ..contracts.conversation import (
+    TOKEN_USAGE_METADATA_KEY,
     TerraFinConversationMessage,
     TerraFinHostedConversation,
     TerraFinMessageBlock,
+    is_internal_only_message,
     iter_tool_result_blocks,
+    iter_tool_use_blocks,
     make_text_block,
 )
+from ..contracts.conversation_state import RUNTIME_MODEL_METADATA_KEY
 from .transcript_normalizer import TranscriptNormalizer
 
 
-PromptBudgetLevel = Literal["default", "aggressive", "minimal"]
+PromptBudgetLevel = Literal["full", "default", "aggressive", "minimal"]
+
+READ_TOOL_RESULT_TOOL_NAME = "read_tool_result"
 
 DEFAULT_MODEL_MESSAGE_WINDOW = 28
 DEFAULT_AGGRESSIVE_MODEL_MESSAGE_WINDOW = 12
@@ -24,7 +31,11 @@ DEFAULT_TEXT_MESSAGE_CHAR_BUDGET = 5000
 DEFAULT_AGGRESSIVE_TEXT_MESSAGE_CHAR_BUDGET = 1800
 DEFAULT_MINIMAL_TEXT_MESSAGE_CHAR_BUDGET = 900
 DEFAULT_ESTIMATED_PROMPT_TOKEN_BUDGET = 52000
-PROMPT_BUDGET_RETRY_LEVELS: tuple[PromptBudgetLevel, ...] = ("default", "aggressive", "minimal")
+# Room kept free of a known context window for the reply and for estimate error.
+CONTEXT_WINDOW_RESERVE_FRACTION = 0.15
+MIN_CONTEXT_WINDOW_RESERVE_TOKENS = 16000
+# "full" sends the whole normalized transcript with no window and no per-message cuts.
+PROMPT_BUDGET_RETRY_LEVELS: tuple[PromptBudgetLevel, ...] = ("full", "default", "aggressive", "minimal")
 
 
 def truncate_text(value: str, limit: int) -> str:
@@ -60,11 +71,39 @@ class ContextBudgetManager:
         self.estimated_prompt_token_budget = estimated_prompt_token_budget
 
     def choose_level(self, conversation: TerraFinHostedConversation) -> PromptBudgetLevel:
+        budget = self.prompt_token_budget(conversation)
+        # A measured size counts system text and tool definitions too, so it is
+        # compared only with a budget taken from the model's real token window.
+        use_measured = _context_window(conversation) is not None
         for level in PROMPT_BUDGET_RETRY_LEVELS:
             prepared = self.prepare_messages(conversation, level=level)
-            if self.estimate_tokens(prepared) <= self.estimated_prompt_token_budget:
+            measured = self._measured_estimate(prepared) if use_measured and level == "full" else None
+            if (measured if measured is not None else self.estimate_tokens(prepared)) <= budget:
                 return level
         return "minimal"
+
+    def prompt_token_budget(self, conversation: TerraFinHostedConversation) -> int:
+        window = _context_window(conversation)
+        if window is None:
+            return self.estimated_prompt_token_budget
+        return window - max(int(window * CONTEXT_WINDOW_RESERVE_FRACTION), MIN_CONTEXT_WINDOW_RESERVE_TOKENS)
+
+    def _measured_estimate(self, prepared: tuple[TerraFinConversationMessage, ...]) -> int | None:
+        """The provider-measured prompt size up to the latest full-level anchor, plus an
+        estimate of every message from the anchor on.
+
+        Only a full-level prompt is append-only, so only its measurement still
+        covers the same prefix on a later turn.
+        """
+        for index in range(len(prepared) - 1, -1, -1):
+            usage = prepared[index].metadata.get(TOKEN_USAGE_METADATA_KEY)
+            if not isinstance(usage, Mapping) or usage.get("promptLevel") != "full":
+                continue
+            measured_input = usage.get("input")
+            # A provider that reported no prompt count measured nothing.
+            if isinstance(measured_input, int) and measured_input > 0:
+                return measured_input + self.estimate_tokens(prepared[index:])
+        return None
 
     def prepare_messages(
         self,
@@ -78,8 +117,25 @@ class ContextBudgetManager:
 
         system_messages = [message for message in messages if message.role == "system"]
         non_system_messages = [message for message in messages if message.role != "system"]
-        selected_non_system = non_system_messages[-self._message_window(level) :]
-        dropped_count = max(len(non_system_messages) - len(selected_non_system), 0)
+        # The current turn, from the latest user-authored message on, is always
+        # sent. The level's window is filled from older messages.
+        turn_start = _current_turn_start(non_system_messages)
+        older = non_system_messages[:turn_start]
+        current_turn = non_system_messages[turn_start:]
+        current_user = current_turn[0] if current_turn else None
+        room = len(older) if level == "full" else max(self._message_window(level) - len(current_turn), 0)
+        window_start = len(older) - min(room, len(older))
+        # A window never opens on a tool result whose tool_use was cut.
+        cut_call_ids = {
+            str(block.payload.get("callId") or "")
+            for message in older[:window_start]
+            for block in iter_tool_use_blocks(message)
+        }
+        for index in range(window_start, len(older)):
+            if older[index].role == "tool" and str(older[index].tool_call_id or "") in cut_call_ids:
+                window_start = index + 1
+        selected_non_system = older[window_start:] + current_turn
+        dropped_count = len(non_system_messages) - len(selected_non_system)
 
         prepared: list[TerraFinConversationMessage] = []
         if system_messages:
@@ -102,7 +158,10 @@ class ContextBudgetManager:
             )
 
         for message in selected_non_system:
-            prepared.append(self._compact_message(message, level=level))
+            if level == "full" or message is current_user:
+                prepared.append(message)
+            else:
+                prepared.append(self._compact_message(message, level=level))
         return tuple(prepared)
 
     def estimate_tokens(self, messages: tuple[TerraFinConversationMessage, ...]) -> int:
@@ -126,8 +185,20 @@ class ContextBudgetManager:
         level: PromptBudgetLevel,
     ) -> TerraFinConversationMessage:
         if message.role == "tool":
+            if message.name == READ_TOOL_RESULT_TOOL_NAME:
+                return self._compact_slice(message, level=level)
+            note = (
+                f"[full result: call_id={message.tool_call_id or ''}, {len(message.content)} chars; "
+                "read_tool_result(call_id, offset, limit)]"
+            )
             blocks = tuple(self._compact_tool_blocks(message.blocks, level=level))
-            content = self._serialize_tool_content(blocks, fallback=message.content, level=level)
+            payload_cut = blocks != message.blocks
+            content = self._serialize_tool_content(
+                blocks, fallback=message.content, note=note, payload_cut=payload_cut, level=level
+            )
+            if payload_cut:
+                # A provider that sends the block payload instead of `content` still shows the note.
+                blocks = _with_note_in_payload(blocks, note)
             return replace(message, content=content, blocks=blocks)
 
         text_limit = self._text_budget(level)
@@ -143,6 +214,23 @@ class ContextBudgetManager:
             )
         else:
             blocks = (make_text_block(content),) if content else ()
+        return replace(message, content=content, blocks=blocks)
+
+    def _compact_slice(
+        self,
+        message: TerraFinConversationMessage,
+        *,
+        level: PromptBudgetLevel,
+    ) -> TerraFinConversationMessage:
+        """A slice the model asked for reaches it whole above minimal: its `limit`
+        bounds it, and a pointer to it would point back at itself. At minimal it is
+        cut like any tool result, so the last level still shrinks the prompt."""
+        budget = self._tool_budget(level)
+        if level != "minimal" or len(message.content) <= budget:
+            return message
+        note = "[slice cut to fit the prompt; call read_tool_result again with a smaller limit]"
+        content = _cut_with_note(message.content, budget, note=note, cut=True)
+        blocks = _with_note_in_payload(tuple(self._compact_tool_blocks(message.blocks, level=level)), note)
         return replace(message, content=content, blocks=blocks)
 
     def _compact_tool_blocks(
@@ -168,6 +256,8 @@ class ContextBudgetManager:
         blocks: tuple[TerraFinMessageBlock, ...],
         *,
         fallback: str,
+        note: str,
+        payload_cut: bool,
         level: PromptBudgetLevel,
     ) -> str:
         tool_blocks = iter_tool_result_blocks(
@@ -175,7 +265,7 @@ class ContextBudgetManager:
         )
         tool_block = tool_blocks[0] if tool_blocks else None
         if tool_block is None:
-            return truncate_text(fallback, self._tool_budget(level))
+            return _cut_with_note(fallback, self._tool_budget(level), note=note, cut=False)
         serialized = json.dumps(
             {
                 "toolName": tool_block.payload.get("toolName"),
@@ -191,7 +281,7 @@ class ContextBudgetManager:
             ensure_ascii=False,
             separators=(",", ":"),
         )
-        return truncate_text(serialized, self._tool_budget(level))
+        return _cut_with_note(serialized, self._tool_budget(level), note=note, cut=payload_cut)
 
     def _message_window(self, level: PromptBudgetLevel) -> int:
         if level == "minimal":
@@ -213,6 +303,44 @@ class ContextBudgetManager:
         if level == "aggressive":
             return DEFAULT_AGGRESSIVE_TEXT_MESSAGE_CHAR_BUDGET
         return DEFAULT_TEXT_MESSAGE_CHAR_BUDGET
+
+
+def _context_window(conversation: TerraFinHostedConversation) -> int | None:
+    runtime_model = conversation.metadata.get(RUNTIME_MODEL_METADATA_KEY)
+    model_metadata = runtime_model.get("metadata") if isinstance(runtime_model, Mapping) else None
+    window = model_metadata.get("context_window") if isinstance(model_metadata, Mapping) else None
+    return window if isinstance(window, int) and window > 0 else None
+
+
+def _cut_with_note(text: str, limit: int, *, note: str, cut: bool) -> str:
+    """`text` within `limit` chars. A cut result keeps its head and tail and ends
+    with `note`, which says how to read the rest."""
+    if not cut and len(text) <= limit:
+        return text
+    room = limit - len(note) - 1
+    if len(text) <= room:
+        return f"{text}\n{note}"
+    head = room * 2 // 3
+    tail = room - head - 1
+    return f"{text[:head]}…{text[len(text) - tail :]}\n{note}"
+
+
+def _with_note_in_payload(blocks: tuple[TerraFinMessageBlock, ...], note: str) -> tuple[TerraFinMessageBlock, ...]:
+    return tuple(
+        TerraFinMessageBlock(
+            kind=block.kind, payload={**block.payload, "payload": {**block.payload["payload"], "_fullResult": note}}
+        )
+        if block.kind == "tool_result" and isinstance(block.payload.get("payload"), dict)
+        else block
+        for block in blocks
+    )
+
+
+def _current_turn_start(messages: list[TerraFinConversationMessage]) -> int:
+    for index in range(len(messages) - 1, -1, -1):
+        if messages[index].role == "user" and not is_internal_only_message(messages[index]):
+            return index
+    return len(messages)
 
 
 def _compact_payload_value(

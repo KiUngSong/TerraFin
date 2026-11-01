@@ -1,5 +1,6 @@
 """Tool execution engine — wraps the hosted tool adapter, builds tool-result
 messages, and surfaces loop-guard outcomes."""
+
 import json
 from dataclasses import dataclass
 from typing import Literal
@@ -9,11 +10,17 @@ from ..contracts.conversation import (
     TerraFinToolCall,
     make_tool_result_block,
 )
+from ..contracts.model_client import TOOL_ARGUMENTS_INVALID_KEY
 from .adapter import TerraFinHostedToolAdapter
 from .types import TerraFinToolInvocationResult
 
 
 ToolExecutionOutcomeKind = Literal["success", "retryable_error", "fatal_error"]
+
+_INVALID_ARGUMENTS_REASON = (
+    "The arguments of this call were not a valid JSON object, so it was not run. "
+    "Re-issue it with arguments that match the tool's input schema."
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -30,8 +37,17 @@ class ToolExecutionEngine:
         self.tool_adapter = tool_adapter
 
     def execute(self, session_id: str, tool_call: TerraFinToolCall) -> ToolExecutionOutcome:
+        if tool_call.provider_data.get(TOOL_ARGUMENTS_INVALID_KEY):
+            return self.build_rejected_call_outcome(
+                tool_call, code="tool_arguments_invalid", reason=_INVALID_ARGUMENTS_REASON
+            )
         try:
-            invocation = self.tool_adapter.run_tool(session_id, tool_call.tool_name, tool_call.arguments)
+            invocation = self.tool_adapter.run_tool(
+                session_id,
+                tool_call.tool_name,
+                tool_call.arguments,
+                call_id=tool_call.call_id,
+            )
         except Exception as exc:
             return ToolExecutionOutcome(kind="fatal_error", error=exc)
         message = self._build_tool_result_message(tool_call=tool_call, invocation=invocation)
@@ -139,6 +155,34 @@ class ToolExecutionEngine:
             error_message=reason,
         )
         return self._build_tool_result_message(tool_call=tool_call, invocation=invocation)
+
+    def build_rejected_call_outcome(
+        self,
+        tool_call: TerraFinToolCall,
+        *,
+        code: str,
+        reason: str,
+    ) -> ToolExecutionOutcome:
+        """Retryable error result for a call answered without running, because
+        its arguments cannot be trusted."""
+        invocation = TerraFinToolInvocationResult(
+            tool_name=tool_call.tool_name,
+            capability_name=tool_call.tool_name,
+            session_id="",
+            execution_mode="invoke",
+            payload={"accepted": False, "error": {"code": code, "message": reason, "retryable": True}},
+            task=None,
+            is_error=True,
+            retryable=True,
+            error_code=code,
+            error_message=reason,
+        )
+        return ToolExecutionOutcome(
+            kind="retryable_error",
+            invocation=invocation,
+            message=self._build_tool_result_message(tool_call=tool_call, invocation=invocation),
+            fingerprint=self._fingerprint(invocation),
+        )
 
     def build_loop_guard_outcome(
         self,

@@ -38,11 +38,34 @@ class TerraFinToolCall:
     provider_data: dict[str, Any] = field(default_factory=dict)
 
 
+TOKEN_USAGE_METADATA_KEY = "tokenUsage"
+
+
+@dataclass(frozen=True, slots=True)
+class TerraFinTokenUsage:
+    # Every prompt token the request carried, cached or not.
+    input: int = 0
+    output: int = 0
+    cache_read: int = 0
+    cache_write: int = 0
+
+    def to_payload(self) -> dict[str, int]:
+        return {
+            "input": self.input,
+            "output": self.output,
+            "cacheRead": self.cache_read,
+            "cacheWrite": self.cache_write,
+        }
+
+
 @dataclass(frozen=True, slots=True)
 class TerraFinModelTurn:
     assistant_message: TerraFinConversationMessage | None = None
     tool_calls: tuple[TerraFinToolCall, ...] = ()
-    stop_reason: Literal["completed", "tool_calls", "max_steps"] = "completed"
+    # "length" and "content_filter" mean the provider cut the output short, so the
+    # assistant message is not a finished answer.
+    stop_reason: Literal["completed", "tool_calls", "max_steps", "length", "content_filter"] = "completed"
+    usage: TerraFinTokenUsage | None = None
 
 
 @dataclass
@@ -164,7 +187,9 @@ def infer_message_blocks(message: TerraFinConversationMessage) -> tuple[TerraFin
                 tool_name=str(payload.get("toolName") or message.name or ""),
                 capability_name=str(payload.get("capabilityName") or message.name or ""),
                 execution_mode=str(payload.get("executionMode") or message.metadata.get("executionMode") or "invoke"),
-                payload=payload.get("payload") if isinstance(payload.get("payload"), Mapping) else {"output": message.content},
+                payload=payload.get("payload")
+                if isinstance(payload.get("payload"), Mapping)
+                else {"output": message.content},
                 task=task if isinstance(task, Mapping) else None,
                 is_error=bool(payload.get("isError") or message.metadata.get("isError")),
                 retryable=bool(payload.get("retryable") or message.metadata.get("retryable")),
@@ -188,4 +213,3 @@ def _optional_string(value: Any) -> str | None:
         return None
     text = str(value).strip()
     return text or None
-

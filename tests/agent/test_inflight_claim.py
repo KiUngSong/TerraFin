@@ -41,9 +41,7 @@ def test_real_contention_is_reported(lock_root: Path) -> None:
     assert inflight.liveness("s") == inflight.FREE
 
 
-def test_an_unwritable_lock_dir_fails_open(
-    lock_root: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_an_unwritable_lock_dir_fails_open(lock_root: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Failing closed here 409s every send and pins turnInFlight forever, which disables
     every exit in the client's poller — a total chat outage from a configuration that
     works without the lock (read-only rootfs, non-root user).
@@ -115,9 +113,7 @@ def test_the_read_path_never_creates_a_lock_file(lock_root: Path) -> None:
     directory = lock_root / "agent" / "locks"
 
     assert inflight.liveness("never-sent") == inflight.FREE
-    assert not directory.exists() or not any(
-        directory.iterdir()
-    ), "a read created a lock file"
+    assert not directory.exists() or not any(directory.iterdir()), "a read created a lock file"
 
     handle, _ = inflight.claim_or_unavailable("has-sent")
     try:
@@ -127,9 +123,7 @@ def test_the_read_path_never_creates_a_lock_file(lock_root: Path) -> None:
         inflight.release(handle)
 
 
-def test_a_turn_running_unserialised_still_reports_in_flight(
-    lock_root: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_a_turn_running_unserialised_still_reports_in_flight(lock_root: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Fail-open must not also drop turnInFlight."""
     from TerraFin.interface.agent import data_routes
 
@@ -149,15 +143,13 @@ def test_a_turn_running_unserialised_still_reports_in_flight(
     assert not data_routes._turn_in_flight(session_id)
 
 
-def test_an_unknowable_liveness_suppresses_the_death_report(
-    lock_root: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_an_unknowable_liveness_suppresses_the_death_report(lock_root: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """turnUnfinished is the client's proof of death and it answers by telling the user to
     resend.
     """
     from TerraFin.agent.contracts.conversation import make_tool_use_block
-    from TerraFin.interface.agent import data_routes
     from TerraFin.agent.loop import TerraFinConversationMessage
+    from TerraFin.interface.agent import data_routes
 
     def _Conv(messages=()):
         return tuple(messages)
@@ -169,9 +161,7 @@ def test_an_unknowable_liveness_suppresses_the_death_report(
                 role="assistant",
                 content="",
                 metadata={"internalOnly": True, "internalToolUse": True},
-                blocks=(
-                    make_tool_use_block(call_id="call_A", tool_name="market_snapshot", arguments={}),
-                ),
+                blocks=(make_tool_use_block(call_id="call_A", tool_name="market_snapshot", arguments={}),),
             ),
         ]
     )
@@ -197,9 +187,7 @@ def test_a_lock_the_caller_cannot_write_is_still_usable(lock_root: Path) -> None
     try:
         handle, state = inflight.claim_or_unavailable("shared")
         try:
-            assert handle is not None and state == inflight.FREE, (
-                "a read-only lock file must still serialise the turn"
-            )
+            assert handle is not None and state == inflight.FREE, "a read-only lock file must still serialise the turn"
             assert inflight.liveness("shared") == inflight.CONTENDED
         finally:
             inflight.release(handle)
@@ -297,8 +285,7 @@ def test_the_lock_mode_follows_the_store_not_the_lock_dir(lock_root: Path) -> No
     for store_mode, expected in ((0o755, 0o644), (0o750, 0o640), (0o700, 0o600), (0o711, 0o644)):
         os.chmod(store, store_mode)
         assert inflight._lock_mode(locks) == expected, (
-            f"store {oct(store_mode)} should give {oct(expected)},"
-            f" got {oct(inflight._lock_mode(locks))}"
+            f"store {oct(store_mode)} should give {oct(expected)}, got {oct(inflight._lock_mode(locks))}"
         )
     os.chmod(store, 0o755)
 
@@ -313,9 +300,7 @@ def test_the_lock_dir_mirrors_the_store_in_both_directions(lock_root: Path) -> N
         assert inflight._lock_path("s") is not None
         got = os.stat(inflight._lock_dir()).st_mode & 0o7777
         wanted = store_mode | 0o700 | 0o2000 | 0o1000
-        assert got == wanted, (
-            f"store {oct(store_mode)} should give locks/ {oct(wanted)}, got {oct(got)}"
-        )
+        assert got == wanted, f"store {oct(store_mode)} should give locks/ {oct(wanted)}, got {oct(got)}"
     os.chmod(store, 0o755)
 
 
@@ -334,9 +319,7 @@ def test_a_claim_repairs_a_lock_left_too_narrow(lock_root: Path) -> None:
     handle, state = inflight.claim_or_unavailable("legacy")
     try:
         assert handle is not None and state == inflight.FREE
-        assert os.stat(path).st_mode & 0o777 == 0o644, (
-            f"claim left the lock at {oct(os.stat(path).st_mode & 0o777)}"
-        )
+        assert os.stat(path).st_mode & 0o777 == 0o644, f"claim left the lock at {oct(os.stat(path).st_mode & 0o777)}"
     finally:
         inflight.release(handle)
 
@@ -488,9 +471,7 @@ def test_the_lock_dir_takes_the_stores_group_not_the_creators(lock_root: Path) -
 
     path = inflight._lock_path("s")
     assert path is not None
-    assert os.stat(locks).st_gid == others[0], (
-        f"locks/ kept gid {os.stat(locks).st_gid}; the store's is {others[0]}"
-    )
+    assert os.stat(locks).st_gid == others[0], f"locks/ kept gid {os.stat(locks).st_gid}; the store's is {others[0]}"
 
     handle, _state = inflight.claim_or_unavailable("s")
     try:
@@ -519,9 +500,7 @@ def test_a_chown_that_clears_setgid_is_repaired_in_the_same_claim(lock_root: Pat
     assert inflight._lock_path("s") is not None
     mode = os.lstat(locks).st_mode
     assert os.lstat(locks).st_gid == others[0], "the chown must land"
-    assert mode & stat.S_ISGID, (
-        f"the chown cleared setgid and the chmod was short-circuited: {oct(mode & 0o7777)}"
-    )
+    assert mode & stat.S_ISGID, f"the chown cleared setgid and the chmod was short-circuited: {oct(mode & 0o7777)}"
 
 
 def test_a_stale_lock_files_group_is_repaired(lock_root: Path) -> None:
@@ -837,9 +816,7 @@ def test_an_unreadable_transcript_raises_rather_than_serving_an_empty_one(
     assert data_routes._conversation_snapshot(None) == ()
 
 
-def test_the_bracket_compares_the_stamp_the_drop_recorded(
-    lock_root: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_the_bracket_compares_the_stamp_the_drop_recorded(lock_root: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Three reads of one value became two, and the pre-bracket window went from
     a few microseconds to exactly zero."""
     from TerraFin.interface.agent import data_routes
@@ -878,11 +855,7 @@ def test_a_real_death_reaches_the_response_through_the_snapshot(
                     role="assistant",
                     content="",
                     metadata={"internalOnly": True, "internalToolUse": True},
-                    blocks=(
-                        make_tool_use_block(
-                            call_id="call_orphan", tool_name="market_snapshot", arguments={}
-                        ),
-                    ),
+                    blocks=(make_tool_use_block(call_id="call_orphan", tool_name="market_snapshot", arguments={}),),
                 ),
             )
 
@@ -936,6 +909,59 @@ def test_the_session_derived_fields_come_from_one_snapshot(lock_root: Path) -> N
 
     payload = data_routes._session_response(record, loop=None, tools=())
     assert payload.focusItems == ["focus-1"], f"served {payload.focusItems}"
-    assert generation["n"] == 1, (
-        f"the session was snapshotted {generation['n']} times in one response"
+    assert generation["n"] == 1, f"the session was snapshotted {generation['n']} times in one response"
+
+
+def test_an_expired_task_at_the_restart_limit_is_failed_not_claimed(tmp_path: Path) -> None:
+    import time
+    from dataclasses import replace
+    from datetime import timedelta
+
+    from fakes import BaseFakeService, fake_chart_opener
+
+    from TerraFin.agent.definitions import DEFAULT_HOSTED_AGENT_NAME
+    from TerraFin.agent.hosted_runtime import TerraFinHostedAgentRuntime
+    from TerraFin.agent.runtime import build_default_capability_registry
+    from TerraFin.agent.runtime.context import create_agent_context
+    from TerraFin.agent.runtime.session import TerraFinAgentSession
+    from TerraFin.agent.session_store import SQLiteHostedSessionStore, TerraFinHostedSessionRecord
+
+    service = BaseFakeService()
+    registry = build_default_capability_registry(service, chart_opener=fake_chart_opener)
+    store = SQLiteHostedSessionStore(db_path=tmp_path / "limit.sqlite3", service=service, registry=registry)
+    session_id = "hosted:restart-limit"
+    context = create_agent_context(
+        service=service, registry=registry, session=TerraFinAgentSession(session_id=session_id)
     )
+    task = context.task_registry.create("market_snapshot", description="d", session_id=session_id)
+    context.task_registry._tasks[task.task_id] = replace(
+        task,
+        status="running",
+        attempt_count=3,
+        worker_id="worker:gone",
+        lease_expires_at=datetime.now(UTC) - timedelta(seconds=5),
+    )
+    store.create(
+        TerraFinHostedSessionRecord(
+            session_id=session_id, agent_name=DEFAULT_HOSTED_AGENT_NAME, context=context, metadata={}
+        )
+    )
+
+    assert store.claim_pending_task(worker_id="worker:next", lease_seconds=30) is None
+
+    runtime = TerraFinHostedAgentRuntime(service=service, capability_registry=registry, session_store=store)
+    try:
+        for _ in range(80):
+            current = runtime.get_task(task.task_id)
+            if current.status != "running":
+                break
+            time.sleep(0.05)
+    finally:
+        runtime.shutdown()
+
+    assert current.status == "failed"
+    assert current.attempt_count == 3
+    assert current.error.startswith("restart_limit")
+    [marker] = store.peek_pending_completions(session_id)
+    assert marker["taskId"] == task.task_id
+    assert marker["result"]["error"]["code"] == "restart_limit"

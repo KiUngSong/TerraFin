@@ -269,6 +269,17 @@ HOSTED_TOOL_CONTRACTS: dict[str, dict[str, Any]] = {
         ),
         "response_model": "HostedViewContextResponse",
     },
+    "read_tool_result": {
+        "input_schema": _object_schema(
+            properties={
+                "call_id": {"type": "string", "minLength": 1},
+                "offset": {"type": "integer", "minimum": 0, "default": 0},
+                "limit": {"type": "integer", "minimum": 1, "maximum": 20000, "default": 8000},
+            },
+            required=["call_id"],
+        ),
+        "response_model": "ToolResultSliceResponse",
+    },
     "fundamental_screen": {
         "input_schema": _object_schema(
             properties={"ticker": {"type": "string", "minLength": 1}},
@@ -393,7 +404,14 @@ HOSTED_TOOL_CONTRACTS: dict[str, dict[str, Any]] = {
                 "ticker": {"type": "string", "minLength": 1},
                 "universe": {
                     "type": "string",
-                    "enum": ["sp500", "nasdaq100", "kospi200", "sp500+nasdaq100+kospi200", "sp500+kospi200", "watchlist"],
+                    "enum": [
+                        "sp500",
+                        "nasdaq100",
+                        "kospi200",
+                        "sp500+nasdaq100+kospi200",
+                        "sp500+kospi200",
+                        "watchlist",
+                    ],
                     "default": "sp500+nasdaq100+kospi200",
                 },
                 "period": {
@@ -557,9 +575,7 @@ def _check_value(name: str, value: Any, schema: dict[str, Any]) -> list[str]:
     return errors
 
 
-def validate_tool_arguments(
-    tool_name: str, arguments: Mapping[str, Any]
-) -> tuple[list[str], dict[str, Any]]:
+def validate_tool_arguments(tool_name: str, arguments: Mapping[str, Any]) -> tuple[list[str], dict[str, Any]]:
     """Validate model-supplied arguments against a tool's declared input schema.
 
     Returns `(problems, arguments_to_dispatch)`. `problems` is a list of
@@ -594,9 +610,7 @@ def validate_tool_arguments(
     if schema.get("additionalProperties") is False:
         unknown = sorted(set(arguments) - set(properties))
         if unknown:
-            errors.append(
-                f"unknown argument(s) {unknown}; this tool accepts only {sorted(properties)}"
-            )
+            errors.append(f"unknown argument(s) {unknown}; this tool accepts only {sorted(properties)}")
 
     normalized = dict(arguments)
     for name, value in arguments.items():

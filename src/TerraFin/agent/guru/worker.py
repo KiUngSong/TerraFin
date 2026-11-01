@@ -7,6 +7,7 @@ asks for one retry on persona-fit failure, and returns a validated
 """
 
 import json
+from functools import partial
 from typing import TYPE_CHECKING, Any, Mapping
 
 from pydantic import ValidationError
@@ -18,16 +19,17 @@ from ..contracts.conversation import (
 )
 from ..contracts.conversation_state import record_tool_call_history
 from ..runtime.recovery import RecoveryTracker
+from ..runtime.tool_batch import run_tool_batch
 from ..storage.transcript_store import SESSION_ORIGIN_GURU
 from ..tools import TerraFinToolDefinition
 from .feedback import _is_broad_market_request, _normalize_text, _persona_fit_feedback
 from .memo import (
-    GuruResearchMemo,
-    GuruRoutePlan,
+    _GURU_MEMO_TOOL_NAME,
     HOWARD_MARKS,
     STANLEY_DRUCKENMILLER,
     WARREN_BUFFETT,
-    _GURU_MEMO_TOOL_NAME,
+    GuruResearchMemo,
+    GuruRoutePlan,
     _build_guru_memo_tool,
     _validate_guru_memo_arguments,
 )
@@ -122,9 +124,9 @@ def _build_guru_research_prompt(
             f"`{_GURU_MEMO_TOOL_NAME}` must include: stance, confidence, thesis, key_evidence, risks, open_questions, citations.",
             (
                 "Memo payload example: "
-                "{\"stance\":\"neutral\",\"confidence\":72,\"thesis\":\"...\","
-                "\"key_evidence\":[\"...\"],\"risks\":[\"...\"],"
-                "\"open_questions\":[\"...\"],\"citations\":[\"...\"]}"
+                '{"stance":"neutral","confidence":72,"thesis":"...",'
+                '"key_evidence":["..."],"risks":["..."],'
+                '"open_questions":["..."],"citations":["..."]}'
             ),
             "",
             "Rules:",
@@ -170,6 +172,7 @@ def _execute_guru_worker(
     memo_tool = _build_guru_memo_tool()
     total_tool_calls = 0
     recovery_budget = RecoveryTracker(loop.recovery_policy)
+    fingerprint_counts: dict[str, int] = {}
     persona_fit_retry_used = False
     memo_validation_retry_used = False
     finalize_reminder_used = False
@@ -206,9 +209,12 @@ def _execute_guru_worker(
         record_tool_call_history(conversation, turn.tool_calls)
         loop._persist_conversation_runtime_state(session_id, conversation)
 
+        # A cut-off turn's arguments may be truncated, so none of its calls run
+        # or count as the memo: the batch answers each one unrun.
+        cut_off = turn.stop_reason == "length"
         memo_calls = [tool_call for tool_call in turn.tool_calls if tool_call.tool_name == memo_tool.name]
         non_memo_calls = [tool_call for tool_call in turn.tool_calls if tool_call.tool_name != memo_tool.name]
-        if memo_calls:
+        if memo_calls and not cut_off:
             if len(memo_calls) != 1 or non_memo_calls:
                 return None, step, "Guru worker emitted an invalid mix of memo and capability tool calls."
             try:
@@ -265,34 +271,23 @@ def _execute_guru_worker(
                 continue
             return memo, step, None
 
-        for tool_call in non_memo_calls:
-            total_tool_calls += 1
-            if total_tool_calls > loop.max_tool_calls:
-                return (
-                    None,
-                    step,
-                    (f"Guru worker exceeded max_tool_calls={loop.max_tool_calls} for session '{session_id}'."),
-                )
-            outcome = loop.tool_execution_engine.execute(session_id, tool_call)
-            if outcome.kind == "fatal_error":
-                return None, step, str(outcome.error or "Guru tool execution failed.")
-            assert outcome.message is not None
-            assert outcome.invocation is not None
-            loop._append_conversation_message(
-                conversation,
-                _sanitize_guru_tool_message(
-                    persona=persona,
-                    broad_market=broad_market,
-                    tool_call=tool_call,
-                    invocation=outcome.invocation,
-                    message=outcome.message,
-                ),
-            )
-            if outcome.kind == "retryable_error":
-                exhausted = recovery_budget.record(outcome.fingerprint)
-                if exhausted:
-                    return None, step, "Guru worker exhausted its internal tool-recovery budget."
-        loop._persist_conversation_runtime_state(session_id, conversation)
+        batch = run_tool_batch(
+            loop,
+            session_id,
+            conversation,
+            turn.tool_calls,
+            tool_call_count=total_tool_calls,
+            fingerprint_counts=fingerprint_counts,
+            recovery_tracker=recovery_budget,
+            cut_off=cut_off,
+            message_transform=partial(_sanitize_guru_tool_message, persona=persona, broad_market=broad_market),
+            max_parallel=loop.max_parallel_tool_calls,
+        )
+        total_tool_calls = batch.tool_call_count
+        if batch.error is not None:
+            return None, step, str(batch.error) or "Guru tool execution failed."
+        if batch.recovery_exhausted:
+            return None, step, "Guru worker exhausted its internal tool-recovery budget."
         if broad_market and total_tool_calls >= 3 and not finalize_reminder_used:
             finalize_prompt = (
                 "You already have enough evidence for a compact memo in this investor's voice. "
@@ -350,23 +345,41 @@ def _special_guru_research_guidance(
         f"Avoid making this the backbone of the answer: {item}" for item in persona.forbidden_backbone_evidence
     )
     if persona_display_name == "Warren Buffett":
-        return general + (
-            "If you use valuation on a broad market ETF, use it only as a rough temperature check on relative expensiveness; do not make missing DCF or owner-earnings data for the ETF shell the main point.",
-            "For Buffett on the broad market, patience, cash, and the absence of clear margin of safety should dominate the memo more than any indicator reading.",
-        ) + persona_guidance + recent_cues + forbidden
+        return (
+            general
+            + (
+                "If you use valuation on a broad market ETF, use it only as a rough temperature check on relative expensiveness; do not make missing DCF or owner-earnings data for the ETF shell the main point.",
+                "For Buffett on the broad market, patience, cash, and the absence of clear margin of safety should dominate the memo more than any indicator reading.",
+            )
+            + persona_guidance
+            + recent_cues
+            + forbidden
+        )
     if persona_display_name == "Howard Marks":
-        return general + (
-            "For Howard Marks, you only need enough evidence to judge cycle position, investor psychology, and risk compensation. Do not burn steps trying to build a full macro dashboard.",
-            "If breadth, sentiment, and valuation already point to optimism or compressed risk premium, finalize the memo rather than continuing to hunt for every confirming statistic.",
-            "Your opening sentence should sound like a cycle-and-psychology investor, not a chart technician or economist pretending to be Howard Marks.",
-        ) + persona_guidance + recent_cues + forbidden
+        return (
+            general
+            + (
+                "For Howard Marks, you only need enough evidence to judge cycle position, investor psychology, and risk compensation. Do not burn steps trying to build a full macro dashboard.",
+                "If breadth, sentiment, and valuation already point to optimism or compressed risk premium, finalize the memo rather than continuing to hunt for every confirming statistic.",
+                "Your opening sentence should sound like a cycle-and-psychology investor, not a chart technician or economist pretending to be Howard Marks.",
+            )
+            + persona_guidance
+            + recent_cues
+            + forbidden
+        )
     if persona_display_name == "Stanley Druckenmiller":
-        return general + (
-            "For Druckenmiller, broad-market questions should usually weigh growth, liquidity, and yields first; technical stretch can support the read, but it should not dominate the opening thesis.",
-            "Your opening sentence should sound like a macro trader weighing rates, liquidity, earnings, and tape confirmation.",
-            "For a U.S. equity-market setup, focus on SPY and QQQ first. Do not fan out into DIA or VT unless they add something essential.",
-            "After roughly three useful tool calls, stop gathering and finalize the memo. This style should act on the tradeoff, not build a giant dashboard.",
-        ) + persona_guidance + recent_cues + forbidden
+        return (
+            general
+            + (
+                "For Druckenmiller, broad-market questions should usually weigh growth, liquidity, and yields first; technical stretch can support the read, but it should not dominate the opening thesis.",
+                "Your opening sentence should sound like a macro trader weighing rates, liquidity, earnings, and tape confirmation.",
+                "For a U.S. equity-market setup, focus on SPY and QQQ first. Do not fan out into DIA or VT unless they add something essential.",
+                "After roughly three useful tool calls, stop gathering and finalize the memo. This style should act on the tradeoff, not build a giant dashboard.",
+            )
+            + persona_guidance
+            + recent_cues
+            + forbidden
+        )
     return general + persona_guidance + recent_cues + forbidden
 
 
@@ -408,7 +421,12 @@ def _sanitize_guru_tool_message(
     benchmark_ticker = ticker in {"SPY", "QQQ", "DIA", "VT", "IWM"}
 
     filtered_payload: dict[str, Any] | None = None
-    if broad_market and benchmark_ticker and persona.name in {WARREN_BUFFETT, HOWARD_MARKS, STANLEY_DRUCKENMILLER} and tool_call.tool_name == "market_snapshot":
+    if (
+        broad_market
+        and benchmark_ticker
+        and persona.name in {WARREN_BUFFETT, HOWARD_MARKS, STANLEY_DRUCKENMILLER}
+        and tool_call.tool_name == "market_snapshot"
+    ):
         filtered_payload = {
             "ticker": payload.get("ticker"),
             "price_action": payload.get("price_action"),
@@ -432,7 +450,12 @@ def _sanitize_guru_tool_message(
             "margin_of_safety_pct": payload.get("margin_of_safety_pct"),
             "processing": payload.get("processing"),
         }
-    elif broad_market and benchmark_ticker and persona.name == STANLEY_DRUCKENMILLER and tool_call.tool_name == "risk_profile":
+    elif (
+        broad_market
+        and benchmark_ticker
+        and persona.name == STANLEY_DRUCKENMILLER
+        and tool_call.tool_name == "risk_profile"
+    ):
         filtered_payload = {
             "ticker": payload.get("ticker"),
             "tail_risk": payload.get("tail_risk"),

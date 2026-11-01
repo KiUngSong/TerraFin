@@ -1,8 +1,9 @@
 import pytest
 
+from TerraFin.agent.contracts.conversation import TerraFinTokenUsage
 from TerraFin.agent.definitions import TerraFinAgentDefinition
-from TerraFin.agent.model_management import set_saved_provider_credentials
 from TerraFin.agent.loop import TerraFinConversationMessage, TerraFinHostedConversation
+from TerraFin.agent.model_management import set_saved_provider_credentials
 from TerraFin.agent.providers.google import (
     TerraFinGoogleModelConfig,
     TerraFinGoogleModelConfigError,
@@ -115,7 +116,72 @@ def test_google_provider_serializes_tools_and_parses_function_calls() -> None:
     assert turn.tool_calls[0].tool_name == "market_snapshot"
     assert turn.tool_calls[0].arguments == {"name": "AAPL"}
     assert fake_session.calls[0]["url"].endswith("/models/gemini-3.1-pro-preview:generateContent")
-    assert (
-        fake_session.calls[0]["json"]["tools"][0]["functionDeclarations"][0]["name"]
-        == "market_snapshot"
+    assert fake_session.calls[0]["json"]["tools"][0]["functionDeclarations"][0]["name"] == "market_snapshot"
+
+
+def test_google_provider_renders_a_result_without_its_call_as_text() -> None:
+    fake_session = _FakeSession(_FakeResponse({"candidates": [{"content": {"parts": [{"text": "Ok."}]}}]}))
+    provider = TerraFinGoogleResponsesProvider(
+        config=TerraFinGoogleModelConfig(api_key="gemini-key"),
+        session=fake_session,
     )
+    conversation = TerraFinHostedConversation(
+        session_id="google:orphan",
+        agent_name="market-researcher",
+        messages=[
+            TerraFinConversationMessage(role="user", content="Give me AAPL."),
+            TerraFinConversationMessage(
+                role="tool", name="market_snapshot", tool_call_id="cut-call", content='{"price": 1}'
+            ),
+        ],
+    )
+
+    provider.complete(
+        model=provider.resolve_model("gemini-3.1-pro-preview"),
+        agent=_agent_definition(),
+        session=TerraFinAgentSession(session_id="google:orphan"),
+        conversation=conversation,
+        messages=conversation.snapshot(),
+        tools=(_tool(),),
+    )
+
+    contents = fake_session.calls[0]["json"]["contents"]
+    assert not any("functionResponse" in part for content in contents for part in content["parts"])
+    assert contents[-1] == {"role": "user", "parts": [{"text": '[tool result: market_snapshot]\n{"price": 1}'}]}
+
+
+def test_google_provider_reads_usage_metadata() -> None:
+    fake_session = _FakeSession(
+        _FakeResponse(
+            {
+                "candidates": [{"content": {"parts": [{"text": "Ok."}]}}],
+                "usageMetadata": {
+                    "promptTokenCount": 1200,
+                    "cachedContentTokenCount": 800,
+                    "candidatesTokenCount": 30,
+                    "thoughtsTokenCount": 70,
+                    "totalTokenCount": 1300,
+                },
+            }
+        )
+    )
+    provider = TerraFinGoogleResponsesProvider(
+        config=TerraFinGoogleModelConfig(api_key="gemini-key"),
+        session=fake_session,
+    )
+    conversation = TerraFinHostedConversation(
+        session_id="google:usage",
+        agent_name="market-researcher",
+        messages=[TerraFinConversationMessage(role="user", content="AAPL?")],
+    )
+
+    turn = provider.complete(
+        model=provider.resolve_model("gemini-3.1-pro-preview"),
+        agent=_agent_definition(),
+        session=TerraFinAgentSession(session_id="google:usage"),
+        conversation=conversation,
+        messages=conversation.snapshot(),
+        tools=(_tool(),),
+    )
+
+    assert turn.usage == TerraFinTokenUsage(input=1200, output=100, cache_read=800)

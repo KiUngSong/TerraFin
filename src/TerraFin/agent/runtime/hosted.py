@@ -3,10 +3,13 @@
 Manages session lifecycle, task dispatch + worker pool, policy
 enforcement, and human-in-the-loop approvals.
 """
+
 import hashlib
 import json
-from collections.abc import Callable
+from collections.abc import Callable, Iterable, Iterator
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from inspect import signature
@@ -33,6 +36,7 @@ from ..storage.session_store import (
     TerraFinHostedApprovalRequest,
     TerraFinHostedSessionRecord,
     TerraFinHostedViewContextRecord,
+    _merge_activity,
 )
 from ..storage.transcript_store import HostedTranscriptStore, session_tag
 from .async_tasks import _AsyncTaskHandle
@@ -44,11 +48,18 @@ from .errors import (
     TerraFinAgentSessionConflictError,
 )
 from .session import TerraFinAgentSession
-from .tasks import TerraFinTaskRecord
+from .tasks import TerraFinTaskContext, TerraFinTaskRecord, TerraFinTaskRegistry, task_restart_limit_reached
 
 
 def _utc_now() -> datetime:
     return datetime.now(UTC)
+
+
+# (session_id, activity): an invoke for that session records on the activity
+# and leaves the session record unwritten.
+_SCRATCH_ACTIVITY: ContextVar[tuple[str, TerraFinAgentSession] | None] = ContextVar(
+    "terrafin_scratch_activity", default=None
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -84,12 +95,14 @@ class TerraFinHostedAgentRuntime:
         default_require_human_approval_for_side_effects: bool = False,
         default_require_human_approval_for_background_tasks: bool = False,
         default_runtime_model: TerraFinRuntimeModel | None = None,
+        claim_foreign_tasks: bool = True,
     ) -> None:
         if service is None:
             # Lazy import to avoid a top-level dependency on
             # `agent.service` (load-order fragile because the service
             # package installs a ForwardingModule shim at import time).
             from ..service import TerraFinAgentService as _TerraFinAgentService
+
             service = _TerraFinAgentService()
         self.service = service
         self.capability_registry = capability_registry or build_default_capability_registry(
@@ -114,7 +127,16 @@ class TerraFinHostedAgentRuntime:
         self._task_max_workers = max(task_max_workers, 1)
         self._task_handles: dict[str, _AsyncTaskHandle] = {}
         self._task_index: dict[str, str] = {}
+        # With `claim_foreign_tasks` off, the dispatcher claims only tasks this
+        # runtime created, so a short-lived process never takes over tasks that
+        # belong to another process sharing the store.
+        self.claim_foreign_tasks = claim_foreign_tasks
+        self._local_task_ids: set[str] = set()
         self._task_lock = RLock()
+        self._next_lease_renewal = _utc_now()
+        # Bound by the hosted loop after it is built; the loop needs this
+        # runtime first, so the runner cannot be a constructor argument.
+        self._turn_runner: Callable[..., Any] | None = None
         self._dispatcher_stop = Event()
         self._dispatcher_thread = Thread(
             target=self._dispatch_loop,
@@ -122,6 +144,10 @@ class TerraFinHostedAgentRuntime:
             daemon=True,
         )
         self._dispatcher_thread.start()
+
+    def bind_turn_runner(self, runner: Callable[..., Any]) -> None:
+        """Sets the model-turn callable each task context exposes as `model_turn`."""
+        self._turn_runner = runner
 
     def shutdown(self) -> None:
         self._dispatcher_stop.set()
@@ -328,7 +354,6 @@ class TerraFinHostedAgentRuntime:
     def delete_session(self, session_id: str) -> TerraFinHostedSessionRecord:
         record = self.get_session_record(session_id)
         deleted_at = _utc_now()
-        self._delete_hidden_child_sessions(parent_session_id=session_id, deleted_at=deleted_at)
         active_tasks = [
             task
             for task in record.context.task_registry.list_for_session(session_id)
@@ -338,6 +363,7 @@ class TerraFinHostedAgentRuntime:
             raise TerraFinAgentSessionConflictError(
                 f"Session '{session_id}' still has active background tasks. Cancel them before deleting the session."
             )
+        self._delete_hidden_child_sessions(parent_session_id=session_id, deleted_at=deleted_at)
         self._drop_task_handles_for_session(session_id)
         if self.transcript_store is not None and self.transcript_store.session_exists(session_id):
             self.transcript_store.archive_session(session_id, deleted_at=deleted_at)
@@ -361,6 +387,20 @@ class TerraFinHostedAgentRuntime:
     def cancel_public_task(self, task_id: str) -> TerraFinTaskRecord:
         task = self.get_public_task(task_id)
         return self.cancel_task(task.task_id)
+
+    def request_turn_interrupt(self, session_id: str) -> None:
+        self.session_store.request_turn_interrupt(session_id)
+
+    def turn_interrupt_requested(self, session_id: str, *, since: datetime) -> bool:
+        """Whether a stop was asked for after `since`, the start of the running turn.
+
+        A request is only ever honoured by the turn it was made during, so one
+        left by a turn that ended or died never stops the next. The comparison is
+        strict: a request stamped in the same clock tick as the turn's start
+        predates it.
+        """
+        requested_at = self.session_store.turn_interrupt_requested_at(session_id)
+        return requested_at is not None and requested_at > since
 
     def list_public_session_approvals(self, session_id: str) -> tuple[TerraFinHostedApprovalRequest, ...]:
         self.get_public_session_record(session_id)
@@ -403,6 +443,7 @@ class TerraFinHostedAgentRuntime:
             for record in self.session_store.list()
             if str(record.metadata.get("parentSessionId") or "").strip() == parent_session_id
         ]
+        # Check every child before deleting any, so a conflict leaves them all.
         for child_session_id in child_session_ids:
             child_record = self.get_session_record(child_session_id)
             active_tasks = [
@@ -414,6 +455,7 @@ class TerraFinHostedAgentRuntime:
                 raise TerraFinAgentSessionConflictError(
                     f"Hidden child session '{child_session_id}' still has active background tasks."
                 )
+        for child_session_id in child_session_ids:
             self._drop_task_handles_for_session(child_session_id)
             if self.transcript_store is not None and self.transcript_store.session_exists(child_session_id):
                 self.transcript_store.archive_session(child_session_id, deleted_at=deleted_at)
@@ -488,9 +530,39 @@ class TerraFinHostedAgentRuntime:
             as_task=False,
             input_payload=resolved_kwargs,
         )
+        scratch = _SCRATCH_ACTIVITY.get()
+        if scratch is not None and scratch[0] == session_id:
+            context = create_agent_context(
+                service=record.context.service,
+                registry=record.context.registry,
+                session=scratch[1],
+                metadata=dict(record.context.metadata),
+            )
+            return context.call(capability_name, **resolved_kwargs)
         payload = record.context.call(capability_name, **resolved_kwargs)
         self.session_store.persist(record)
         return payload
+
+    @contextmanager
+    def recording_on_scratch(self, session_id: str) -> Iterator[TerraFinAgentSession]:
+        """Invokes for `session_id` in this block record on the yielded activity.
+
+        For calls that run off the loop thread: they never touch the shared
+        session record, and `merge_activity` applies their activity afterwards.
+        """
+        activity = TerraFinAgentSession(session_id=session_id)
+        token = _SCRATCH_ACTIVITY.set((session_id, activity))
+        try:
+            yield activity
+        finally:
+            _SCRATCH_ACTIVITY.reset(token)
+
+    def merge_activity(self, session_id: str, activities: Iterable[TerraFinAgentSession]) -> None:
+        record = self.get_session_record(session_id)
+        session = record.context.session
+        for activity in activities:
+            _merge_activity(session, activity)
+        self.session_store.persist(record)
 
     def run_task(
         self,
@@ -568,6 +640,9 @@ class TerraFinHostedAgentRuntime:
             origin_tool_call_id=origin_tool_call_id,
         )
         self._index_task(task.task_id, session_id)
+        if not self.claim_foreign_tasks:
+            with self._task_lock:
+                self._local_task_ids.add(task.task_id)
         self.session_store.persist(record)
         return record.context.task_registry.get(task.task_id)
 
@@ -601,18 +676,14 @@ class TerraFinHostedAgentRuntime:
             handle = self._task_handles.get(task_id)
 
         if handle is None:
-            cancelled_task = record.context.task_registry.cancel(task_id, reason="Task cancelled.")
-            self.session_store.persist(record)
-            return cancelled_task
-
-        handle.cancel_event.set()
-        cancelled = False
-        if handle.future is not None:
-            cancelled = handle.future.cancel()
-        reason = "Task cancelled before execution." if cancelled else "Cancellation requested."
-        cancelled_task = record.context.task_registry.cancel(task_id, reason=reason)
-        self.session_store.persist(record)
-        return cancelled_task
+            reason = "Task cancelled."
+        else:
+            handle.cancel_event.set()
+            cancelled = False
+            if handle.future is not None:
+                cancelled = handle.future.cancel()
+            reason = "Task cancelled before execution." if cancelled else "Cancellation requested."
+        return self.session_store.update_task(session_id, lambda tasks: tasks.cancel(task_id, reason=reason))
 
     def list_session_approvals(self, session_id: str) -> tuple[TerraFinHostedApprovalRequest, ...]:
         record = self.get_session_record(session_id)
@@ -690,6 +761,11 @@ class TerraFinHostedAgentRuntime:
         try:
             context = self.get_view_context(str(linked_context_id))
         except KeyError:
+            # A model passes an id it made up ("current") more often than a real one;
+            # an unknown id falls back to the page this session is linked to.
+            session_linked_id = record.context.session.metadata.get("viewContextId")
+            if view_context_id is not None and session_linked_id and session_linked_id != view_context_id:
+                return self.read_linked_view_context(session_id)
             return {
                 "available": False,
                 "linked": view_context_id is None,
@@ -709,6 +785,34 @@ class TerraFinHostedAgentRuntime:
             "selection": dict(context.selection),
             "entities": [dict(entity) for entity in context.entities],
             "metadata": dict(context.metadata),
+        }
+
+    def read_tool_result(self, session_id: str, *, call_id: str, offset: int, limit: int) -> dict[str, Any]:
+        """A slice of a stored tool result. Only the session's own transcript is
+        searched, so another session's call_id is refused as not found."""
+        conversation = self.get_session_record(session_id).conversation
+        messages = conversation.messages if conversation is not None else ()
+        # Newest first: providers may reuse a call_id across steps, and the
+        # prompt's pointer always names the newest result with that id.
+        content = next(
+            (m.content for m in reversed(messages) if m.role == "tool" and m.tool_call_id == call_id),
+            None,
+        )
+        if content is None:
+            return {
+                "found": False,
+                "callId": call_id,
+                "reason": f"No tool result with call_id {call_id!r} in this session. Use a call_id from this conversation.",
+            }
+        text = content[offset : offset + limit]
+        end = offset + len(text)
+        return {
+            "found": True,
+            "callId": call_id,
+            "totalChars": len(content),
+            "offset": offset,
+            "text": text,
+            "nextOffset": end if end < len(content) else None,
         }
 
     def approve_approval(
@@ -762,69 +866,110 @@ class TerraFinHostedAgentRuntime:
         capability_name: str,
         cancel_event: Event,
     ) -> None:
+        # Every task write goes through `session_store.update_task`, which patches
+        # this one task on the current stored row. The worker never persists the
+        # record it loaded here, because it holds that record across the
+        # capability call and writing it back would revert concurrent changes.
         try:
-            record = self.get_session_record(session_id)
+            self._run_async_task(session_id, task_id, capability_name, cancel_event)
         except KeyError:
+            # The session or task was deleted while the task ran.
+            pass
+        finally:
             self._drop_task_handle(task_id)
-            return
+
+    def _run_async_task(
+        self,
+        session_id: str,
+        task_id: str,
+        capability_name: str,
+        cancel_event: Event,
+    ) -> None:
+        record = self.get_session_record(session_id)
 
         if cancel_event.is_set():
-            record.context.task_registry.cancel(task_id, reason="Task cancelled before execution.")
-            self._persist_task_record(record)
-            self._drop_task_handle(task_id)
+            self.session_store.update_task(
+                session_id, lambda tasks: tasks.cancel(task_id, reason="Task cancelled before execution.")
+            )
             return
 
         task = record.context.task_registry.get(task_id)
         kwargs = dict(task.input_payload)
 
-        def _report_progress(stage: str) -> None:
+        def _report_progress(stage: str | None) -> None:
             # Best-effort mid-run progress: surfaces `task.progress.stage` to the
-            # widget AND renews the lease so a long-running task (deep_research
-            # can take minutes) is not re-claimed by another worker mid-flight.
-            # A progress-write failure must never fail the task itself.
+            # widget when given AND renews the lease so a long-running task
+            # (deep_research can take minutes) is not re-claimed by another
+            # worker mid-flight. A progress-write failure must never fail the task.
             try:
                 lease_expires_at = _utc_now() + timedelta(seconds=self.task_lease_seconds)
-                record.context.task_registry.record_progress(
-                    task_id,
-                    progress={"stage": stage},
-                    lease_expires_at=lease_expires_at,
+                self.session_store.update_task(
+                    session_id,
+                    lambda tasks: tasks.record_progress(
+                        task_id,
+                        progress=None if stage is None else {"stage": stage},
+                        lease_expires_at=lease_expires_at,
+                    ),
                 )
-                self._persist_task_record(record)
             except Exception:
                 pass
 
+        # The call records its focus, artifacts and capability call on a scratch
+        # context; the completion write merges them into the stored session.
+        activity = TerraFinAgentSession(session_id=session_id)
+        scratch = create_agent_context(
+            service=record.context.service,
+            registry=record.context.registry,
+            session=activity,
+            metadata=dict(record.context.metadata),
+        )
+        task_context = TerraFinTaskContext(
+            task_id=task_id,
+            session_id=session_id,
+            heartbeat=_report_progress,
+            cancel_event=cancel_event,
+            store=self.session_store,
+            call=scratch.call,
+            turn_runner=lambda: self._turn_runner,
+        )
         try:
-            result = record.context.call(capability_name, progress_reporter=_report_progress, **kwargs)
+            result = scratch.registry.invoke(
+                capability_name,
+                context=scratch,
+                progress_reporter=_report_progress,
+                task_context=task_context,
+                **kwargs,
+            )
         except Exception as exc:
             if cancel_event.is_set():
-                record.context.task_registry.cancel(task_id, reason="Cancellation requested.")
+                self.session_store.update_task(
+                    session_id, lambda tasks: tasks.cancel(task_id, reason="Cancellation requested.")
+                )
             else:
-                record.context.task_registry.fail(task_id, error=str(exc))
-            self._persist_task_record(record)
-            self._drop_task_handle(task_id)
+                error = str(exc)
+                self.session_store.update_task(session_id, lambda tasks: tasks.fail(task_id, error=error))
             return
 
         if cancel_event.is_set():
-            record.context.task_registry.cancel(task_id, reason="Cancellation requested.")
-            self._persist_task_record(record)
-            self._drop_task_handle(task_id)
+            self.session_store.update_task(
+                session_id,
+                lambda tasks: tasks.cancel(task_id, reason="Cancellation requested."),
+                activity=activity,
+            )
             return
-        latest_task = self.session_store.get(session_id).context.task_registry.get(task_id)
-        if latest_task.status == "cancelled":
-            record.context.task_registry.cancel(task_id, reason=latest_task.error or "Cancellation requested.")
-            self._persist_task_record(record)
-            self._drop_task_handle(task_id)
-            return
-        # Best-effort at-most-once delivery: only the worker that observes the
-        # task as non-terminal here records a pending-completion marker. This
-        # rides on the task layer's at-least-once semantics — a lease-expiry
-        # re-claim could still, rarely, double-run and double-deliver.
-        already_terminal = latest_task.status in {"completed", "failed"}
-        record.context.task_registry.complete(task_id, result=result, progress={"state": "completed"})
-        self._persist_task_record(record)
-        if not already_terminal:
+
+        # The stored status read inside the completion write decides delivery: a
+        # task already cancelled, or completed by another worker after a lease
+        # re-claim, stays as it is and records no second pending completion.
+        previous_status: list[str] = []
+
+        def _complete(tasks: TerraFinTaskRegistry) -> TerraFinTaskRecord:
+            previous_status.append(tasks.get(task_id).status)
+            return tasks.complete(task_id, result=result, progress={"state": "completed"})
+
+        self.session_store.update_task(session_id, _complete, activity=activity)
+        if previous_status[0] not in {"completed", "failed", "cancelled"}:
             self._record_pending_completion(session_id, task=task, result=result)
-        self._drop_task_handle(task_id)
 
     def _record_pending_completion(
         self,
@@ -849,12 +994,6 @@ class TerraFinHostedAgentRuntime:
             self.session_store.append_pending_completion(session_id, marker=marker)
         except KeyError:
             return
-
-    def _persist_task_record(self, record: TerraFinHostedSessionRecord) -> None:
-        # Pending-completion markers live in a dedicated store table, isolated
-        # from the record payload, so persisting the whole record can no longer
-        # clobber a marker a sibling task wrote during this run.
-        self.session_store.persist(record)
 
     def _enforce_policy(
         self,
@@ -1106,6 +1245,7 @@ class TerraFinHostedAgentRuntime:
         with self._task_lock:
             self._task_handles.pop(task_id, None)
             self._task_index.pop(task_id, None)
+            self._local_task_ids.discard(task_id)
 
     def _drop_task_handles_for_session(self, session_id: str) -> None:
         with self._task_lock:
@@ -1115,12 +1255,39 @@ class TerraFinHostedAgentRuntime:
             for task_id in task_ids:
                 self._task_handles.pop(task_id, None)
                 self._task_index.pop(task_id, None)
+                self._local_task_ids.discard(task_id)
 
     def _active_task_count(self) -> int:
+        return len(self._live_task_handles())
+
+    def _live_task_handles(self) -> list[_AsyncTaskHandle]:
         with self._task_lock:
-            return sum(
-                1 for handle in self._task_handles.values() if handle.future is not None and not handle.future.done()
-            )
+            return [
+                handle
+                for handle in self._task_handles.values()
+                if handle.future is not None and not handle.future.done()
+            ]
+
+    def _renew_live_task_leases(self) -> None:
+        # A task this runtime is still running keeps its lease, heartbeat or
+        # not, so attempt_count counts only re-claims after a worker was lost.
+        now = _utc_now()
+        if now < self._next_lease_renewal:
+            return
+        self._next_lease_renewal = now + timedelta(seconds=self.task_lease_seconds / 2)
+        lease_expires_at = now + timedelta(seconds=self.task_lease_seconds)
+        for handle in self._live_task_handles():
+
+            def _renew(tasks: TerraFinTaskRegistry, task_id: str = handle.task_id) -> TerraFinTaskRecord:
+                task = tasks.get(task_id)
+                if task.worker_id != self._worker_id:
+                    return task
+                return tasks.record_progress(task_id, lease_expires_at=lease_expires_at)
+
+            try:
+                self.session_store.update_task(handle.session_id, _renew)
+            except KeyError:
+                continue
 
     def _launch_claimed_task(self, session_id: str, task: TerraFinTaskRecord) -> None:
         handle = _AsyncTaskHandle(session_id=session_id, task_id=task.task_id)
@@ -1142,14 +1309,24 @@ class TerraFinHostedAgentRuntime:
         while not self._dispatcher_stop.is_set():
             try:
                 self._cleanup_expired_state()
+                self._renew_live_task_leases()
                 if self._active_task_count() >= self._task_max_workers:
                     self._dispatcher_stop.wait(self.task_dispatch_poll_seconds)
                     continue
+                task_ids = None
+                if not self.claim_foreign_tasks:
+                    with self._task_lock:
+                        task_ids = frozenset(self._local_task_ids)
+                    if not task_ids:
+                        self._dispatcher_stop.wait(self.task_dispatch_poll_seconds)
+                        continue
                 claimed = self.session_store.claim_pending_task(
                     worker_id=self._worker_id,
                     lease_seconds=self.task_lease_seconds,
+                    task_ids=task_ids,
                 )
                 if claimed is None:
+                    self._fail_restart_limited_tasks(task_ids)
                     self._dispatcher_stop.wait(self.task_dispatch_poll_seconds)
                     continue
                 record, task = claimed
@@ -1157,6 +1334,37 @@ class TerraFinHostedAgentRuntime:
                 self._launch_claimed_task(record.session_id, task)
             except Exception:
                 self._dispatcher_stop.wait(min(self.task_dispatch_poll_seconds * 2, 1.0))
+
+    def _fail_restart_limited_tasks(self, task_ids: frozenset[str] | None) -> None:
+        live_task_ids = {handle.task_id for handle in self._live_task_handles()}
+        for session_id, task_id in self.session_store.list_restart_limited_tasks(task_ids=task_ids):
+            if task_id in live_task_ids:
+                continue
+            failed: list[TerraFinTaskRecord] = []
+
+            # Re-checked inside the write: a worker may have finished the task
+            # since the listing.
+            def _fail(tasks: TerraFinTaskRegistry, task_id: str = task_id) -> TerraFinTaskRecord:
+                task = tasks.get(task_id)
+                if not task_restart_limit_reached(task, now=_utc_now()):
+                    return task
+                error = (
+                    f"restart_limit: task '{task.capability_name}' lost its worker {task.attempt_count} times "
+                    "without finishing. Start it again."
+                )
+                failed.append(tasks.fail(task_id, error=error))
+                return failed[0]
+
+            try:
+                self.session_store.update_task(session_id, _fail)
+            except KeyError:
+                continue
+            if failed:
+                self._record_pending_completion(
+                    session_id,
+                    task=failed[0],
+                    result={"error": {"code": "restart_limit", "message": failed[0].error}},
+                )
 
     def _reconcile_orphaned_tasks(self, record: TerraFinHostedSessionRecord) -> None:
         for task in record.context.task_registry.list_for_session(record.session_id):

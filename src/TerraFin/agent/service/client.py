@@ -10,8 +10,8 @@ from TerraFin.interface.pages.chart.formatters import build_multi_payload
 from ..contracts.conversation import is_internal_only_message
 from ..contracts.definitions import is_internal_agent_definition
 from ..contracts.schemas import ChartOpenResponse
+from ..runtime import inflight
 from .service import TerraFinAgentService
-from TerraFin.agent.runtime import inflight
 
 
 class TerraFinAgentClient:
@@ -198,11 +198,15 @@ class TerraFinAgentClient:
                 conversation = loop.get_conversation(record.session_id)
             except Exception:
                 conversation = getattr(record, "conversation", None)
-        visible_messages = [] if conversation is None else [
-            message
-            for message in conversation.snapshot()
-            if message.role not in {"system", "tool"} and not is_internal_only_message(message)
-        ]
+        visible_messages = (
+            []
+            if conversation is None
+            else [
+                message
+                for message in conversation.snapshot()
+                if message.role not in {"system", "tool"} and not is_internal_only_message(message)
+            ]
+        )
         first_user_message = next((message for message in visible_messages if message.role == "user"), None)
         last_message = visible_messages[-1] if visible_messages else None
         runtime_model = self._serialize_runtime_model(record.context.session.metadata.get("runtimeModel"))
@@ -219,10 +223,26 @@ class TerraFinAgentClient:
             "updatedAt": record.updated_at.isoformat(),
             "lastAccessedAt": record.last_accessed_at.isoformat(),
             "runtimeModel": runtime_model,
-            "title": transcript_summary.title if transcript_summary is not None else None if first_user_message is None else first_user_message.content,
-            "lastMessagePreview": transcript_summary.last_message_preview if transcript_summary is not None else None if last_message is None else last_message.content,
-            "lastMessageAt": None if (transcript_summary is not None and transcript_summary.last_message_at is None) else transcript_summary.last_message_at.isoformat() if transcript_summary is not None else None if last_message is None else last_message.created_at.isoformat(),
-            "messageCount": transcript_summary.message_count if transcript_summary is not None else len(visible_messages),
+            "title": transcript_summary.title
+            if transcript_summary is not None
+            else None
+            if first_user_message is None
+            else first_user_message.content,
+            "lastMessagePreview": transcript_summary.last_message_preview
+            if transcript_summary is not None
+            else None
+            if last_message is None
+            else last_message.content,
+            "lastMessageAt": None
+            if (transcript_summary is not None and transcript_summary.last_message_at is None)
+            else transcript_summary.last_message_at.isoformat()
+            if transcript_summary is not None
+            else None
+            if last_message is None
+            else last_message.created_at.isoformat(),
+            "messageCount": transcript_summary.message_count
+            if transcript_summary is not None
+            else len(visible_messages),
             "pendingTaskCount": sum(
                 1
                 for task in record.context.task_registry.list_for_session(record.session_id)
@@ -230,7 +250,9 @@ class TerraFinAgentClient:
             ),
         }
 
-    def _serialize_runtime_session(self, *, loop: Any, session_id: str, conversation: Any | None = None) -> dict[str, Any]:
+    def _serialize_runtime_session(
+        self, *, loop: Any, session_id: str, conversation: Any | None = None
+    ) -> dict[str, Any]:
         if hasattr(loop.runtime, "get_session_record"):
             record = loop.runtime.get_session_record(session_id)
             active_conversation = conversation
@@ -261,8 +283,7 @@ class TerraFinAgentClient:
                     for task in record.context.task_registry.list_for_session(record.session_id)
                 ],
                 "approvals": [
-                    self._serialize_runtime_approval(approval)
-                    for approval in getattr(record, "approval_requests", [])
+                    self._serialize_runtime_approval(approval) for approval in getattr(record, "approval_requests", [])
                 ],
                 "auditTrail": [self._serialize_runtime_audit_event(event) for event in record.audit_log],
                 "tools": [
@@ -299,7 +320,7 @@ class TerraFinAgentClient:
     def _runtime_loop(self) -> Any:
         from .hosted import get_hosted_agent_loop
 
-        return get_hosted_agent_loop()
+        return get_hosted_agent_loop(claim_foreign_tasks=False)
 
     def resolve(self, query: str) -> dict[str, Any]:
         if self._resolved_transport() == "python":
@@ -322,7 +343,9 @@ class TerraFinAgentClient:
             return self._service_call("market_data", name, depth=depth, view=view)
         return self._http_get("/agent/api/market-data", params={"ticker": name, "depth": depth, "view": view})
 
-    def indicators(self, name: str, indicators: str | Iterable[str], *, depth: str = "auto", view: str = "daily") -> dict[str, Any]:
+    def indicators(
+        self, name: str, indicators: str | Iterable[str], *, depth: str = "auto", view: str = "daily"
+    ) -> dict[str, Any]:
         indicator_text = indicators if isinstance(indicators, str) else ",".join(str(item) for item in indicators)
         if self._resolved_transport() == "python":
             return self._service_call("indicators", name, indicator_text, depth=depth, view=view)
@@ -340,9 +363,7 @@ class TerraFinAgentClient:
         force_refresh: bool = False,
     ) -> dict[str, Any]:
         if self._resolved_transport() == "python":
-            return self._service_call(
-                "market_snapshot", name, depth=depth, view=view, force_refresh=force_refresh
-            )
+            return self._service_call("market_snapshot", name, depth=depth, view=view, force_refresh=force_refresh)
         return self._http_get(
             "/agent/api/market-snapshot",
             params={
@@ -470,7 +491,9 @@ class TerraFinAgentClient:
             metadata=metadata,
             system_prompt=system_prompt,
         )
-        return self._serialize_runtime_session(loop=loop, session_id=conversation.session_id, conversation=conversation)
+        return self._serialize_runtime_session(
+            loop=loop, session_id=conversation.session_id, conversation=conversation
+        )
 
     def runtime_sessions(self) -> dict[str, Any]:
         if self._resolved_transport() == "http":
@@ -536,12 +559,19 @@ class TerraFinAgentClient:
                 for message in run_result.messages_added
                 if not is_internal_only_message(message)
             ],
-            "toolResults": [
-                self._serialize_runtime_tool_result(result)
-                for result in run_result.tool_results
-            ],
+            "toolResults": [self._serialize_runtime_tool_result(result) for result in run_result.tool_results],
             "session": self._serialize_runtime_session(loop=loop, session_id=session_id, conversation=conversation),
         }
+
+    def runtime_interrupt(self, session_id: str) -> dict[str, Any]:
+        if self._resolved_transport() == "http":
+            return self._http_post(f"/agent/api/runtime/sessions/{session_id}/interrupt", json={})
+        loop = self._runtime_loop()
+        loop.runtime.get_public_session_record(session_id)
+        requested = inflight.liveness(session_id) != inflight.FREE
+        if requested:
+            loop.runtime.request_turn_interrupt(session_id)
+        return {"sessionId": session_id, "interruptRequested": requested}
 
     def runtime_session_tasks(self, session_id: str) -> dict[str, Any]:
         if self._resolved_transport() == "http":
@@ -603,8 +633,10 @@ class TerraFinAgentClient:
         if isinstance(data_or_names, TimeSeriesDataFrame):
             frames = [data_or_names]
             names = None
-        elif isinstance(data_or_names, list) and data_or_names and all(
-            isinstance(item, TimeSeriesDataFrame) for item in data_or_names
+        elif (
+            isinstance(data_or_names, list)
+            and data_or_names
+            and all(isinstance(item, TimeSeriesDataFrame) for item in data_or_names)
         ):
             frames = list(data_or_names)
             names = None
@@ -615,7 +647,9 @@ class TerraFinAgentClient:
             frames = None
             names = [str(item) for item in data_or_names]
         else:
-            raise TypeError("open_chart expects a name, list of names, TimeSeriesDataFrame, or list of TimeSeriesDataFrame")
+            raise TypeError(
+                "open_chart expects a name, list of names, TimeSeriesDataFrame, or list of TimeSeriesDataFrame"
+            )
 
         transport = self._resolved_transport()
         if transport == "python":
@@ -658,7 +692,9 @@ class TerraFinAgentClient:
                 timeout=self.timeout,
             )
             if response.status_code >= 400:
-                raise RuntimeError(response.json().get("error") or response.json().get("detail") or "Failed to add chart series")
+                raise RuntimeError(
+                    response.json().get("error") or response.json().get("detail") or "Failed to add chart series"
+                )
         chart_url = chart_client._runtime_chart_url("/chart", session_id=session_id)
         return ChartOpenResponse(ok=True, sessionId=session_id, chartUrl=chart_url).model_dump()
 
@@ -679,7 +715,9 @@ class TerraFinAgentClient:
                 timeout=self.timeout,
             )
             if response.status_code >= 400:
-                raise RuntimeError(response.json().get("error") or response.json().get("detail") or "Failed to update chart")
+                raise RuntimeError(
+                    response.json().get("error") or response.json().get("detail") or "Failed to update chart"
+                )
             chart_url = f"{self.base_url}/chart?sessionId={session_id}"
             return ChartOpenResponse(ok=True, sessionId=session_id, chartUrl=chart_url).model_dump()
 
@@ -701,6 +739,8 @@ class TerraFinAgentClient:
                 timeout=self.timeout,
             )
             if response.status_code >= 400:
-                raise RuntimeError(response.json().get("error") or response.json().get("detail") or "Failed to add chart series")
+                raise RuntimeError(
+                    response.json().get("error") or response.json().get("detail") or "Failed to add chart series"
+                )
         chart_url = f"{self.base_url}/chart?sessionId={session_id}"
         return ChartOpenResponse(ok=True, sessionId=session_id, chartUrl=chart_url).model_dump()

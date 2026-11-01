@@ -11,6 +11,7 @@ only cleared AFTER its note is durably appended.
 The `deep_research` capability is stubbed with a canned serialized report so the
 tests stay deterministic and offline (no live LLM / web).
 """
+
 import time
 
 import pytest
@@ -43,7 +44,14 @@ _CANNED_REPORT = {
     "question": "How is Apple doing?",
     "title": "AAPL deep dive",
     "claims": [
-        {"claimId": "g1", "text": "Revenue grew to a record.", "value": None, "quote": "", "unit": None, "citations": []},
+        {
+            "claimId": "g1",
+            "text": "Revenue grew to a record.",
+            "value": None,
+            "quote": "",
+            "unit": None,
+            "citations": [],
+        },
     ],
     "gaps": [],
 }
@@ -240,7 +248,7 @@ def test_completion_persist_does_not_clobber_sibling_marker(tmp_path) -> None:
             session_id,
             marker={"taskId": "t-sibling", "capabilityName": "deep_research", "result": {"title": "SIBLING"}},
         )
-        runtime_a._persist_task_record(record_a)
+        runtime_a.session_store.persist(record_a)
 
         survivors = [(m.get("result") or {}).get("title") for m in store_b.peek_pending_completions(session_id)]
         assert survivors == ["SIBLING"]
@@ -458,11 +466,7 @@ def test_delivered_completion_is_valid_on_google_adapter() -> None:
     )
     contents = payload["contents"]
     # No orphaned functionResponse referencing the removed delivery tool.
-    assert not any(
-        "functionResponse" in part
-        for content in contents
-        for part in content.get("parts", [])
-    )
+    assert not any("functionResponse" in part for content in contents for part in content.get("parts", []))
     user_texts = [
         part["text"]
         for content in contents
@@ -501,8 +505,8 @@ def test_injection_failure_preserves_marker_for_redelivery() -> None:
         loop.runtime.start_task(conversation.session_id, "deep_research", origin_tool_call_id="o1", ticker="AAPL")
         _wait_for_marker(loop.runtime, conversation.session_id)
 
-        # Budget is exhausted by the system message alone → the note append
-        # raises before it lands in the transcript.
+        # Budget is exhausted by the system message alone → the turn is refused
+        # at its start, before the note is appended.
         with pytest.raises(RuntimeError):
             loop.submit_user_message(conversation.session_id, "hello")
 
@@ -526,7 +530,9 @@ def test_marker_whose_note_is_already_in_transcript_is_not_redelivered() -> None
     loop = _loop(_DirectAnswerModel())
     try:
         conversation = loop.create_session(DEFAULT_HOSTED_AGENT_NAME, session_id="deferred:redup")
-        task = loop.runtime.start_task(conversation.session_id, "deep_research", origin_tool_call_id="o1", ticker="AAPL")
+        task = loop.runtime.start_task(
+            conversation.session_id, "deep_research", origin_tool_call_id="o1", ticker="AAPL"
+        )
         _wait_for_marker(loop.runtime, conversation.session_id)
 
         loop.submit_user_message(conversation.session_id, "first")  # delivers + clears
@@ -553,7 +559,9 @@ def test_recompleting_a_terminal_task_does_not_enqueue_a_second_marker() -> None
     loop = _loop(_DirectAnswerModel())
     try:
         conversation = loop.create_session(DEFAULT_HOSTED_AGENT_NAME, session_id="deferred:idem-complete")
-        task = loop.runtime.start_task(conversation.session_id, "deep_research", origin_tool_call_id="o1", ticker="AAPL")
+        task = loop.runtime.start_task(
+            conversation.session_id, "deep_research", origin_tool_call_id="o1", ticker="AAPL"
+        )
         _wait_for_marker(loop.runtime, conversation.session_id)
 
         # Re-run the async execution for the already-completed task, simulating a

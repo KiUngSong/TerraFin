@@ -8,10 +8,12 @@ import anthropic
 
 from TerraFin.env import ensure_runtime_env_loaded
 
+from ...contracts.model_client import TerraFinTurnOptions
 from ...conversation import (
     TerraFinConversationMessage,
     TerraFinHostedConversation,
     TerraFinModelTurn,
+    TerraFinTokenUsage,
     TerraFinToolCall,
     iter_tool_result_blocks,
     iter_tool_use_blocks,
@@ -197,9 +199,16 @@ class TerraFinAnthropicMessagesProvider(TerraFinModelProvider):
         conversation: TerraFinHostedConversation,
         messages: tuple[TerraFinConversationMessage, ...],
         tools: tuple[TerraFinToolDefinition, ...],
+        options: TerraFinTurnOptions | None = None,
     ) -> TerraFinModelTurn:
         _ = session, conversation
-        request = self._build_request(model_id=model.model_id, agent=agent, messages=messages, tools=tools)
+        request = self._build_request(
+            model_id=model.model_id,
+            agent=agent,
+            messages=messages,
+            tools=tools,
+            options=options or TerraFinTurnOptions(),
+        )
         try:
             with self._runtime_client().beta.messages.stream(**request) as stream:
                 response = stream.get_final_message()
@@ -222,6 +231,7 @@ class TerraFinAnthropicMessagesProvider(TerraFinModelProvider):
         agent: TerraFinAgentDefinition,
         messages: tuple[TerraFinConversationMessage, ...],
         tools: tuple[TerraFinToolDefinition, ...],
+        options: TerraFinTurnOptions = TerraFinTurnOptions(),
     ) -> dict[str, Any]:
         system_lines = [message.content for message in messages if message.role == "system" and message.content]
         request: dict[str, Any] = {
@@ -233,18 +243,25 @@ class TerraFinAnthropicMessagesProvider(TerraFinModelProvider):
             "output_config": {"effort": self.config.effort},
             "betas": [THINKING_BINDING_BETA],
         }
-        if system_lines:
-            request["system"] = "\n\n".join(
-                [
-                    *system_lines,
-                    f"Stay within the hosted TerraFin agent definition '{agent.name}' and use tools when they improve accuracy.",
-                ]
-            )
+        system_parts = (
+            [
+                *system_lines,
+                f"Stay within the hosted TerraFin agent definition '{agent.name}' and use tools when they improve accuracy.",
+            ]
+            if system_lines
+            else []
+        )
+        if options.pinned_context:
+            system_parts.append(options.pinned_context)
+        if system_parts:
+            request["system"] = "\n\n".join(system_parts)
         if tools:
             request["tools"] = [
                 {"name": tool.name, "description": tool.description, "input_schema": dict(tool.input_schema)}
                 for tool in tools
             ]
+            if options.tool_choice == "none":
+                request["tool_choice"] = {"type": "none"}
         if self.config.refusal_fallbacks and model_id in REFUSAL_FALLBACK_MODELS:
             request["betas"].append(REFUSAL_FALLBACK_BETA)
             request["fallbacks"] = "default"
@@ -312,22 +329,16 @@ class TerraFinAnthropicMessagesProvider(TerraFinModelProvider):
 
     def _parse_response(self, response: Any) -> TerraFinModelTurn:
         stop_reason = response.stop_reason
-        # A declined or cut-off turn is never an answer: its text is partial and its
-        # tool inputs may be truncated, so it fails rather than reaching the caller.
+        # A declined turn is never an answer, so it fails rather than reaching the caller.
         if stop_reason == "refusal":
             details = getattr(response, "stop_details", None)
             category = getattr(details, "category", None) or "unspecified"
             raise TerraFinAnthropicModelResponseError(
                 f"Claude declined to answer (refusal category: {category}). Rephrase the request and try again."
             )
-        if stop_reason in _LENGTH_STOP_REASONS:
-            raise TerraFinAnthropicModelResponseError(
-                f"Claude's reply was cut off before it finished (stop_reason={stop_reason}). "
-                "Ask for a shorter answer or start a new chat."
-            )
         content = _echo_content(response.content)
         text = _joined_text(content)
-        if stop_reason not in _COMPLETED_STOP_REASONS:
+        if stop_reason not in _COMPLETED_STOP_REASONS | _LENGTH_STOP_REASONS:
             raise TerraFinAnthropicModelResponseError(f"Claude returned an unsupported stop_reason {stop_reason!r}.")
         tool_calls = [
             TerraFinToolCall(call_id=str(block["id"]), tool_name=str(block["name"]), arguments=dict(block["input"]))
@@ -347,10 +358,14 @@ class TerraFinAnthropicMessagesProvider(TerraFinModelProvider):
                 provider_data={ANTHROPIC_CONTENT_KEY: content},
             )
         assistant_message = TerraFinConversationMessage(role="assistant", content=text) if text else None
+        # A cut-off turn reports "length", as the other providers do: the loop continues
+        # its partial text and answers its tool calls, whose inputs may be truncated, unrun.
+        cut_off = stop_reason in _LENGTH_STOP_REASONS
         return TerraFinModelTurn(
             assistant_message=assistant_message,
             tool_calls=tuple(tool_calls),
-            stop_reason="tool_calls" if tool_calls else "completed",
+            stop_reason="length" if cut_off else "tool_calls" if tool_calls else "completed",
+            usage=_usage(response.usage),
         )
 
 
@@ -369,6 +384,19 @@ def _carried_content(message: TerraFinConversationMessage) -> list[dict[str, Any
         if isinstance(carried, list):
             return carried
     return None
+
+
+def _usage(usage: Any) -> TerraFinTokenUsage:
+    """The streamed message's usage, which the SDK has already merged from
+    message_start and every message_delta. input_tokens excludes cached tokens."""
+    cache_read = usage.cache_read_input_tokens or 0
+    cache_write = usage.cache_creation_input_tokens or 0
+    return TerraFinTokenUsage(
+        input=usage.input_tokens + cache_read + cache_write,
+        output=usage.output_tokens,
+        cache_read=cache_read,
+        cache_write=cache_write,
+    )
 
 
 def _joined_text(blocks: list[dict[str, Any]]) -> str:

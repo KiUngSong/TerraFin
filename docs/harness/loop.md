@@ -8,7 +8,7 @@ read_when:
 
 # The agent loop
 
-Package paths on this page drop the leading `src/TerraFin/`: `data/` means `src/TerraFin/data/`.
+All paths are under `src/TerraFin/`.
 
 TerraFin has its own agent: the chat panel in the TerraFin web app, served by
 the runtime in `agent/`. This page follows one turn of that
@@ -20,8 +20,9 @@ The loop lives in `agent/runtime/loop.py`
 (`TerraFinHostedAgentLoop.submit_user_message`). A turn appends the user's
 message, then repeats one step (call the model, run the tools it asked for)
 until the model answers in plain text, recovery ends the turn, or a limit is
-hit. The limits are constructor arguments on the loop class and on
-`RecoveryPolicy` in `agent/runtime/recovery.py`.
+hit. The limits are constructor arguments on the loop class (`max_steps` 8,
+`max_tool_calls` 24, `max_messages_per_session` 200, `max_parallel_tool_calls`
+1) and on `RecoveryPolicy` in `agent/runtime/recovery.py`.
 
 ## Flow
 
@@ -32,16 +33,25 @@ hit. The limits are constructor arguments on the loop class and on
         route["<b>HTTP route</b><br/>check model, relink view context,<br/>claim the turn"]
         route -- no model --> e503(["503"])
         route -- turn running --> e409(["409"])
-        route --> submit["<b>submit_user_message</b><br/>load conversation, check message cap,<br/>append user message"]
-        submit --> step["<b>Step</b>, up to max_steps<br/>list tools, call the model,<br/>append its reply"]
-        step --> calls{"Tool calls?"}
-        calls -- no --> done(["Return the answer"])
-        calls -- yes --> batch["Run each tool call<br/>(next chart)"]
+        route --> submit["<b>submit_user_message</b><br/>check message cap, deliver finished<br/>background tasks, run before_turn hooks,<br/>append user message"]
+        submit --> step["<b>Step</b>, up to max_steps<br/>check the stop flag, list tools,<br/>collect pinned context"]
+        step --> last{"Last step?<br/>max_steps or stopped"}
+        last -- no --> model["Call the model"]
+        last -- yes --> wrap["Call the model with tools off<br/>and the wrap-up note, unless it<br/>continues a cut-off reply"]
+        model --> calls{"Tool calls?"}
+        calls -- "no, cut off at the<br/>output limit (up to 2 times)" --> cont["Append a continue note"] --> step
+        calls -- "no, with text<br/>(a 3rd cut adds<br/>turnEnding length)" --> done(["Return the answer"])
+        calls -- no, no text --> empty(["Raise: empty reply"])
+        calls -- yes --> batch["Run the tool batch<br/>(next chart)"]
         batch -- recovery says stop --> fb1(["Fallback message"])
         batch -- fatal error or cap --> fail1(["Raise"])
-        batch -- all ran --> left{"Steps left?"}
-        left -- yes --> step
-        left -- no --> any{"Any retryable<br/>error?"}
+        batch -- all answered, or stopped --> step
+        wrap --> text{"Text?"}
+        text -- yes --> ending(["Return the answer, with turnEnding<br/>unless it finished a<br/>continued reply"])
+        text -- "no, tools asked" --> stopped{"Stopped?"}
+        text -- "no, no tools" --> empty
+        stopped -- yes --> stoptext(["Stopped reply"])
+        stopped -- no --> any{"Any retryable<br/>error?"}
         any -- yes --> fb2(["Fallback message"])
         any -- no --> fail2(["Raise"])
 
@@ -49,32 +59,40 @@ hit. The limits are constructor arguments on the loop class and on
         classDef bad stroke:#c62828,stroke-width:2px
         classDef soft stroke:#ef6c00,stroke-width:2px
         class done ok
-        class e503,e409,fail1,fail2 bad
-        class fb1,fb2 soft
+        class e503,e409,empty,fail1,fail2 bad
+        class fb1,fb2,ending,stoptext soft
     ```
 
 ??? info "Diagram: each tool call in the batch"
 
     ```mermaid
     flowchart TD
-        cap{"Over the<br/>tool-call cap?"}
-        cap -- yes --> close
-        cap -- no --> dup{"Same call a<br/>3rd time?"}
+        stop{"Stop asked?"}
+        stop -- yes --> unrun["Answer this call and every<br/>later one as not run"] --> judge
+        stop -- no --> cap{"Over the<br/>tool-call cap?"}
+        cap -- yes --> close["Close open calls"] --> fail(["Raise"])
+        cap -- no --> cut{"Reply cut off at<br/>the output limit?"}
+        cut -- yes --> trunc["tool_arguments_truncated<br/>result"]
+        cut -- no --> dup{"Same call a<br/>3rd time?"}
         dup -- yes --> guard["Loop-guard result"]
         dup -- no --> exec["Execute"]
-        exec -- fatal_error --> close["Close open calls"] --> fail(["Raise"])
-        exec -- success or<br/>retryable_error --> append["Append tool result"]
+        exec -- fatal_error --> close
+        exec -- success or<br/>retryable_error --> append["Append tool result,<br/>run after_tool hooks"]
         guard --> append
-        append --> stop{"Retryable error and<br/>recovery says stop?"}
-        stop -- yes --> fb(["Fallback message"])
-        stop -- no --> next(["Next call"])
+        trunc --> append
+        append --> more{"More calls?"}
+        more -- yes --> stop
+        more -- no --> judge{"Retryable error and<br/>recovery says stop?"}
+        judge -- yes --> fb(["Fallback message"])
+        judge -- "no, stopped" --> halted(["Batch ends.<br/>The next step is the last."])
+        judge -- "no, not stopped" --> next(["Next step"])
 
         classDef ok stroke:#2e7d32,stroke-width:2px
         classDef bad stroke:#c62828,stroke-width:2px
         classDef soft stroke:#ef6c00,stroke-width:2px
         class next ok
         class fail bad
-        class fb soft
+        class fb,halted soft
     ```
 
 ## Before the loop
@@ -87,26 +105,63 @@ see the live page. It then claims the turn with a per-session lock
 `hosted_agent_turn_in_flight`. The claim is released when the turn ends,
 whether it succeeded or not.
 
-`submit_user_message` loads the conversation, checks the session message cap,
-and appends the user's message.
+`submit_user_message` then does four things in order:
+
+1. **Message cap.** It loads the conversation and checks the session message
+   cap. Messages a hook re-adds each turn do not count.
+2. **Finished background tasks.** Each task that finished since the last turn
+   is delivered as one internal note. See [Background tasks](#background-tasks).
+3. **Turn hooks.** It drops the messages hooks added last turn, then runs
+   every hook's `before_turn` (`agent/runtime/hooks.py`). The default list
+   is empty.
+4. **User message.** It appends the user's message.
 
 ## One step
 
-### 1. Tools and prompt
+### 1. Stop check, tools and prompt
+
+Each step first reads the session's stop flag. A stop asked for during this
+turn makes this step the last. A model call already running is never aborted.
 
 The tool list is rebuilt every step from the session's agent definition
 (`agent/tools/adapter.py`).
 
-The prompt is built by `ContextBudgetManager` (`agent/runtime/context_budget.py`).
-It has three levels, `default`, `aggressive` and `minimal`. Each keeps fewer
-recent messages and shortens them more. The manager picks the first level
-whose estimated size fits its budget. If the provider still rejects the prompt
-as too long, the loop retries at the other levels. If every level is
-rejected, the turn fails and asks the user to start a new chat. Any other
-model error fails the turn at once.
+**Pinned context.** Before every model call, each hook's `pinned_context`
+returns text for that one request. The provider adds it to the system text
+(`TerraFinTurnOptions.pinned_context` in `agent/contracts/model_client.py`).
+It is never written to the transcript.
+
+**Context budget.** The prompt is built by `ContextBudgetManager`
+(`agent/runtime/context_budget.py`). It has four levels, `full`, `default`,
+`aggressive` and `minimal`:
+
+- `full` sends the whole normalized transcript, uncut.
+- Each later level keeps fewer older messages and cuts them shorter.
+- The current turn, from the user's message on, is always sent.
+
+The manager picks the first level that fits the budget:
+
+- When the session's model metadata carries a `context_window`, the budget is
+  that window minus a reserve (15%, at least 16,000 tokens). The size of a
+  `full` prompt is then measured from the provider's own token count on the
+  last `full` reply, plus an estimate of the messages after it.
+- Otherwise the budget is a fixed estimate of 52,000 tokens, and the size is
+  estimated from characters.
+
+If the provider still rejects the prompt as too long, the loop retries at the
+tighter levels only. If every level is rejected, the turn fails and asks the
+user to start a new chat. Any other model error fails the turn at once.
+
+**Spill by pointer.** Below `full`, a long tool result is cut to its head and
+tail and ends with a pointer:
+`[full result: call_id=..., N chars; read_tool_result(call_id, offset, limit)]`.
+The model calls `read_tool_result` to read the exact text in slices. A slice
+it asked for is sent whole at every level but `minimal`. The stored transcript
+keeps every result in full.
 
 The model client (`agent/models/runtime.py`) reads the model pinned on the session
-and routes the call to that provider.
+and routes the call to that provider. Each reply records the provider's token
+usage and the level its prompt was sent at.
 
 ### 2. Model reply
 
@@ -115,20 +170,41 @@ and routes the call to that provider.
 - **Tool calls** are appended as one internal `tool_use` message before any
   call runs.
 - **No tool calls** ends the turn. The loop returns the final message, every
-  message added this turn, the tool results and the step count.
+  message added this turn, the tool results and the step count. The final
+  reply carries `turnTokenUsage`, the token usage of every model call in the
+  turn.
+- **No text and no tool calls** fails the turn as an empty reply.
 
 ### 3. Tool batch
 
-Calls run one after another, in the order the model gave them. For each call:
+`run_tool_batch` (`agent/runtime/tool_batch.py`) runs and answers every call
+in the batch, in the order the model gave them. The guru worker uses the same
+runner.
 
-1. **Tool-call cap.** A count across the whole turn. Past the cap, the turn
+**Parallel runs.** A run of consecutive read-only calls can share threads,
+up to `max_parallel_tool_calls`. It is 1 by default, so calls run one after
+another. Results are appended in call order either way.
+
+For each call:
+
+1. **Stop check.** If the user asked to stop, this call and every later one
+   get a `tool_call_unresolved` result saying it was not run. The batch ends,
+   and the next step is the last. Recovery is still judged on the calls that
+   ran. If it says stop, the turn ends with the fallback message, marked
+   `interrupted`, and no last step runs.
+2. **Tool-call cap.** A count across the whole turn. Past the cap, the turn
    fails.
-2. **Loop guard.** A call is identified by tool name plus arguments. The
+3. **Cut-off reply.** If the reply that asked for the calls was cut at the
+   output limit, its arguments may be truncated. No call runs. Each gets a
+   retryable `tool_arguments_truncated` result asking for smaller arguments.
+4. **Loop guard.** A call is identified by tool name plus arguments. The
    third identical call in one turn is not run. It gets a
    `tool_call_loop_guard` result telling the model to change tool, change
    arguments, or answer. It does not count toward recovery.
-3. **Execute.** `ToolExecutionEngine` (`agent/tools/execution.py`) runs the tool
+5. **Execute.** `ToolExecutionEngine` (`agent/tools/execution.py`) runs the tool
    through the adapter, which validates arguments and classifies failures.
+
+After each result is appended, every hook's `after_tool` runs.
 
 | Outcome | When | What the loop does |
 |---|---|---|
@@ -148,16 +224,50 @@ a `tool_call_unresolved` result before the error propagates. A stored
 
 ### 4. Recovery
 
-`RecoveryTracker` (`agent/runtime/recovery.py`) counts retryable errors in the turn.
-Once there are too many, or the same error repeats, the loop stops at once. It
-appends a fallback message asking the user to name a ticker or keep the
-relevant page open, and returns it as the final message. Otherwise the model
-sees the error results on the next step and can try again.
+`RecoveryTracker` (`agent/runtime/recovery.py`) counts failing batches, once
+per batch however many of its calls failed. After every call in the batch has
+its result, the loop asks the tracker. Three failing batches in a turn, or the
+same error in two batches, stop the turn. The loop appends a fallback message
+asking the user to name a ticker or keep the relevant page open, and returns
+it as the final message. Otherwise the model sees the error results on the
+next step and can try again.
 
-### 5. Out of steps
+### 5. Turn endings
 
-If every step used tool calls, the turn ends with the same fallback message
-when any retryable error happened, and fails otherwise.
+A reply on the last step carries `turnEnding`, unless it only finishes a
+continued reply. A reply still cut at the output limit after the loop stops
+continuing it, and the reply of a stopped turn, carry one too. A fallback message carries one only
+when the turn was stopped.
+The chat panel shows a line under that reply.
+
+| `turnEnding` | When | What the last step does |
+|---|---|---|
+| `step_limit` | The step is the last of `max_steps` | Tools are off, and a pinned wrap-up note asks for an answer from the results in hand: what is established, what is missing, what to fetch next. Tool calls in the reply are dropped unrun. |
+| `length` | The reply was cut at the output limit and not continued | The loop continues a cut text reply up to 2 times with an internal note: "continue exactly where it stopped". The parts are joined in the returned answer. The transcript keeps each part. A reply still cut after 2 continuations, or cut on the last step, ends the turn with `length`. A last step that continues a cut reply has tools off and no wrap-up note. |
+| `interrupted` | The user pressed Stop during the turn | The next step is the last: tools off, with the wrap-up note. If that step writes no text, the reply is "Stopped at your request before an answer was written." |
+
+Every provider reports a cut-off reply as stop reason `length`: OpenAI's
+`max_output_tokens`, Google's `MAX_TOKENS`, and Anthropic's `max_tokens`.
+
+### 6. Out of steps
+
+If the last step still asked for tools and wrote no text, the turn ends with
+the same fallback message when any retryable error happened, and fails
+otherwise.
+
+## Stop
+
+`POST /agent/api/runtime/sessions/{id}/interrupt` records a stop for the
+session in the session store. The route records it only while a turn may be
+running, and answers `interruptRequested: false` otherwise.
+
+The running turn reads the flag at two points:
+
+- before each step
+- before each tool call, or each parallel run of calls
+
+Only a stop asked for after the turn started counts, so a stop left by an
+earlier turn never ends the next one.
 
 ## Background tasks
 
@@ -171,6 +281,36 @@ right away. The turn does not wait. A dispatcher thread in
 worker pool. The widget reads task status from the session's tasks route
 (`/agent/api/runtime/sessions/{id}/tasks`).
 
+**The task's own view.** A handler that takes a `task` argument gets a
+`TerraFinTaskContext` (`agent/runtime/tasks.py`):
+
+- `heartbeat(stage)` renews the lease and sets `progress.stage`.
+- `cancelled()` says whether the user cancelled the task.
+- `load_checkpoint()` and `save_checkpoint(payload)` keep resume state in the
+  session store, apart from `progress`.
+- `call(name, ...)` runs another capability for the task.
+- `model_turn` is the loop's `complete_model_turn`, so a task's model calls
+  get the same prompt budget.
+
+The dispatcher also renews the lease of every task it is still running. A task
+whose worker was lost is claimed again, up to 3 attempts, then fails with
+`restart_limit`.
+
+**Cancel.** `POST /agent/api/runtime/tasks/{id}/cancel` sets the task's cancel
+event. A task not yet started never runs. A running handler stops at its next
+`cancelled()` check.
+
+**Delivery.** A completed task leaves a pending completion on the session. The
+next turn appends it, before the user's message, as one internal user note:
+
+- The note carries the task's result as JSON.
+- A task that fails after losing its worker 3 times (`restart_limit`) gets a
+  note that tells the model to say it failed.
+- A task whose handler raises is marked failed in the task list. No note is
+  delivered.
+
+Then every hook's `after_completion` runs.
+
 ## What is saved
 
 Two stores, wired in `agent/service/hosted.py`:
@@ -179,7 +319,7 @@ Two stores, wired in `agent/service/hosted.py`:
   Every message is written as it is appended.
 - **Session record** (`agent/storage/session_store.py`): a SQLite row per session.
   It holds the tool-call history, the pinned model, tasks, approvals and the
-  audit log.
+  audit log. Task checkpoints and stop requests sit in their own tables.
 
 Because each message is written when it is appended, a turn that fails leaves
 everything up to the failure in the transcript, with every tool call closed.

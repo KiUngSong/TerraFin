@@ -11,7 +11,9 @@ annotations and TYPE_CHECKING imports so this module stays free of
 behavioural dependencies on the rest of the agent package.
 """
 
-from typing import TYPE_CHECKING, Protocol
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Literal, Protocol
+
 
 if TYPE_CHECKING:
     # Guard required: runtime.loop imports TerraFinHostedModelClient from
@@ -29,6 +31,21 @@ if TYPE_CHECKING:
     from .definitions import TerraFinAgentDefinition
 
 
+# Set in a tool call's provider_data when the provider could not decode its
+# arguments; the call is answered with a retryable error instead of running.
+TOOL_ARGUMENTS_INVALID_KEY = "argumentsInvalid"
+
+
+@dataclass(frozen=True, slots=True)
+class TerraFinTurnOptions:
+    """Settings for one model request. Never persisted to the conversation."""
+
+    # "none" keeps the tool definitions in the request but forbids calling them.
+    tool_choice: Literal["auto", "none"] = "auto"
+    # Appended to the provider's system text for this request only.
+    pinned_context: str = ""
+
+
 class TerraFinHostedModelClient(Protocol):
     def complete(
         self,
@@ -38,7 +55,8 @@ class TerraFinHostedModelClient(Protocol):
         conversation: "TerraFinHostedConversation",
         messages: "tuple[TerraFinConversationMessage, ...]",
         tools: "tuple[TerraFinToolDefinition, ...]",
+        options: TerraFinTurnOptions | None = None,
     ) -> "TerraFinModelTurn": ...
 
 
-__all__ = ["TerraFinHostedModelClient"]
+__all__ = ["TOOL_ARGUMENTS_INVALID_KEY", "TerraFinHostedModelClient", "TerraFinTurnOptions"]

@@ -19,6 +19,7 @@ from TerraFin.agent.hosted_runtime import (
 )
 from TerraFin.agent.model_runtime import TerraFinRuntimeModel
 from TerraFin.agent.runtime import build_default_capability_registry
+from TerraFin.agent.runtime.capability import TerraFinCapability
 from TerraFin.agent.session_store import SQLiteHostedSessionStore
 from TerraFin.agent.transcript_store import HostedTranscriptStore
 
@@ -325,6 +326,7 @@ def test_sqlite_session_store_reloads_cached_record_when_another_worker_persists
     # Worker A mutates through a relink — persist updates SQLite AND worker
     # A's cache, but leaves worker B's cache stale.
     import time as _time
+
     _time.sleep(0.01)  # ensure strictly-later updated_at
     runtime_a.relink_session_view_context("hosted:coherency", "ctx-B")
 
@@ -506,6 +508,241 @@ def test_sqlite_store_allows_another_runtime_to_execute_pending_task(tmp_path) -
     assert current.result is not None
     assert current.result["ticker"] == "QQQ"
     runtime_b.shutdown()
+
+
+def _wait_for_task(runtime: TerraFinHostedAgentRuntime, task_id: str, status: str = "completed"):
+    for _ in range(80):
+        current = runtime.get_task(task_id)
+        if current.status == status:
+            return current
+        time.sleep(0.05)
+    raise AssertionError(f"Timed out waiting for task {task_id} to reach {status}.")
+
+
+def test_background_task_does_not_revert_writes_made_while_it_runs(tmp_path) -> None:
+    service = _FakeService()
+    registry = build_default_capability_registry(service, chart_opener=_fake_chart_opener)
+    db_path = tmp_path / "held-record.sqlite3"
+    runtime = TerraFinHostedAgentRuntime(
+        service=service,
+        capability_registry=registry,
+        session_store=SQLiteHostedSessionStore(db_path=db_path, service=service, registry=registry),
+    )
+    session_id = runtime.create_session(DEFAULT_HOSTED_AGENT_NAME, session_id="hosted:held").session.session_id
+
+    def _handler(*, name, progress=None):
+        progress("start")
+        runtime.list_sessions()
+        runtime.relink_session_view_context(session_id, "ctx-during-task")
+        progress("end")
+        return {"ticker": name}
+
+    registry._capabilities["market_snapshot"] = TerraFinCapability(
+        name="market_snapshot",
+        description="Stub that writes to its own session mid-run.",
+        handler=_handler,
+        backgroundable=True,
+        summary="stub",
+    )
+    try:
+        task = runtime.start_task(session_id, "market_snapshot", name="AAPL")
+        _wait_for_task(runtime, task.task_id)
+    finally:
+        runtime.shutdown()
+
+    stored = SQLiteHostedSessionStore(db_path=db_path, service=service, registry=registry).get(session_id)
+    assert stored.context.session.metadata["viewContextId"] == "ctx-during-task"
+    assert stored.context.task_registry.get(task.task_id).status == "completed"
+    assert [call.capability_name for call in stored.context.session.capability_calls] == ["market_snapshot"]
+
+
+def test_task_write_is_never_stamped_older_than_a_peer_write(tmp_path, monkeypatch) -> None:
+    from TerraFin.agent.runtime.context import create_agent_context
+    from TerraFin.agent.runtime.session import TerraFinAgentSession
+    from TerraFin.agent.storage import session_store as session_store_module
+
+    service = _FakeService()
+    registry = build_default_capability_registry(service, chart_opener=_fake_chart_opener)
+    db_path = tmp_path / "stamps.sqlite3"
+    store_a = SQLiteHostedSessionStore(db_path=db_path, service=service, registry=registry)
+    store_b = SQLiteHostedSessionStore(db_path=db_path, service=service, registry=registry)
+    context = create_agent_context(
+        service=service, registry=registry, session=TerraFinAgentSession(session_id="hosted:stamps")
+    )
+    task = context.task_registry.create("market_snapshot", description="d", session_id="hosted:stamps")
+    store_a.create(
+        session_store_module.TerraFinHostedSessionRecord(
+            session_id="hosted:stamps", agent_name=DEFAULT_HOSTED_AGENT_NAME, context=context, metadata={}
+        )
+    )
+    held_by_b = store_b.get("hosted:stamps")
+    earlier = session_store_module._utc_now()
+    store_b.touch("hosted:stamps")
+
+    monkeypatch.setattr(session_store_module, "_utc_now", lambda: earlier)
+    store_a.update_task("hosted:stamps", lambda tasks: tasks.complete(task.task_id, result={"ok": 1}))
+    monkeypatch.undo()
+
+    seen_by_b = store_b.get("hosted:stamps")
+    assert seen_by_b is not held_by_b
+    assert seen_by_b.context.task_registry.get(task.task_id).status == "completed"
+
+
+def test_idle_expiry_keeps_the_stored_session_and_its_pending_report(tmp_path) -> None:
+    service = _FakeService()
+    registry = build_default_capability_registry(service, chart_opener=_fake_chart_opener)
+    store = SQLiteHostedSessionStore(db_path=tmp_path / "expiry.sqlite3", service=service, registry=registry)
+    runtime = TerraFinHostedAgentRuntime(service=service, capability_registry=registry, session_store=store)
+    try:
+        session_id = runtime.create_session(DEFAULT_HOSTED_AGENT_NAME, session_id="hosted:idle").session.session_id
+        store.append_pending_completion(session_id, marker={"taskId": "t1", "result": {"title": "report"}})
+        time.sleep(1.1)
+
+        removed = store.cleanup_expired(session_ttl_seconds=1)
+
+        assert [record.session_id for record in removed] == [session_id]
+        assert runtime.get_session_record(session_id).session_id == session_id
+        assert [marker["taskId"] for marker in store.peek_pending_completions(session_id)] == ["t1"]
+    finally:
+        runtime.shutdown()
+
+
+def test_runtime_without_foreign_claims_runs_only_the_tasks_it_started(tmp_path) -> None:
+    service = _FakeService()
+    registry = build_default_capability_registry(service, chart_opener=_fake_chart_opener)
+    store = SQLiteHostedSessionStore(db_path=tmp_path / "claims.sqlite3", service=service, registry=registry)
+    runtime = TerraFinHostedAgentRuntime(
+        service=service,
+        capability_registry=registry,
+        session_store=store,
+        claim_foreign_tasks=False,
+    )
+    try:
+        session_id = runtime.create_session(DEFAULT_HOSTED_AGENT_NAME, session_id="hosted:cli").session.session_id
+        record = store.get(session_id)
+        foreign = record.context.task_registry.create(
+            "market_snapshot",
+            description="created by another process",
+            session_id=session_id,
+            input_payload={"name": "QQQ"},
+        )
+        store.persist(record)
+
+        own = runtime.start_task(session_id, "market_snapshot", name="MSFT")
+        _wait_for_task(runtime, own.task_id)
+
+        assert runtime.get_task(foreign.task_id).status == "pending"
+    finally:
+        runtime.shutdown()
+
+
+def _stub_task_capability(registry, handler) -> None:
+    registry._capabilities["market_snapshot"] = TerraFinCapability(
+        name="market_snapshot",
+        description="Stub that takes the task context.",
+        handler=handler,
+        backgroundable=True,
+        summary="stub",
+    )
+
+
+def test_a_handler_polling_cancelled_stops_after_cancel_task() -> None:
+    import threading
+
+    runtime = _runtime()
+    started = threading.Event()
+    stopped = threading.Event()
+
+    def _handler(*, name, task):
+        started.set()
+        deadline = time.monotonic() + 5
+        while not task.cancelled() and time.monotonic() < deadline:
+            time.sleep(0.01)
+        stopped.set()
+        return {"ticker": name}
+
+    _stub_task_capability(runtime.capability_registry, _handler)
+    try:
+        session_id = runtime.create_session(DEFAULT_HOSTED_AGENT_NAME).session.session_id
+        task = runtime.start_task(session_id, "market_snapshot", name="AAPL")
+        assert started.wait(2)
+        runtime.cancel_task(task.task_id)
+        assert stopped.wait(1), "the handler never saw the cancel"
+        assert _wait_for_task(runtime, task.task_id, "cancelled").status == "cancelled"
+    finally:
+        runtime.shutdown()
+
+
+def test_heartbeat_extends_the_lease() -> None:
+    runtime = _runtime()
+    leases = []
+
+    def _handler(*, name, task):
+        leases.append(runtime.get_task(task.task_id).lease_expires_at)
+        time.sleep(0.05)
+        task.heartbeat()
+        leases.append(runtime.get_task(task.task_id).lease_expires_at)
+        return {"ticker": name}
+
+    _stub_task_capability(runtime.capability_registry, _handler)
+    try:
+        session_id = runtime.create_session(DEFAULT_HOSTED_AGENT_NAME).session.session_id
+        task = runtime.start_task(session_id, "market_snapshot", name="AAPL")
+        _wait_for_task(runtime, task.task_id)
+    finally:
+        runtime.shutdown()
+
+    assert leases[1] > leases[0]
+
+
+def test_a_checkpoint_survives_a_heartbeat_and_a_reclaim(tmp_path) -> None:
+    import threading
+
+    service = _FakeService()
+    registry = build_default_capability_registry(service, chart_opener=_fake_chart_opener)
+    db_path = tmp_path / "checkpoint.sqlite3"
+    first_attempt_hung = threading.Event()
+    release = threading.Event()
+    seen = []
+
+    def _handler(*, name, task):
+        checkpoint = task.load_checkpoint()
+        seen.append(checkpoint)
+        if checkpoint is None:
+            task.save_checkpoint({"step": 1})
+            task.heartbeat("step 1")
+            first_attempt_hung.set()
+            release.wait(5)
+        return {"ticker": name, "resumedFrom": checkpoint}
+
+    _stub_task_capability(registry, _handler)
+    runtime_a = TerraFinHostedAgentRuntime(
+        service=service,
+        capability_registry=registry,
+        session_store=SQLiteHostedSessionStore(db_path=db_path, service=service, registry=registry),
+        task_lease_seconds=1,
+    )
+    runtime_b = None
+    try:
+        session_id = runtime_a.create_session(DEFAULT_HOSTED_AGENT_NAME, session_id="hosted:cp").session.session_id
+        task = runtime_a.start_task(session_id, "market_snapshot", name="AAPL")
+        assert first_attempt_hung.wait(2)
+        runtime_a.shutdown()
+        runtime_b = TerraFinHostedAgentRuntime(
+            service=service,
+            capability_registry=registry,
+            session_store=SQLiteHostedSessionStore(db_path=db_path, service=service, registry=registry),
+        )
+        done = _wait_for_task(runtime_b, task.task_id)
+    finally:
+        release.set()
+        runtime_a.shutdown()
+        if runtime_b is not None:
+            runtime_b.shutdown()
+
+    assert seen == [None, {"step": 1}]
+    assert done.attempt_count == 2
+    assert done.result["resumedFrom"] == {"step": 1}
 
 
 def test_transcript_first_runtime_ignores_legacy_blob_only_sessions(tmp_path) -> None:

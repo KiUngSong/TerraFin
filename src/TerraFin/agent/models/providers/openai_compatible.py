@@ -1,22 +1,26 @@
 import json
 import logging
+import time
 from collections.abc import Mapping
 from datetime import UTC, datetime
 from typing import Any
 
 from openai import APIError
 
+from ...contracts.conversation_state import iter_tool_call_history
+from ...contracts.model_client import TOOL_ARGUMENTS_INVALID_KEY, TerraFinTurnOptions
 from ...conversation import (
     TerraFinConversationMessage,
     TerraFinHostedConversation,
     TerraFinModelTurn,
+    TerraFinTokenUsage,
     TerraFinToolCall,
 )
-from ...contracts.conversation_state import iter_tool_call_history
 from ...conversation_state import get_provider_state, set_provider_state
 from ...definitions import TerraFinAgentDefinition
 from ...runtime.session import TerraFinAgentSession
 from ...tools import TerraFinToolDefinition
+
 
 _logger = logging.getLogger(__name__)
 
@@ -24,11 +28,18 @@ _logger = logging.getLogger(__name__)
 def _utc_now_iso() -> str:
     return datetime.now(UTC).isoformat()
 
+
 _MAX_CHAIN_RECOVERIES = 2
 # Strikes expire by wall clock, not by turns: a recovery clears the chain, so the
 # next turn cannot resume, so a turn-based decay could never reach the limit
 # while holding forever made a single benign 400 disable resuming for good.
 _CHAIN_STRIKE_TTL_SECONDS = 3600
+_RETRY_BACKOFF_SECONDS = 0.5
+_RETRY_BACKOFF_CAP_SECONDS = 8.0
+# A server-directed Retry-After is honoured up to this bound, then capped.
+_RETRY_AFTER_CAP_SECONDS = 60.0
+_RETRYABLE_STATUS_CODES = {408, 409, 429}
+_INCOMPLETE_STOP_REASONS = {"max_output_tokens": "length", "content_filter": "content_filter"}
 
 
 class OpenAICompatibleResponsesRunner:
@@ -43,6 +54,20 @@ class OpenAICompatibleResponsesRunner:
         self.max_retries = max(max_retries, 0)
         self.response_error_cls = response_error_cls
 
+    @staticmethod
+    def _retry_delay(exc: APIError, attempt: int) -> float:
+        """The SDK runs with max_retries=0, so this loop owns Retry-After: a
+        numeric server delay wins over the exponential backoff."""
+        headers = getattr(getattr(exc, "response", None), "headers", None) or {}
+        for header, divisor in (("retry-after-ms", 1000.0), ("retry-after", 1.0)):
+            try:
+                delay = float(headers.get(header)) / divisor
+            except (TypeError, ValueError):
+                continue
+            if delay > 0:
+                return min(delay, _RETRY_AFTER_CAP_SECONDS)
+        return min(_RETRY_BACKOFF_SECONDS * 2**attempt, _RETRY_BACKOFF_CAP_SECONDS)
+
     def complete(
         self,
         *,
@@ -53,17 +78,20 @@ class OpenAICompatibleResponsesRunner:
         conversation: TerraFinHostedConversation,
         messages: tuple[TerraFinConversationMessage, ...],
         tools: tuple[TerraFinToolDefinition, ...],
+        options: TerraFinTurnOptions | None = None,
         legacy_response_id: str | None = None,
         legacy_message_cursor: int = 0,
         legacy_response_id_key: str | None = None,
     ) -> TerraFinModelTurn:
         _ = session
+        options = options or TerraFinTurnOptions()
         payload = self._build_request_payload(
             model_id=model_id,
             agent=agent,
             conversation=conversation,
             messages=messages,
             tools=tools,
+            options=options,
             legacy_response_id=legacy_response_id,
             legacy_message_cursor=legacy_message_cursor,
             legacy_response_id_key=legacy_response_id_key,
@@ -97,15 +125,19 @@ class OpenAICompatibleResponsesRunner:
                         conversation=conversation,
                         messages=messages,
                         tools=tools,
+                        options=options,
                         legacy_response_id=None,
                         legacy_message_cursor=0,
                         legacy_response_id_key=legacy_response_id_key,
                         force_fresh=True,
                     )
                     continue
-                retryable = status_code is None or status_code == 429 or int(status_code) >= 500
+                retryable = (
+                    status_code is None or int(status_code) in _RETRYABLE_STATUS_CODES or int(status_code) >= 500
+                )
                 if attempt >= self.max_retries or not retryable:
                     raise self.response_error_cls(str(exc)) from exc
+                time.sleep(self._retry_delay(exc, attempt))
                 attempt += 1
             except Exception as exc:
                 raise self.response_error_cls(str(exc)) from exc
@@ -136,9 +168,7 @@ class OpenAICompatibleResponsesRunner:
                     attempted_resume=attempted_resume,
                     recovered_chain=recovered_chain,
                 ),
-                "chainRecoveriesAt": (
-                    _utc_now_iso() if recovered_chain else state_before.get("chainRecoveriesAt")
-                ),
+                "chainRecoveriesAt": (_utc_now_iso() if recovered_chain else state_before.get("chainRecoveriesAt")),
             },
         )
 
@@ -149,8 +179,30 @@ class OpenAICompatibleResponsesRunner:
         return TerraFinModelTurn(
             assistant_message=assistant_message,
             tool_calls=tuple(tool_calls),
-            stop_reason="tool_calls" if tool_calls else "completed",
+            stop_reason=self._stop_reason(data, has_tool_calls=bool(tool_calls)),
+            usage=self._usage(data),
         )
+
+    @staticmethod
+    def _usage(payload: Mapping[str, Any]) -> TerraFinTokenUsage | None:
+        usage = payload.get("usage")
+        if not isinstance(usage, Mapping):
+            return None
+        details = usage.get("input_tokens_details")
+        return TerraFinTokenUsage(
+            input=int(usage.get("input_tokens") or 0),
+            output=int(usage.get("output_tokens") or 0),
+            cache_read=int(details.get("cached_tokens") or 0) if isinstance(details, Mapping) else 0,
+        )
+
+    @staticmethod
+    def _stop_reason(payload: Mapping[str, Any], *, has_tool_calls: bool) -> str:
+        default = "tool_calls" if has_tool_calls else "completed"
+        if payload.get("status") != "incomplete":
+            return default
+        details = payload.get("incomplete_details")
+        reason = details.get("reason") if isinstance(details, Mapping) else None
+        return _INCOMPLETE_STOP_REASONS.get(str(reason or ""), default)
 
     def _build_request_payload(
         self,
@@ -160,6 +212,7 @@ class OpenAICompatibleResponsesRunner:
         conversation: TerraFinHostedConversation,
         messages: tuple[TerraFinConversationMessage, ...],
         tools: tuple[TerraFinToolDefinition, ...],
+        options: TerraFinTurnOptions = TerraFinTurnOptions(),
         legacy_response_id: str | None,
         legacy_message_cursor: int,
         legacy_response_id_key: str | None = None,
@@ -185,13 +238,18 @@ class OpenAICompatibleResponsesRunner:
         }
         if previous_response_id:
             payload["previous_response_id"] = previous_response_id
-        if not previous_response_id:
-            payload["instructions"] = (
-                f"You are '{agent.name}'. "
-                "Follow the user's format instructions exactly — do not add preamble, commentary, or conclusions outside the requested format. "
-                "Use tools only when the user's data is insufficient; if the user provides all necessary data inline, respond directly without tool calls. "
-                "Never fabricate specific numbers (prices, percentages, EPS values) not present in the provided data."
-            )
+        if options.tool_choice == "none":
+            payload["tool_choice"] = "none"
+        # Sent on every request: the API does not carry `instructions` over a
+        # `previous_response_id` chain.
+        payload["instructions"] = (
+            f"You are '{agent.name}'. "
+            "Follow the user's format instructions exactly — do not add preamble, commentary, or conclusions outside the requested format. "
+            "Use tools only when the user's data is insufficient; if the user provides all necessary data inline, respond directly without tool calls. "
+            "Never fabricate specific numbers (prices, percentages, EPS values) not present in the provided data."
+        )
+        if options.pinned_context:
+            payload["instructions"] += f"\n\n{options.pinned_context}"
         return payload
 
     def _decline_resume(self, reason: str) -> None:
@@ -273,10 +331,10 @@ class OpenAICompatibleResponsesRunner:
     ) -> tuple[TerraFinConversationMessage, ...] | None:
         """Messages appended since the chain's last response, or None to start fresh.
 
-        Keyed on `created_at`, not on a count: `loop.py:511-516` deletes the prior
-        working-memory note from `conversation.messages` in place on every user
-        turn, so an absolute index silently omits one message — a deferred research
-        report, or in the early-return case the user's own question.
+        Keyed on `created_at`, not on a count: the loop deletes hook-owned messages
+        (`TerraFinTurnHook.owned_metadata_tags`) from `conversation.messages` in place
+        on every user turn, so an absolute index silently omits one message: a
+        deferred research report, or in the early-return case the user's own question.
         """
         if self._strikes_active(state):
             return self._decline_resume("recent chain recoveries")
@@ -301,7 +359,7 @@ class OpenAICompatibleResponsesRunner:
                 return self._decline_resume("naive/aware timestamp mix")
         else:
             # No watermark: a pre-existing session. The old index counted a list that
-            # loop.py:511-516 edits in place, so it dropped a message. Take one fresh
+            # the loop edits in place, so it dropped a message. Take one fresh
             # chain instead; this turn's success writes the watermark.
             _ = legacy_message_cursor
             return self._decline_resume("no sentThrough watermark (pre-existing session)")
@@ -336,9 +394,7 @@ class OpenAICompatibleResponsesRunner:
         if [message.role for message in tail] != [message.role for message in resume]:
             return self._decline_resume("role sequence misaligned with the budgeted window")
         for original, approved in zip(resume, tail, strict=True):
-            if original.role == "tool" and str(original.tool_call_id or "") != str(
-                approved.tool_call_id or ""
-            ):
+            if original.role == "tool" and str(original.tool_call_id or "") != str(approved.tool_call_id or ""):
                 return self._decline_resume("tool_call_id misaligned with the budgeted window")
         return tail
 
@@ -408,9 +464,7 @@ class OpenAICompatibleResponsesRunner:
                 if as_plain_text:
                     # A fresh chain has no function_call for this output to answer,
                     # so send the data as text rather than losing it.
-                    input_items.append(
-                        self._text_item(f"[tool result: {message.name}]\n{message.content}")
-                    )
+                    input_items.append(self._text_item(f"[tool result: {message.name}]\n{message.content}"))
                     continue
                 input_items.append(
                     {
@@ -447,28 +501,25 @@ class OpenAICompatibleResponsesRunner:
             if not isinstance(item, Mapping) or item.get("type") != "function_call":
                 continue
             arguments_raw = item.get("arguments")
+            arguments: Any = {}
             if isinstance(arguments_raw, str) and arguments_raw.strip():
                 try:
                     arguments = json.loads(arguments_raw)
-                except json.JSONDecodeError as exc:
-                    raise self.response_error_cls(
-                        f"Provider function_call arguments for '{item.get('name')}' were not valid JSON."
-                    ) from exc
-            else:
-                arguments = {}
-            if not isinstance(arguments, Mapping):
-                raise self.response_error_cls(
-                    f"Provider function_call arguments for '{item.get('name')}' must decode to an object."
-                )
+                except json.JSONDecodeError:
+                    arguments = None
             call_id = str(item.get("call_id") or item.get("id") or "").strip()
             tool_name = str(item.get("name") or "").strip()
             if not call_id or not tool_name:
                 raise self.response_error_cls("Provider function_call response was missing call_id or name.")
+            # Undecodable arguments still make a call, so the model gets an
+            # error result it can correct instead of the turn failing.
+            valid = isinstance(arguments, Mapping)
             calls.append(
                 TerraFinToolCall(
                     call_id=call_id,
                     tool_name=tool_name,
-                    arguments=dict(arguments),
+                    arguments=dict(arguments) if valid else {},
+                    provider_data={} if valid else {TOOL_ARGUMENTS_INVALID_KEY: True},
                 )
             )
         return tuple(calls)

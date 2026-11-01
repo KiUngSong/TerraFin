@@ -26,14 +26,15 @@ from TerraFin.agent.runtime import build_default_capability_registry
 
 
 # Hosted-only tools live outside the capability registry: the three guru
-# consults and `current_view_context` need a live session, so they are wired
-# straight into the tool adapter instead.
+# consults, `current_view_context` and `read_tool_result` need a live session,
+# so they are wired straight into the tool adapter instead.
 HOSTED_ONLY_TOOLS = frozenset(
     {
         "consult_warren_buffett",
         "consult_howard_marks",
         "consult_stanley_druckenmiller",
         "current_view_context",
+        "read_tool_result",
     }
 )
 
@@ -113,8 +114,7 @@ def _declared_class_names() -> set[str]:
 def test_every_capability_has_a_tool_contract(capabilities) -> None:
     missing = sorted(c.name for c in capabilities if c.name not in HOSTED_TOOL_CONTRACTS)
     assert not missing, (
-        "capabilities registered without a HOSTED_TOOL_CONTRACTS entry "
-        f"(tool listing would raise KeyError): {missing}"
+        f"capabilities registered without a HOSTED_TOOL_CONTRACTS entry (tool listing would raise KeyError): {missing}"
     )
 
 
@@ -192,8 +192,7 @@ def test_every_capability_handler_binds_on_the_real_service() -> None:
         and getattr(c.handler, "__name__", None) not in (c.name, None)
     )
     assert not mislabelled, (
-        "capability handlers bound to a differently-named service method "
-        f"(likely a copy-paste error): {mislabelled}"
+        f"capability handlers bound to a differently-named service method (likely a copy-paste error): {mislabelled}"
     )
 
 
@@ -213,9 +212,7 @@ def test_declared_cli_subcommands_are_wired(capabilities) -> None:
     unwired = sorted(
         f"{c.name} -> {c.cli_subcommand_name}"
         for c in capabilities
-        if c.cli_subcommand_name
-        and c.cli_subcommand_name not in wired
-        and c.name not in CAPABILITIES_WITH_UNWIRED_CLI
+        if c.cli_subcommand_name and c.cli_subcommand_name not in wired and c.name not in CAPABILITIES_WITH_UNWIRED_CLI
     )
     assert not unwired, f"capabilities declaring a CLI subcommand that is not wired: {unwired}"
 
@@ -267,8 +264,7 @@ def test_no_new_undeclared_handler_parameters(real_capabilities) -> None:
             surprises[capability.name] = sorted(undeclared)
 
     assert not surprises, (
-        "handler parameters that are not in the tool schema and not listed as "
-        f"deliberately internal: {surprises}"
+        f"handler parameters that are not in the tool schema and not listed as deliberately internal: {surprises}"
     )
 
 

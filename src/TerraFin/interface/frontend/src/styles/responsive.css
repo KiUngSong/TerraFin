@@ -855,6 +855,150 @@
   color: var(--tf-down);
 }
 
+/* Turn activity: the tools a turn used, folded between question and answer. */
+.tf-agent-turn {
+  align-self: flex-start;
+  max-width: min(86%, 640px);
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--tf-space-1);
+  padding: var(--tf-space-2) var(--tf-space-3);
+  border: 1px solid var(--tf-border);
+  border-radius: var(--tf-radius);
+  background: var(--tf-bg-pane);
+  font-family: var(--tf-mono);
+}
+
+.tf-agent-turn--live {
+  max-width: none;
+  padding: 0;
+  border: 0;
+  background: none;
+}
+
+.tf-agent-turn__toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--tf-space-2);
+  padding: 0;
+  border: 0;
+  background: none;
+  text-align: left;
+  font: inherit;
+  font-size: var(--tf-fs-base);
+  line-height: 1.45;
+  color: var(--tf-muted-strong);
+  cursor: pointer;
+  word-break: break-word;
+}
+
+.tf-agent-turn__toggle:hover {
+  color: var(--tf-text);
+}
+
+.tf-agent-turn__calls {
+  display: grid;
+  gap: var(--tf-space-2);
+  margin: var(--tf-space-1) 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.tf-agent-turn__call {
+  display: grid;
+  gap: var(--tf-space-1);
+  min-width: 0;
+  padding-top: var(--tf-space-2);
+  border-top: 1px solid var(--tf-border);
+}
+
+.tf-agent-turn__call-head {
+  display: flex;
+  align-items: center;
+  gap: var(--tf-space-2);
+}
+
+.tf-agent-turn__call-head .tf-agent-task-card__label {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.tf-agent-turn__raw-toggle {
+  margin-left: auto;
+  padding: var(--tf-space-1) var(--tf-space-2);
+  border: 1px solid var(--tf-border);
+  border-radius: var(--tf-radius);
+  background: var(--tf-bg-elevated);
+  color: var(--tf-text);
+  font: inherit;
+  font-size: var(--tf-fs-xs);
+  cursor: pointer;
+}
+
+.tf-agent-turn__detail,
+.tf-agent-turn__footer {
+  font-size: var(--tf-fs-xs);
+  line-height: 1.5;
+  color: var(--tf-muted-strong);
+  word-break: break-word;
+}
+
+.tf-agent-turn__raw {
+  margin: 0;
+  max-height: 320px;
+  overflow: auto;
+  padding: var(--tf-space-2);
+  border-radius: var(--tf-radius);
+  background: var(--tf-bg);
+  font-size: var(--tf-fs-xs);
+  color: var(--tf-text);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.tf-agent-turn__footer {
+  align-self: flex-start;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--tf-space-1) var(--tf-space-3);
+  margin-top: calc(-1 * var(--tf-space-2));
+  font-family: var(--tf-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.tf-agent-turn__sources {
+  padding: 0 var(--tf-space-2);
+  border: 1px solid var(--tf-border);
+  border-radius: var(--tf-radius);
+}
+
+/* A turn that died: a full-width rule under its last message. */
+.tf-agent-turn-divider {
+  padding-top: var(--tf-space-2);
+  border-top: 1px solid var(--tf-down);
+  font-size: var(--tf-fs-base);
+  line-height: 1.45;
+  color: var(--tf-down);
+  word-break: break-word;
+}
+
+.tf-agent-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+@media (max-width: 767px) {
+  .tf-agent-turn__toggle,
+  .tf-agent-turn__raw-toggle {
+    min-height: var(--tf-tap-min);
+  }
+}
+
 .tf-agent-composer {
   display: flex;
   flex-direction: column;
@@ -962,8 +1106,16 @@
   padding: 11px 18px;
 }
 
+/* Light amber is too light for --tf-bg text to clear AA, so text goes dark. */
+[data-theme="light"] .tf-agent-primary {
+  color: var(--tf-text);
+}
+
+/* Disabled drops the amber fill rather than fading it, so its text keeps AA. */
 .tf-agent-primary:disabled {
-  opacity: 0.6;
+  background: var(--tf-bg-elevated);
+  color: var(--tf-muted);
+  cursor: default;
 }
 
 .tf-agent-secondary {
@@ -971,6 +1123,11 @@
   background: var(--tf-bg-elevated);
   color: var(--tf-text);
   padding: 11px 18px;
+}
+
+.tf-agent-secondary:disabled {
+  color: var(--tf-muted);
+  cursor: default;
 }
 
 .tf-agent-tool-results {
@@ -1285,12 +1442,6 @@
   color: var(--tf-amber);
 }
 
-.tf-agent-widget__meta-pill--attention {
-  background: var(--tf-bg-elevated);
-  border-color: var(--tf-amber);
-  color: var(--tf-amber);
-}
-
 .tf-agent-widget__close {
   color: var(--tf-text);
   background: var(--tf-bg-elevated);
@@ -1561,6 +1712,7 @@
   cursor: pointer;
   font-family: var(--tf-mono);
   background: var(--tf-bg-elevated);
+  color: var(--tf-text);
 }
 
 .tf-agent-approval-card__button--approve {
@@ -1579,6 +1731,41 @@
 
 .tf-agent-approval-card__button--deny:hover {
   background: var(--tf-bg-pane);
+}
+
+.tf-agent-approval-card__button:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.tf-agent-approval-dock {
+  flex-shrink: 0;
+  max-height: 40%;
+  overflow-y: auto;
+}
+
+.tf-agent-approval-card__note {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid var(--tf-border);
+  border-radius: var(--tf-radius);
+  padding: var(--tf-space-1) var(--tf-space-2);
+  font-size: var(--tf-fs-base);
+  font-family: var(--tf-mono);
+  color: var(--tf-text);
+  background: var(--tf-bg-pane);
+}
+
+.tf-agent-approval-card__note:focus {
+  outline: none;
+  border-color: var(--tf-amber);
+}
+
+@media (max-width: 767px) {
+  .tf-agent-approval-card__button,
+  .tf-agent-approval-card__note {
+    min-height: var(--tf-tap-min);
+  }
 }
 
 .tf-agent-task-board {
@@ -1712,6 +1899,65 @@
   background: var(--tf-bg-pane);
 }
 
+.tf-agent-task-card__cancel--armed {
+  border-color: var(--tf-down);
+  color: var(--tf-down);
+}
+
+/* Running background tasks, one line each, above the composer. */
+.tf-agent-task-capsule {
+  display: grid;
+  gap: var(--tf-space-1);
+  flex-shrink: 0;
+  max-height: 30%;
+  overflow-y: auto;
+}
+
+.tf-agent-task-capsule__row {
+  display: flex;
+  align-items: center;
+  gap: var(--tf-space-2);
+  padding: var(--tf-space-1) var(--tf-space-2);
+  border: 1px solid var(--tf-amber);
+  border-radius: var(--tf-radius);
+  background: var(--tf-bg-elevated);
+  font-family: var(--tf-mono);
+  font-size: var(--tf-fs-xs);
+  font-weight: 700;
+  color: var(--tf-amber);
+}
+
+.tf-agent-task-capsule__text {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tf-agent-task-capsule__elapsed {
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+@media (max-width: 767px) {
+  .tf-agent-task-card__cancel {
+    min-height: var(--tf-tap-min);
+  }
+}
+
+/* An ended task's one transcript row. */
+.tf-agent-task-notice {
+  font-size: var(--tf-fs-base);
+  line-height: 1.45;
+  color: var(--tf-muted-strong);
+  word-break: break-word;
+}
+
+.tf-agent-task-notice--failed {
+  color: var(--tf-down);
+}
+
 .tf-agent-transcript--widget {
   min-height: 0;
   flex: 1 1 auto;
@@ -1782,30 +2028,6 @@
   background: var(--tf-bg-pane);
   width: min(280px, calc(100vw - 80px));
   max-width: min(320px, calc(100vw - 80px));
-}
-
-.tf-agent-widget__notice-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.tf-agent-widget__notice {
-  border: 1px solid var(--tf-amber);
-  border-radius: var(--tf-radius);
-  background: var(--tf-bg-elevated);
-  color: var(--tf-amber);
-  padding: 7px 11px;
-  font-size: var(--tf-fs-xs);
-  font-weight: 700;
-  font-family: var(--tf-mono);
-  cursor: pointer;
-}
-
-.tf-agent-widget__notice--attention {
-  background: var(--tf-bg-elevated);
-  border-color: var(--tf-amber);
-  color: var(--tf-amber);
 }
 
 .tf-agent-widget__tool-strip {

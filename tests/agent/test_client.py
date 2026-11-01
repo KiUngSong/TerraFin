@@ -3,6 +3,7 @@ import pandas as pd
 import TerraFin.agent.client as agent_client
 from TerraFin.agent.definitions import DEFAULT_HOSTED_AGENT_NAME, TerraFinAgentDefinition
 from TerraFin.agent.loop import TerraFinConversationMessage, TerraFinHostedConversation, TerraFinHostedRunResult
+from TerraFin.agent.runtime import inflight
 from TerraFin.agent.tools import TerraFinToolDefinition, TerraFinToolInvocationResult
 from TerraFin.data.contracts import TimeSeriesDataFrame
 
@@ -34,6 +35,7 @@ class _FakeHostedRuntime:
             allow_background_tasks=True,
         )
         self._records: dict[str, object] = {}
+        self.interrupt_requests: list[str] = []
 
     def list_agents(self):
         return (self._definition,)
@@ -46,6 +48,9 @@ class _FakeHostedRuntime:
 
     def get_public_session_record(self, session_id: str):
         return self._records[session_id]
+
+    def request_turn_interrupt(self, session_id: str) -> None:
+        self.interrupt_requests.append(session_id)
 
     def list_public_session_tasks(self, session_id: str):
         _ = session_id
@@ -105,7 +110,9 @@ class _FakeHostedLoop:
         self.runtime = _FakeHostedRuntime()
         self.tool_adapter = _FakeHostedToolAdapter()
         self._conversations: dict[str, TerraFinHostedConversation] = {}
-        self.model_client = type("ModelClient", (), {"describe_runtime_model": staticmethod(lambda session=None: None)})()
+        self.model_client = type(
+            "ModelClient", (), {"describe_runtime_model": staticmethod(lambda session=None: None)}
+        )()
 
     def create_session(
         self,
@@ -239,7 +246,9 @@ def test_open_chart_remote_names_uses_chart_routes(monkeypatch) -> None:
 
 def test_open_chart_local_frames_reuses_chart_client(monkeypatch) -> None:
     monkeypatch.setattr(agent_client, "TerraFinAgentService", lambda: _FakeService())
-    monkeypatch.setattr(agent_client.chart_client, "_wait_for_server_ready", lambda timeout_s=0, poll_interval_s=0: True)
+    monkeypatch.setattr(
+        agent_client.chart_client, "_wait_for_server_ready", lambda timeout_s=0, poll_interval_s=0: True
+    )
     monkeypatch.setattr(agent_client.chart_client, "start_server", lambda: 1234)
     monkeypatch.setattr(agent_client.chart_client, "update_chart", lambda data, session_id=None: True)
     monkeypatch.setattr(
@@ -336,3 +345,39 @@ def test_runtime_http_transport_uses_runtime_routes(monkeypatch) -> None:
     assert current["ok"] is True
     assert run["ok"] is True
     assert deleted["ok"] is True
+
+
+def test_runtime_interrupt_python_transport_requests_a_stop_only_while_a_turn_runs(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("TERRAFIN_AGENT_TRANSCRIPT_DIR", str(tmp_path / "agent"))
+    monkeypatch.setattr(agent_client, "TerraFinAgentService", lambda: _FakeService())
+    fake_loop = _FakeHostedLoop()
+    monkeypatch.setattr(agent_client.TerraFinAgentClient, "_runtime_loop", lambda self: fake_loop)
+    client = agent_client.TerraFinAgentClient(transport="python")
+    client.runtime_create_session(DEFAULT_HOSTED_AGENT_NAME, session_id="runtime:stop")
+
+    idle = client.runtime_interrupt("runtime:stop")
+    with inflight.claimed("runtime:stop") as acquired:
+        assert acquired, "precondition: a turn is running"
+        running = client.runtime_interrupt("runtime:stop")
+
+    assert idle == {"sessionId": "runtime:stop", "interruptRequested": False}
+    assert running == {"sessionId": "runtime:stop", "interruptRequested": True}
+    assert fake_loop.runtime.interrupt_requests == ["runtime:stop"]
+
+
+def test_runtime_interrupt_http_transport_posts_the_interrupt_route(monkeypatch) -> None:
+    monkeypatch.setattr(agent_client, "TerraFinAgentService", lambda: _FakeService())
+    request_log: list[tuple[str, dict | None]] = []
+
+    def _fake_post(url: str, json: dict | None = None, timeout: float = 0, headers: dict | None = None):
+        _ = timeout, headers
+        request_log.append((url, json))
+        return _FakeResponse(200, {"sessionId": "runtime:http", "interruptRequested": True})
+
+    monkeypatch.setattr(agent_client.requests, "post", _fake_post)
+    client = agent_client.TerraFinAgentClient(transport="http", base_url="http://127.0.0.1:8001")
+
+    payload = client.runtime_interrupt("runtime:http")
+
+    assert request_log == [("http://127.0.0.1:8001/agent/api/runtime/sessions/runtime:http/interrupt", {})]
+    assert payload == {"sessionId": "runtime:http", "interruptRequested": True}

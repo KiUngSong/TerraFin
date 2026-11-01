@@ -7,7 +7,7 @@ from openai import OpenAI
 
 from TerraFin.env import ensure_runtime_env_loaded
 
-from ...contracts.model_client import TerraFinHostedModelClient
+from ...contracts.model_client import TerraFinHostedModelClient, TerraFinTurnOptions
 from ...conversation import (
     TerraFinConversationMessage,
     TerraFinHostedConversation,
@@ -109,6 +109,8 @@ class TerraFinOpenAIResponsesProvider(TerraFinModelProvider):
                 api_key=self.config.api_key,
                 base_url=self.config.base_url,
                 timeout=self.config.timeout_seconds,
+                # The runner owns retries, so SDK retries on top would multiply them.
+                max_retries=0,
             )
         return self._client
 
@@ -132,6 +134,7 @@ class TerraFinOpenAIResponsesProvider(TerraFinModelProvider):
         conversation: TerraFinHostedConversation,
         messages: tuple[TerraFinConversationMessage, ...],
         tools: tuple[TerraFinToolDefinition, ...],
+        options: TerraFinTurnOptions | None = None,
     ) -> TerraFinModelTurn:
         legacy_response_id = str(conversation.metadata.get("openai_response_id") or "").strip() or None
         try:
@@ -151,8 +154,10 @@ class TerraFinOpenAIResponsesProvider(TerraFinModelProvider):
             conversation=conversation,
             messages=messages,
             tools=tools,
+            options=options,
             legacy_response_id=legacy_response_id,
             legacy_message_cursor=legacy_message_cursor,
+            legacy_response_id_key="openai_response_id",
         )
         provider_state = get_provider_state(conversation, self.provider_id)
         if provider_state:
@@ -181,6 +186,7 @@ class TerraFinOpenAIResponsesModelClient(TerraFinHostedModelClient):
         conversation: TerraFinHostedConversation,
         messages: tuple[TerraFinConversationMessage, ...],
         tools: tuple[TerraFinToolDefinition, ...],
+        options: TerraFinTurnOptions | None = None,
     ) -> TerraFinModelTurn:
         return self.provider.complete(
             model=self.runtime_model,
@@ -189,4 +195,5 @@ class TerraFinOpenAIResponsesModelClient(TerraFinHostedModelClient):
             conversation=conversation,
             messages=messages,
             tools=tools,
+            options=options,
         )

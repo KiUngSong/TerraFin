@@ -5,6 +5,7 @@ metadata; `TerraFinCapabilityRegistry` is the lookup surface used by
 contexts and the hosted runtime. `build_default_capability_registry`
 materialises every TerraFin capability the agent service exposes.
 """
+
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from inspect import signature
@@ -27,8 +28,9 @@ from .focus import (
 
 
 if TYPE_CHECKING:
-    from .context import TerraFinAgentContext
     from ..service import TerraFinAgentService
+    from .context import TerraFinAgentContext
+    from .tasks import TerraFinTaskContext
 
 
 @dataclass(frozen=True, slots=True)
@@ -98,14 +100,19 @@ class TerraFinCapabilityRegistry:
         *,
         context: "TerraFinAgentContext | None" = None,
         progress_reporter: Callable[[str], None] | None = None,
+        task_context: "TerraFinTaskContext | None" = None,
         **kwargs: Any,
     ) -> dict[str, Any]:
         capability = self.get(capability_name)
         handler_kwargs = dict(kwargs)
-        # The progress reporter goes only to a handler that takes a `progress`
-        # parameter. It stays out of `kwargs`, so recorded inputs never carry it.
-        if progress_reporter is not None and "progress" in signature(capability.handler).parameters:
+        # Inject the runtime-provided progress reporter and task context only for
+        # handlers that accept a `progress` or `task` parameter. Both stay out of
+        # `kwargs`, so recorded inputs never carry them.
+        parameters = signature(capability.handler).parameters
+        if progress_reporter is not None and "progress" in parameters:
             handler_kwargs["progress"] = progress_reporter
+        if task_context is not None and "task" in parameters:
+            handler_kwargs["task"] = task_context
         payload = capability.handler(**handler_kwargs)
         if not isinstance(payload, dict):
             raise TypeError(f"Capability '{capability_name}' must return a dict payload.")

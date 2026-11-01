@@ -1,5 +1,6 @@
 """TerraFinHostedToolAdapter — surfaces capabilities as tool definitions and
 runs tool calls against the hosted runtime."""
+
 from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any
 
@@ -10,6 +11,7 @@ from ..contracts.tool_contracts import (
     validate_tool_arguments,
 )
 from ..runtime.capability import TerraFinCapability
+from ..runtime.context_budget import READ_TOOL_RESULT_TOOL_NAME
 from ..runtime.errors import TerraFinAgentApprovalRequiredError
 from ..runtime.hosted import TerraFinHostedAgentRuntime
 from ..runtime.tasks import TerraFinTaskRecord
@@ -74,6 +76,8 @@ class TerraFinHostedToolAdapter:
         session_id: str,
         tool_name: str,
         arguments: Mapping[str, Any] | None = None,
+        *,
+        call_id: str | None = None,
     ) -> TerraFinToolInvocationResult:
         tool = self._get_tool_for_session(session_id, tool_name)
         payload: dict[str, Any]
@@ -81,9 +85,7 @@ class TerraFinHostedToolAdapter:
         resolved_arguments = _normalize_common_alias_arguments(dict(arguments or {}))
         # Validate AFTER alias normalisation (so documented aliases are accepted)
         # and BEFORE dispatch (so nothing undeclared reaches a handler).
-        schema_result, resolved_arguments = self._preflight_argument_schema(
-            tool, session_id, resolved_arguments
-        )
+        schema_result, resolved_arguments = self._preflight_argument_schema(tool, session_id, resolved_arguments)
         if schema_result is not None:
             return schema_result
         preflight_result = self._preflight_tool_misuse(tool, session_id, resolved_arguments)
@@ -95,6 +97,13 @@ class TerraFinHostedToolAdapter:
                     session_id,
                     view_context_id=_optional_string(resolved_arguments.get("viewContextId")),
                 )
+            elif tool.name == READ_TOOL_RESULT_TOOL_NAME:
+                payload = self.runtime.read_tool_result(
+                    session_id,
+                    call_id=str(resolved_arguments["call_id"]),
+                    offset=resolved_arguments.get("offset") or 0,
+                    limit=resolved_arguments.get("limit") or 8000,
+                )
             elif tool.name in _PERSONA_CONSULT_TOOLS:
                 if self._loop is None:
                     raise RuntimeError(
@@ -105,12 +114,15 @@ class TerraFinHostedToolAdapter:
                 guru_name = _PERSONA_CONSULT_TOOLS[tool.name]
                 question = _optional_string(resolved_arguments.get("question")) or ""
                 if not question:
-                    raise ValueError(
-                        f"{tool.name} requires a non-empty `question` argument."
-                    )
+                    raise ValueError(f"{tool.name} requires a non-empty `question` argument.")
                 payload = self._loop.consult_guru(session_id, guru_name, question)
             elif tool.execution_mode == "task":
-                task = self.runtime.start_task(session_id, tool.capability_name, **resolved_arguments)
+                task = self.runtime.start_task(
+                    session_id,
+                    tool.capability_name,
+                    origin_tool_call_id=call_id,
+                    **resolved_arguments,
+                )
                 payload = {
                     "accepted": True,
                     "taskId": task.task_id,
@@ -157,9 +169,7 @@ class TerraFinHostedToolAdapter:
                             "status": task.status,
                         }
                     else:
-                        payload = self.runtime.invoke(
-                            session_id, tool.capability_name, **retried_arguments
-                        )
+                        payload = self.runtime.invoke(session_id, tool.capability_name, **retried_arguments)
                 except Exception as exc_retry:
                     # Kept for `detail` below: the classification comes from the
                     # original error, so this is the only place the retry's own
@@ -173,9 +183,7 @@ class TerraFinHostedToolAdapter:
                     # the bad symbol the first error looked like. Only where the
                     # retry's error is classified and must surface — an
                     # unclassifiable one still yields the original verdict.
-                    retry_disposition = self._classify_tool_error(
-                        tool, resolved_arguments, retry_error
-                    )
+                    retry_disposition = self._classify_tool_error(tool, resolved_arguments, retry_error)
                     if retry_disposition is not None and retry_disposition.expose_to_user:
                         raise retry_error
                 disposition = self._classify_tool_error(tool, resolved_arguments, exc)
@@ -229,6 +237,7 @@ class TerraFinHostedToolAdapter:
             if definition.allow_background_tasks and capability.backgroundable:
                 tools.append(self._build_tool_definition(capability, execution_mode="task"))
         tools.append(self._build_current_view_context_tool())
+        tools.append(self._build_read_tool_result_tool())
         # Persona-consult tools — only the user-facing orchestrator gets
         # them. Persona subagents themselves (hiddenInternal guru roles)
         # must not recurse through consult_* onto each other, so they are
@@ -349,7 +358,12 @@ class TerraFinHostedToolAdapter:
         not in any contract, so a model that passes it is rejected; that matches
         the `additionalProperties: false` schema the task tool advertises.
         """
-        problems, normalized = validate_tool_arguments(tool.capability_name, arguments)
+        try:
+            problems, normalized = validate_tool_arguments(tool.capability_name, arguments)
+        except Exception as exc:
+            # A validator fault comes back to the model as a retryable argument
+            # error. Escaping `run_tool` would abort the whole turn.
+            problems, normalized = [f"arguments could not be validated: {exc}"], dict(arguments)
         if not problems:
             return None, normalized
 
@@ -508,6 +522,30 @@ class TerraFinHostedToolAdapter:
             metadata={
                 "backgroundable": False,
                 "capabilityName": "current_view_context",
+                "contractVersion": HOSTED_TOOL_CONTRACT_VERSION,
+                "responseModel": contract["response_model"],
+            },
+        )
+
+    def _build_read_tool_result_tool(self) -> TerraFinToolDefinition:
+        contract = get_hosted_tool_contract(READ_TOOL_RESULT_TOOL_NAME)
+        return TerraFinToolDefinition(
+            name=READ_TOOL_RESULT_TOOL_NAME,
+            capability_name=READ_TOOL_RESULT_TOOL_NAME,
+            description=(
+                "Read the full text of an earlier tool result in this conversation. A result "
+                "that was cut to fit the prompt ends with `[full result: call_id=..., N chars; "
+                "read_tool_result(call_id, offset, limit)]`. Pass that call_id to get the exact "
+                "characters from `offset`, up to `limit` (default 8000). `nextOffset` is where "
+                "the next slice starts, or null at the end. Use it before quoting a filing or "
+                "citing a figure that the cut result no longer shows."
+            ),
+            input_schema=contract["input_schema"],
+            execution_mode="invoke",
+            side_effecting=False,
+            metadata={
+                "backgroundable": False,
+                "capabilityName": READ_TOOL_RESULT_TOOL_NAME,
                 "contractVersion": HOSTED_TOOL_CONTRACT_VERSION,
                 "responseModel": contract["response_model"],
             },

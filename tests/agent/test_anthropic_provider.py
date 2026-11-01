@@ -5,7 +5,12 @@ import httpx2
 import pytest
 from anthropic.types.beta import BetaMessage
 
-from TerraFin.agent.contracts.conversation import make_text_block, make_tool_result_block, make_tool_use_block
+from TerraFin.agent.contracts.conversation import (
+    TerraFinTokenUsage,
+    make_text_block,
+    make_tool_result_block,
+    make_tool_use_block,
+)
 from TerraFin.agent.definitions import TerraFinAgentDefinition
 from TerraFin.agent.loop import TerraFinConversationMessage, TerraFinHostedConversation
 from TerraFin.agent.model_management import set_saved_provider_credentials
@@ -309,21 +314,42 @@ def test_tool_use_response_becomes_tool_calls() -> None:
     assert ANTHROPIC_CONTENT_KEY in turn.tool_calls[0].provider_data
 
 
+def test_usage_counts_cached_prompt_tokens_as_input() -> None:
+    usage = {
+        "input_tokens": 10,
+        "output_tokens": 5,
+        "cache_read_input_tokens": 300,
+        "cache_creation_input_tokens": 40,
+    }
+    provider, _ = _provider([_message([{"type": "text", "text": "Ok."}], usage=usage)])
+
+    turn = _complete(provider, [TerraFinConversationMessage(role="user", content="AAPL?")])
+
+    assert turn.usage == TerraFinTokenUsage(input=350, output=5, cache_read=300, cache_write=40)
+
+
 @pytest.mark.parametrize("stop_reason", ["max_tokens", "model_context_window_exceeded"])
-@pytest.mark.parametrize(
-    "content",
-    [
-        [
-            {"type": "text", "text": "Partial answer"},
-            {"type": "tool_use", "id": "toolu_1", "name": "market_snapshot", "input": {}},
-        ],
-        [{"type": "thinking", "thinking": "", "signature": "sig"}],
-    ],
-)
-def test_cut_off_reply_is_an_error_with_or_without_text(stop_reason, content) -> None:
+def test_cut_off_reply_reports_length_with_its_partial_text_and_calls(stop_reason) -> None:
+    content = [
+        {"type": "text", "text": "Partial answer"},
+        {"type": "tool_use", "id": "toolu_1", "name": "market_snapshot", "input": {}},
+    ]
     provider, _ = _provider([_message(content, stop_reason=stop_reason)])
 
-    with pytest.raises(TerraFinAnthropicModelResponseError, match=f"cut off.*{stop_reason}"):
+    turn = _complete(provider, [TerraFinConversationMessage(role="user", content="Long one.")])
+
+    assert turn.stop_reason == "length"
+    assert turn.assistant_message.content == "Partial answer"
+    assert [call.call_id for call in turn.tool_calls] == ["toolu_1"]
+
+
+@pytest.mark.parametrize("stop_reason", ["max_tokens", "model_context_window_exceeded"])
+def test_cut_off_reply_without_text_is_an_empty_reply(stop_reason) -> None:
+    provider, _ = _provider(
+        [_message([{"type": "thinking", "thinking": "", "signature": "sig"}], stop_reason=stop_reason)]
+    )
+
+    with pytest.raises(TerraFinAnthropicModelResponseError, match=f"empty reply.*{stop_reason}"):
         _complete(provider, [TerraFinConversationMessage(role="user", content="Long one.")])
 
 
@@ -562,6 +588,8 @@ def test_real_sdk_stream_round_trip_without_network() -> None:
     turn = _complete(provider, [TerraFinConversationMessage(role="user", content="AAPL?")])
 
     assert turn.stop_reason == "tool_calls"
+    # Input from message_start, output from the final message_delta.
+    assert turn.usage == TerraFinTokenUsage(input=10, output=20)
     assert turn.tool_calls[0].arguments == {"name": "AAPL"}
     assert turn.tool_calls[0].provider_data[ANTHROPIC_CONTENT_KEY][0] == {
         "type": "thinking",

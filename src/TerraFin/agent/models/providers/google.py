@@ -1,6 +1,7 @@
 import json
 import os
 import re
+import time
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
@@ -10,16 +11,20 @@ import requests
 
 from TerraFin.env import ensure_runtime_env_loaded
 
+from ...contracts.model_client import TerraFinTurnOptions
 from ...conversation import (
     TerraFinConversationMessage,
     TerraFinHostedConversation,
     TerraFinModelTurn,
+    TerraFinTokenUsage,
     TerraFinToolCall,
     iter_tool_result_blocks,
     iter_tool_use_blocks,
 )
 from ...conversation_state import get_tool_call_record
 from ...definitions import TerraFinAgentDefinition
+from ...runtime.session import TerraFinAgentSession
+from ...tools import TerraFinToolDefinition
 from ..management import resolve_provider_secret
 from ..runtime import (
     TerraFinModelConfigError,
@@ -27,8 +32,6 @@ from ..runtime import (
     TerraFinModelResponseError,
     TerraFinRuntimeModel,
 )
-from ...runtime.session import TerraFinAgentSession
-from ...tools import TerraFinToolDefinition
 
 
 DEFAULT_GOOGLE_BASE_URL = "https://generativelanguage.googleapis.com/v1beta"
@@ -36,6 +39,32 @@ DEFAULT_GOOGLE_MODEL = "gemini-4-argon"
 DEFAULT_GOOGLE_TIMEOUT_SECONDS = 60.0
 DEFAULT_GOOGLE_MAX_RETRIES = 2
 _GOOGLE_MODEL_RE = re.compile(r"^(gemini|gemma)-[a-z0-9][a-z0-9.-]*$", re.IGNORECASE)
+_RETRY_BACKOFF_SECONDS = 0.5
+_RETRY_BACKOFF_CAP_SECONDS = 8.0
+_GOOGLE_STOP_REASONS = {
+    "MAX_TOKENS": "length",
+    "SAFETY": "content_filter",
+    "RECITATION": "content_filter",
+    "BLOCKLIST": "content_filter",
+    "PROHIBITED_CONTENT": "content_filter",
+    "SPII": "content_filter",
+    "IMAGE_SAFETY": "content_filter",
+}
+
+
+def _retry_delay(attempt: int) -> float:
+    return min(_RETRY_BACKOFF_SECONDS * 2**attempt, _RETRY_BACKOFF_CAP_SECONDS)
+
+
+def _usage(metadata: Any) -> TerraFinTokenUsage | None:
+    if not isinstance(metadata, Mapping):
+        return None
+    # promptTokenCount already includes cached content. Thinking is billed as output.
+    return TerraFinTokenUsage(
+        input=int(metadata.get("promptTokenCount") or 0),
+        output=int(metadata.get("candidatesTokenCount") or 0) + int(metadata.get("thoughtsTokenCount") or 0),
+        cache_read=int(metadata.get("cachedContentTokenCount") or 0),
+    )
 
 
 class TerraFinGoogleModelConfigError(TerraFinModelConfigError):
@@ -130,6 +159,7 @@ class TerraFinGoogleResponsesProvider(TerraFinModelProvider):
         conversation: TerraFinHostedConversation,
         messages: tuple[TerraFinConversationMessage, ...],
         tools: tuple[TerraFinToolDefinition, ...],
+        options: TerraFinTurnOptions | None = None,
     ) -> TerraFinModelTurn:
         _ = session
         payload = self._build_request_payload(
@@ -137,6 +167,7 @@ class TerraFinGoogleResponsesProvider(TerraFinModelProvider):
             conversation=conversation,
             messages=messages,
             tools=tools,
+            options=options or TerraFinTurnOptions(),
         )
         url = f"{self.config.base_url}/models/{model.model_id}:generateContent"
         headers = {
@@ -155,10 +186,12 @@ class TerraFinGoogleResponsesProvider(TerraFinModelProvider):
             except requests.RequestException as exc:
                 if attempt >= self.config.max_retries:
                     raise TerraFinGoogleModelResponseError(str(exc)) from exc
+                time.sleep(_retry_delay(attempt))
                 continue
             if response.status_code == 429 or response.status_code >= 500:
                 if attempt >= self.config.max_retries:
                     break
+                time.sleep(_retry_delay(attempt))
                 continue
             break
 
@@ -179,9 +212,13 @@ class TerraFinGoogleResponsesProvider(TerraFinModelProvider):
         conversation: TerraFinHostedConversation,
         messages: tuple[TerraFinConversationMessage, ...],
         tools: tuple[TerraFinToolDefinition, ...],
+        options: TerraFinTurnOptions = TerraFinTurnOptions(),
     ) -> dict[str, Any]:
         system_lines = [message.content for message in messages if message.role == "system" and message.content]
         contents: list[dict[str, Any]] = []
+        # Call ids of the latest model turn: only these may be answered by a
+        # functionResponse. Any other result lost its call to the context window.
+        open_call_ids: set[str] = set()
         for message in messages:
             if message.role == "system":
                 continue
@@ -189,28 +226,37 @@ class TerraFinGoogleResponsesProvider(TerraFinModelProvider):
                 contents.append({"role": "user", "parts": [{"text": message.content}]})
                 continue
             if message.role == "assistant":
-                tool_use_blocks = iter_tool_use_blocks(message)
-                if tool_use_blocks:
-                    for block in tool_use_blocks:
-                        contents.append(
-                            {
-                                "role": "model",
-                                "parts": [
-                                    {
-                                        "functionCall": {
-                                            "name": str(block.payload.get("toolName") or ""),
-                                            "args": dict(block.payload.get("arguments", {})),
-                                        }
-                                    }
-                                ],
-                            }
-                        )
+                parts: list[dict[str, Any]] = []
                 if message.content.strip():
-                    contents.append({"role": "model", "parts": [{"text": message.content}]})
+                    parts.append({"text": message.content})
+                for block in iter_tool_use_blocks(message):
+                    part: dict[str, Any] = {
+                        "functionCall": {
+                            "name": str(block.payload.get("toolName") or ""),
+                            "args": dict(block.payload.get("arguments", {})),
+                        }
+                    }
+                    signature = dict(block.payload.get("providerData") or {}).get("thoughtSignature")
+                    if signature:
+                        part["thoughtSignature"] = signature
+                    parts.append(part)
+                if parts:
+                    if not contents or contents[-1]["role"] != "model":
+                        open_call_ids = set()
+                    open_call_ids.update(
+                        str(block.payload.get("callId") or "") for block in iter_tool_use_blocks(message)
+                    )
+                    self._append_turn(contents, "model", parts)
                 continue
             if message.role == "tool":
                 tool_result_blocks = iter_tool_result_blocks(message)
                 tool_result_block = tool_result_blocks[0] if tool_result_blocks else None
+                if str(message.tool_call_id or "") not in open_call_ids:
+                    result_payload = tool_result_block.payload if tool_result_block is not None else {}
+                    tool_name = str(result_payload.get("toolName") or message.name or "tool")
+                    text = f"[tool result: {tool_name}]\n{message.content}"
+                    contents.append({"role": "user", "parts": [{"text": text}]})
+                    continue
                 call_record = get_tool_call_record(conversation, message.tool_call_id or "")
                 if tool_result_block is not None:
                     tool_name = str(
@@ -223,18 +269,17 @@ class TerraFinGoogleResponsesProvider(TerraFinModelProvider):
                 else:
                     tool_name = message.name or str((call_record or {}).get("toolName") or "")
                     response_payload = self._parse_tool_output(message.content)
-                contents.append(
-                    {
-                        "role": "user",
-                        "parts": [
-                            {
-                                "functionResponse": {
-                                    "name": tool_name,
-                                    "response": response_payload,
-                                }
+                self._append_turn(
+                    contents,
+                    "user",
+                    [
+                        {
+                            "functionResponse": {
+                                "name": tool_name,
+                                "response": response_payload,
                             }
-                        ],
-                    }
+                        }
+                    ],
                 )
 
         payload: dict[str, Any] = {
@@ -253,24 +298,37 @@ class TerraFinGoogleResponsesProvider(TerraFinModelProvider):
             ],
             "toolConfig": {
                 "functionCallingConfig": {
-                    "mode": "AUTO",
+                    "mode": "NONE" if options.tool_choice == "none" else "AUTO",
                 }
             },
         }
-        if system_lines:
-            payload["systemInstruction"] = {
-                "parts": [
-                    {
-                        "text": "\n\n".join(
-                            [
-                                *system_lines,
-                                f"Stay within the hosted TerraFin agent definition '{agent.name}' and use tools when they improve accuracy.",
-                            ]
-                        )
-                    }
-                ]
-            }
+        instruction_lines = (
+            [
+                *system_lines,
+                f"Stay within the hosted TerraFin agent definition '{agent.name}' and use tools when they improve accuracy.",
+            ]
+            if system_lines
+            else []
+        )
+        if options.pinned_context:
+            instruction_lines.append(options.pinned_context)
+        if instruction_lines:
+            payload["systemInstruction"] = {"parts": [{"text": "\n\n".join(instruction_lines)}]}
         return payload
+
+    @staticmethod
+    def _append_turn(contents: list[dict[str, Any]], role: str, parts: list[dict[str, Any]]) -> None:
+        """Gemini wants one model turn per step, holding its text then every call,
+        and one user turn holding every response to those calls."""
+        previous = contents[-1] if contents else None
+        if (
+            previous is not None
+            and previous["role"] == role
+            and (role == "model" or all("functionResponse" in part for part in [*previous["parts"], *parts]))
+        ):
+            previous["parts"].extend(parts)
+            return
+        contents.append({"role": role, "parts": parts})
 
     def _parse_tool_output(self, content: str) -> dict[str, Any]:
         try:
@@ -319,11 +377,13 @@ class TerraFinGoogleResponsesProvider(TerraFinModelProvider):
                     f"Gemini functionCall arguments for '{tool_name}' must decode to an object."
                 )
             call_id = str(function_call.get("id") or f"gemini-call:{index}:{uuid4().hex}").strip()
+            signature = part.get("thoughtSignature")
             tool_calls.append(
                 TerraFinToolCall(
                     call_id=call_id,
                     tool_name=tool_name,
                     arguments=dict(arguments),
+                    provider_data={"thoughtSignature": signature} if isinstance(signature, str) and signature else {},
                 )
             )
         assistant_message = (
@@ -332,7 +392,11 @@ class TerraFinGoogleResponsesProvider(TerraFinModelProvider):
         return TerraFinModelTurn(
             assistant_message=assistant_message,
             tool_calls=tuple(tool_calls),
-            stop_reason="tool_calls" if tool_calls else "completed",
+            stop_reason=_GOOGLE_STOP_REASONS.get(
+                str(first.get("finishReason") or ""),
+                "tool_calls" if tool_calls else "completed",
+            ),
+            usage=_usage(payload.get("usageMetadata")),
         )
 
     def _error_message(self, response: requests.Response) -> str:

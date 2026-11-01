@@ -3,17 +3,25 @@
 Note: this module is `agent.runtime.tasks` and is distinct from
 `agent.tasks` (which holds high-level helpers like `open_chart`).
 """
-from collections.abc import Iterable, Mapping
+
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field, replace
 from datetime import datetime
-from threading import RLock
-from typing import Any, Literal
+from threading import Event, RLock
+from typing import TYPE_CHECKING, Any, Literal
 from uuid import uuid4
 
 from .artifacts import _utc_now
 
 
+if TYPE_CHECKING:
+    from ..storage.session_store import HostedSessionStore
+
+
 TaskStatus = Literal["pending", "running", "completed", "failed", "cancelled"]
+
+# A task whose lease has expired this many times is failed instead of re-claimed.
+TASK_MAX_ATTEMPTS = 3
 
 
 def _is_terminal_task_status(status: TaskStatus) -> bool:
@@ -38,6 +46,58 @@ class TerraFinTaskRecord:
     lease_expires_at: datetime | None = None
     attempt_count: int = 0
     origin_tool_call_id: str | None = None
+
+
+def task_lease_expired(task: TerraFinTaskRecord, *, now: datetime) -> bool:
+    return task.status == "running" and task.lease_expires_at is not None and task.lease_expires_at <= now
+
+
+def task_restart_limit_reached(task: TerraFinTaskRecord, *, now: datetime) -> bool:
+    return task_lease_expired(task, now=now) and task.attempt_count >= TASK_MAX_ATTEMPTS
+
+
+class TerraFinTaskContext:
+    """A background handler's view of its own task, injected as `task`."""
+
+    def __init__(
+        self,
+        *,
+        task_id: str,
+        session_id: str,
+        heartbeat: Callable[[str | None], None],
+        cancel_event: Event,
+        store: "HostedSessionStore",
+        call: Callable[..., dict[str, Any]],
+        turn_runner: Callable[[], Callable[..., Any] | None],
+    ) -> None:
+        self.task_id = task_id
+        self.session_id = session_id
+        self._heartbeat = heartbeat
+        self._cancel_event = cancel_event
+        self._store = store
+        self._call = call
+        self._turn_runner = turn_runner
+
+    @property
+    def model_turn(self) -> Callable[..., Any] | None:
+        """The hosted loop's `complete_model_turn`, or None while no loop is bound."""
+        return self._turn_runner()
+
+    def heartbeat(self, stage: str | None = None) -> None:
+        """Renews the lease, and sets `progress.stage` when `stage` is given."""
+        self._heartbeat(stage)
+
+    def cancelled(self) -> bool:
+        return self._cancel_event.is_set()
+
+    def load_checkpoint(self) -> dict[str, Any] | None:
+        return self._store.load_task_checkpoint(self.session_id, self.task_id)
+
+    def save_checkpoint(self, payload: Mapping[str, Any]) -> None:
+        self._store.save_task_checkpoint(self.session_id, self.task_id, payload=dict(payload))
+
+    def call(self, capability_name: str, /, **kwargs: Any) -> dict[str, Any]:
+        return self._call(capability_name, **kwargs)
 
 
 class TerraFinTaskRegistry:

@@ -5,20 +5,29 @@ from types import SimpleNamespace
 
 import pandas as pd
 import pytest
+from fakes import BaseFakeService, fake_chart_opener
 from fastapi.testclient import TestClient
 
 import TerraFin.agent.service as agent_service
 import TerraFin.interface.agent.data_routes as agent_routes
-import TerraFin.interface.pages.stock.data_routes as stock_routes
 import TerraFin.interface.pages.stock.payloads as stock_payloads
+from TerraFin.agent.contracts.conversation import TerraFinTokenUsage
+from TerraFin.agent.contracts.conversation_state import RUNTIME_MODEL_METADATA_KEY
 from TerraFin.agent.definitions import (
     DEFAULT_HOSTED_AGENT_NAME,
     TerraFinAgentDefinition,
     is_internal_agent_definition,
 )
-from TerraFin.agent.contracts.conversation_state import RUNTIME_MODEL_METADATA_KEY
-from TerraFin.agent.loop import TerraFinConversationMessage, TerraFinHostedConversation, TerraFinHostedRunResult
-from TerraFin.agent.runtime import TerraFinAgentSession, TerraFinTaskRegistry
+from TerraFin.agent.hosted_runtime import TerraFinHostedAgentRuntime
+from TerraFin.agent.loop import (
+    TerraFinConversationMessage,
+    TerraFinHostedAgentLoop,
+    TerraFinHostedConversation,
+    TerraFinHostedRunResult,
+    TerraFinModelTurn,
+    TerraFinToolCall,
+)
+from TerraFin.agent.runtime import TerraFinAgentSession, TerraFinTaskRegistry, build_default_capability_registry
 from TerraFin.agent.runtime.hosted import HostedSessionListSummary
 from TerraFin.agent.session_store import (
     TerraFinHostedApprovalRequest,
@@ -28,8 +37,8 @@ from TerraFin.agent.session_store import (
 from TerraFin.agent.tools import TerraFinToolDefinition, TerraFinToolInvocationResult
 from TerraFin.data.contracts import HistoryChunk, TimeSeriesDataFrame
 from TerraFin.data.providers.corporate.filings.sec_edgar.filing import SecEdgarConfigurationError
-from TerraFin.interface.server import create_app
 from TerraFin.data.watchlist_service import reset_watchlist_service
+from TerraFin.interface.server import create_app
 
 
 def _make_fake_tsdf(ticker: str = "TEST", n: int = 120) -> TimeSeriesDataFrame:
@@ -147,6 +156,7 @@ class _FakeHostedRuntime:
         self._records: dict[str, TerraFinHostedSessionRecord] = {}
         self._task_index: dict[str, str] = {}
         self._view_contexts: dict[str, TerraFinHostedViewContextRecord] = {}
+        self.interrupt_requests: list[str] = []
 
     def list_agents(self):
         definitions = [self._definition]
@@ -273,6 +283,9 @@ class _FakeHostedRuntime:
     def cancel_public_task(self, task_id: str):
         task = self.get_public_task(task_id)
         return self.cancel_task(task.task_id)
+
+    def request_turn_interrupt(self, session_id: str) -> None:
+        self.interrupt_requests.append(session_id)
 
     def list_session_approvals(self, session_id: str):
         return tuple(self._records[session_id].approval_requests)
@@ -949,6 +962,7 @@ def test_agent_page_route_is_not_registered(monkeypatch) -> None:
 
     assert response.status_code == 404
 
+
 def test_claim_turn_is_atomic_and_rejects_a_second_concurrent_turn(
     lock_sandbox: str,
 ) -> None:
@@ -1066,3 +1080,161 @@ def test_a_second_concurrent_turn_is_rejected_with_409(monkeypatch, lock_sandbox
     assert ok.status_code == 200, ok.text
     assert agent_data_routes._claim_turn("hosted:conflict"), "the claim must be released"
     agent_data_routes._mark_turn_finished("hosted:conflict")
+
+
+def test_interrupting_an_idle_session_returns_200_and_records_nothing(monkeypatch, lock_sandbox: str) -> None:
+    loop = _FakeHostedLoop()
+    client = _client(monkeypatch, hosted_loop=loop)
+    client.post(
+        "/agent/api/runtime/sessions",
+        json={"agentName": DEFAULT_HOSTED_AGENT_NAME, "sessionId": "hosted:idle-stop"},
+    )
+
+    resp = client.post("/agent/api/runtime/sessions/hosted:idle-stop/interrupt")
+
+    assert resp.status_code == 200, resp.text
+    assert resp.json() == {"sessionId": "hosted:idle-stop", "interruptRequested": False}
+    assert loop.runtime.interrupt_requests == []
+
+
+def test_interrupting_a_running_turn_records_the_request(monkeypatch, lock_sandbox: str) -> None:
+    from TerraFin.interface.agent import data_routes as agent_data_routes
+
+    loop = _FakeHostedLoop()
+    client = _client(monkeypatch, hosted_loop=loop)
+    client.post(
+        "/agent/api/runtime/sessions",
+        json={"agentName": DEFAULT_HOSTED_AGENT_NAME, "sessionId": "hosted:running-stop"},
+    )
+
+    assert agent_data_routes._claim_turn("hosted:running-stop"), "precondition: a turn is running"
+    try:
+        resp = client.post("/agent/api/runtime/sessions/hosted:running-stop/interrupt")
+    finally:
+        agent_data_routes._mark_turn_finished("hosted:running-stop")
+
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["interruptRequested"] is True
+    assert loop.runtime.interrupt_requests == ["hosted:running-stop"]
+
+
+def _seed_turn_with_a_running_call(loop: "_FakeHostedLoop", session_id: str) -> None:
+    from TerraFin.agent.contracts.conversation import make_tool_use_block
+
+    def carrier(*blocks):
+        return TerraFinConversationMessage(
+            role="assistant", content="", metadata={"internalOnly": True}, blocks=blocks
+        )
+
+    loop.get_conversation(session_id).messages.extend(
+        [
+            # An earlier turn's abandoned call is never answered and must not read as running.
+            TerraFinConversationMessage(role="user", content="earlier turn"),
+            carrier(make_tool_use_block(call_id="call-abandoned", tool_name="earnings")),
+            TerraFinConversationMessage(role="user", content="value AAPL"),
+            carrier(make_tool_use_block(call_id="call-done", tool_name="company_info")),
+            TerraFinConversationMessage(role="tool", content="{}", name="company_info", tool_call_id="call-done"),
+            carrier(make_tool_use_block(call_id="call-running", tool_name="valuation", arguments={"ticker": "AAPL"})),
+        ]
+    )
+
+
+def test_session_names_the_tool_call_running_now(monkeypatch, lock_sandbox: str) -> None:
+    from TerraFin.interface.agent import data_routes as agent_data_routes
+
+    loop = _FakeHostedLoop()
+    client = _client(monkeypatch, hosted_loop=loop)
+    client.post(
+        "/agent/api/runtime/sessions",
+        json={"agentName": DEFAULT_HOSTED_AGENT_NAME, "sessionId": "hosted:running-call"},
+    )
+    _seed_turn_with_a_running_call(loop, "hosted:running-call")
+
+    assert agent_data_routes._claim_turn("hosted:running-call"), "precondition: a turn is running"
+    try:
+        payload = client.get("/agent/api/runtime/sessions/hosted:running-call").json()
+    finally:
+        agent_data_routes._mark_turn_finished("hosted:running-call")
+
+    running = payload["metadata"]["runningToolCalls"]
+    assert [(call["callId"], call["toolName"], call["ticker"]) for call in running] == [
+        ("call-running", "valuation", "AAPL")
+    ]
+    assert running[0]["startedAt"] == loop.get_conversation("hosted:running-call").messages[-1].created_at.isoformat()
+
+
+def test_session_names_no_running_call_once_the_turn_ends(monkeypatch, lock_sandbox: str) -> None:
+    loop = _FakeHostedLoop()
+    client = _client(monkeypatch, hosted_loop=loop)
+    client.post(
+        "/agent/api/runtime/sessions",
+        json={"agentName": DEFAULT_HOSTED_AGENT_NAME, "sessionId": "hosted:ended-call"},
+    )
+    _seed_turn_with_a_running_call(loop, "hosted:ended-call")
+
+    payload = client.get("/agent/api/runtime/sessions/hosted:ended-call").json()
+
+    assert payload["metadata"]["turnInFlight"] is False
+    assert payload["metadata"]["runningToolCalls"] == []
+
+
+class _EndingModel:
+    """Calls a tool until tools are off, then answers. `cut_off` cuts every text reply at the output limit."""
+
+    def __init__(self, *, cut_off: bool = False) -> None:
+        self.cut_off = cut_off
+
+    def describe_runtime_status(self, **kwargs):
+        _ = kwargs
+        return {"configured": True}
+
+    def complete(self, *, messages, tools, options=None, **kwargs):
+        _ = messages, tools, kwargs
+        usage = TerraFinTokenUsage(input=1000, output=40, cache_read=200)
+        if self.cut_off or (options is not None and options.tool_choice == "none"):
+            return TerraFinModelTurn(
+                assistant_message=TerraFinConversationMessage(role="assistant", content="Partial. "),
+                stop_reason="length" if self.cut_off else "completed",
+                usage=usage,
+            )
+        return TerraFinModelTurn(
+            tool_calls=(TerraFinToolCall(call_id="snap", tool_name="market_snapshot", arguments={"name": "AAPL"}),),
+            stop_reason="tool_calls",
+            usage=usage,
+        )
+
+
+def _final_reply_metadata(monkeypatch, model: _EndingModel, *, max_steps: int) -> list[dict]:
+    service = BaseFakeService()
+    registry = build_default_capability_registry(service, chart_opener=fake_chart_opener)
+    runtime = TerraFinHostedAgentRuntime(service=service, capability_registry=registry)
+    loop = TerraFinHostedAgentLoop(runtime=runtime, model_client=model, max_steps=max_steps)
+    client = _client(monkeypatch, hosted_loop=loop)
+    client.post(
+        "/agent/api/runtime/sessions",
+        json={"agentName": DEFAULT_HOSTED_AGENT_NAME, "sessionId": "hosted:ending"},
+    )
+    assert (
+        client.post("/agent/api/runtime/sessions/hosted:ending/messages", json={"content": "AAPL"}).status_code == 200
+    )
+    messages = client.get("/agent/api/runtime/sessions/hosted:ending").json()["messages"]
+    return [message["metadata"] for message in messages if message["role"] == "assistant"]
+
+
+def test_a_reply_forced_at_the_step_limit_carries_its_ending_and_the_turns_tokens(
+    monkeypatch, lock_sandbox: str
+) -> None:
+    replies = _final_reply_metadata(monkeypatch, _EndingModel(), max_steps=2)
+
+    assert replies[-1]["turnEnding"] == "step_limit"
+    # Both model calls, including the tool-only step that has no visible message.
+    assert replies[-1]["turnTokenUsage"] == {"input": 2000, "output": 80, "cacheRead": 400, "cacheWrite": 0}
+
+
+def test_a_reply_cut_at_the_output_limit_ends_as_length_on_its_last_part(monkeypatch, lock_sandbox: str) -> None:
+    replies = _final_reply_metadata(monkeypatch, _EndingModel(cut_off=True), max_steps=8)
+
+    # The first reply and its two continuations stay separate messages.
+    assert ["turnEnding" in reply for reply in replies] == [False, False, True]
+    assert replies[-1]["turnEnding"] == "length"
+    assert replies[-1]["turnTokenUsage"]["input"] == 3000
