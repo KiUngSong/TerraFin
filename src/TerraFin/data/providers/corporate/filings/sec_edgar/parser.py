@@ -154,7 +154,7 @@ def parse_sec_filing(html_content, filing_form="10-Q", *, include_images: bool =
     Args:
         html_content: Raw HTML content from SEC filing.
         filing_form: Filing form descriptor (e.g. "10-Q", "10-K", "10-K/A",
-            "FORM 10-Q", or anything containing "10-K" / "10-Q").
+            "FORM 10-Q", or anything containing "10-K" / "10-Q" / "8-K" / "S-1").
         include_images: When True, emit markdown image tags for inline images.
             Default is False because a 10-K often embeds many signature/chart
             images whose src URLs the downstream LLM cannot fetch, so enabling
@@ -187,6 +187,13 @@ def parse_sec_filing(html_content, filing_form="10-Q", *, include_images: bool =
             include_images=include_images,
             heading_re=_EIGHT_K_SECTION_HEADING_RE,
         )
+    if "S-1" in form:
+        # `FilingType` lists S-1, but nothing parsed it. A registration
+        # statement has no Part/Item scaffold, so the 10-K path yields its
+        # body under the prospectus's own headings (checked on SpaceX's S-1/A,
+        # 0001628280-26-040364).
+        log.info("Parsing S-1 filing with Edgar10QParser (no S-1 parser in sec_parser)")
+        return _parse_filing(html_content, include_images=include_images)
     raise ValueError(f"Filing form '{filing_form}' not supported.")
 
 
