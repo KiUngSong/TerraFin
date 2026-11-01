@@ -83,11 +83,17 @@ def _load_dotenv_candidates(
     except ImportError:  # pragma: no cover - optional import guard
         return False
 
-    for candidate in _candidate_dotenv_paths(dotenv_path):
-        if not candidate.is_file():
-            continue
-        return bool(load_dotenv(candidate, override=override))
-    return False
+    # Every candidate loads, and the first one wins each key it sets. Stopping
+    # at the first file let a project's own `.env` (found from cwd) hide every
+    # key it lacked, though the package's `.env` held them. With `override`,
+    # loading in reverse keeps that precedence.
+    files = [candidate for candidate in _candidate_dotenv_paths(dotenv_path) if candidate.is_file()]
+    if override:
+        files.reverse()
+    loaded = False
+    for candidate in files:
+        loaded = bool(load_dotenv(candidate, override=override)) or loaded
+    return loaded
 
 
 def load_dotenv_file(
