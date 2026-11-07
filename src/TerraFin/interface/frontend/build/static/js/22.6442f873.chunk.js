@@ -1,0 +1,2 @@
+"use strict";(self.webpackChunkterrafin_frontend=self.webpackChunkterrafin_frontend||[]).push([[22],{9022:(e,n,r)=>{r.r(n),r.d(n,{default:()=>o});var t=r(3849),s=r(9865),a=r(981),c=r(285);const o=()=>{const e=(0,t.useRef)(function(){try{const e=new URLSearchParams(window.location.search).get("sessionId");if(e)return e}catch(e){}return(0,s.S)("chart-page")}());return(0,c.jsx)(a.A,{sessionId:e.current})}}}]);
+//# sourceMappingURL=22.6442f873.chunk.js.map

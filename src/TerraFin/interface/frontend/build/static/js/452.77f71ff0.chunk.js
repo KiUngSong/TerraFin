@@ -1,0 +1,2 @@
+"use strict";(self.webpackChunkterrafin_frontend=self.webpackChunkterrafin_frontend||[]).push([[452],{1452:(t,a,s)=>{s.r(a),s.d(a,{default:()=>r});s(3849);var e=s(7695),n=s(285);const r=()=>{const t=(0,e.B)(t=>t.agentActivity);return"idle"===t?null:(0,n.jsxs)("div",{className:"tf-statusbar",role:"status","aria-live":"off",children:[(0,n.jsxs)("span",{className:"tf-statusbar__led tf-statusbar__led--".concat(t),title:"agent: ".concat(t),children:["agent ",t]}),(0,n.jsx)("span",{className:"tf-statusbar__spacer"})]})}}}]);
+//# sourceMappingURL=452.77f71ff0.chunk.js.map
