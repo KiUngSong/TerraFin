@@ -20,6 +20,7 @@ export interface TickerSearchInputProps {
   onSubmit?: () => void;
   placeholder?: string;
   disabled?: boolean;
+  readOnly?: boolean;
   ariaLabel?: string;
   inputStyle?: React.CSSProperties;
 }
@@ -33,7 +34,7 @@ interface BackendIndicator {
 }
 
 const TickerSearchInput: React.FC<TickerSearchInputProps> = ({
-  value, onChange, onSelect, onSubmit, placeholder, disabled, ariaLabel, inputStyle,
+  value, onChange, onSelect, onSubmit, placeholder, disabled, readOnly, ariaLabel, inputStyle,
 }) => {
   const registry = useTickerRegistry();
   const [yahooStocks, setYahooStocks] = useState<YahooStock[]>([]);
@@ -145,7 +146,7 @@ const TickerSearchInput: React.FC<TickerSearchInputProps> = ({
     }
   };
 
-  const showDropdown = open && (hits.length > 0 || loading);
+  const showDropdown = !readOnly && open && (hits.length > 0 || loading);
 
   return (
     <div ref={wrapperRef} style={{ position: 'relative', width: '100%' }}>
@@ -154,10 +155,11 @@ const TickerSearchInput: React.FC<TickerSearchInputProps> = ({
         value={value}
         onChange={(e) => { onChange(e.target.value); setOpen(true); }}
         onFocus={() => { if (hits.length > 0 || loading) setOpen(true); }}
-        onKeyDown={handleKey}
+        onKeyDown={readOnly ? undefined : handleKey}
         placeholder={placeholder}
         aria-label={ariaLabel}
         disabled={disabled}
+        readOnly={readOnly}
         autoComplete="off"
         style={inputStyle}
       />

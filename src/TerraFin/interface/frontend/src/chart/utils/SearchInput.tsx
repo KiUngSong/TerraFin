@@ -67,13 +67,14 @@ const SearchInput: React.FC<SearchInputProps> = ({
         onSubmit={() => addSeries(query)}
         placeholder={disabled ? `Max ${maxSeries} charts` : 'Search ticker or company'}
         ariaLabel="Add chart series"
-        disabled={disabled || loading}
+        disabled={disabled}
+        readOnly={loading}
         inputStyle={{
           width: '100%',
           height: 28,
           border: `1px solid ${error ? 'var(--tf-down)' : 'var(--tf-border)'}`,
           borderRadius: 'var(--tf-radius)',
-          padding: '0 12px',
+          padding: loading ? '0 64px 0 12px' : '0 12px',
           fontSize: "var(--tf-fs-xs)",
           color: 'var(--tf-text)',
           background: disabled ? 'var(--tf-bg-pane)' : 'var(--tf-bg-elevated)',
@@ -81,6 +82,20 @@ const SearchInput: React.FC<SearchInputProps> = ({
           boxSizing: 'border-box',
         }}
       />
+      <span
+        role="status"
+        style={{
+          position: 'absolute',
+          right: 10,
+          top: '50%',
+          transform: 'translateY(-50%)',
+          fontSize: 'var(--tf-fs-xs)',
+          color: 'var(--tf-muted)',
+          pointerEvents: 'none',
+        }}
+      >
+        {loading ? 'Loading…' : ''}
+      </span>
     </div>
   );
 };
