@@ -5,6 +5,9 @@ from typing import Any
 
 HOSTED_TOOL_CONTRACT_VERSION = "v1"
 
+# Hosted-only: shows the user a question with options and ends the turn.
+ASK_USER_TOOL_NAME = "ask_user"
+
 
 def _string_array_or_scalar(*, max_items: int | None = None) -> dict[str, Any]:
     array_schema: dict[str, Any] = {"type": "array", "items": {"type": "string"}}
@@ -273,12 +276,28 @@ HOSTED_TOOL_CONTRACTS: dict[str, dict[str, Any]] = {
         "input_schema": _object_schema(
             properties={
                 "call_id": {"type": "string", "minLength": 1},
+                "task_id": {"type": "string", "minLength": 1},
                 "offset": {"type": "integer", "minimum": 0, "default": 0},
                 "limit": {"type": "integer", "minimum": 1, "maximum": 20000, "default": 8000},
             },
-            required=["call_id"],
+            required=[],
         ),
         "response_model": "ToolResultSliceResponse",
+    },
+    ASK_USER_TOOL_NAME: {
+        "input_schema": _object_schema(
+            properties={
+                "question": {"type": "string", "minLength": 1},
+                "options": {
+                    "type": "array",
+                    "items": {"type": "string", "minLength": 1},
+                    "minItems": 2,
+                    "maxItems": 4,
+                },
+            },
+            required=["question", "options"],
+        ),
+        "response_model": "AskUserResponse",
     },
     "fundamental_screen": {
         "input_schema": _object_schema(
@@ -323,7 +342,16 @@ HOSTED_TOOL_CONTRACTS: dict[str, dict[str, Any]] = {
     },
     "sec_filings": {
         "input_schema": _object_schema(
-            properties={"ticker": {"type": "string", "minLength": 1}},
+            properties={
+                "ticker": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": (
+                        "A ticker, a CIK written CIK<digits>, or a company name. A company "
+                        "that has filed to list but has no ticker yet is found by name."
+                    ),
+                }
+            },
             required=["ticker"],
         ),
         "response_model": "SecFilingsListResponse",
@@ -340,7 +368,7 @@ HOSTED_TOOL_CONTRACTS: dict[str, dict[str, Any]] = {
                     "default": "10-Q",
                     "description": (
                         "Filing form string from sec_filings (e.g. '10-K', '10-Q', "
-                        "'8-K', '8-K/A'). MUST be passed for 8-K filings — otherwise "
+                        "'8-K', '8-K/A', 'S-1/A', '424B4'). MUST be passed for 8-K filings — otherwise "
                         "EX-99.x exhibit bodies (earnings PR, CFO commentary) are not "
                         "appended and the agent only sees the 4 KB cover sheet."
                     ),
@@ -363,7 +391,7 @@ HOSTED_TOOL_CONTRACTS: dict[str, dict[str, Any]] = {
                     "default": "10-Q",
                     "description": (
                         "Filing form string from sec_filings (e.g. '10-K', '10-Q', "
-                        "'8-K', '8-K/A'). MUST be passed for 8-K filings so EX-99.x "
+                        "'8-K', '8-K/A', 'S-1/A', '424B4'). MUST be passed for 8-K filings so EX-99.x "
                         "exhibit slugs (exhibit-991-press-release, "
                         "exhibit-992-supplemental-material) are reachable."
                     ),
@@ -445,10 +473,28 @@ HOSTED_TOOL_CONTRACTS: dict[str, dict[str, Any]] = {
         "input_schema": _object_schema(properties={}, required=[]),
         "response_model": "WatchlistResponse",
     },
+    "deep_research": {
+        "input_schema": _object_schema(
+            properties={
+                "question": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "The research question, in the user's words.",
+                },
+                "documents": {
+                    "type": "array",
+                    "items": {"type": "string", "minLength": 1},
+                    "description": "URLs of documents the user supplied (a filing, a prospectus, a PDF report).",
+                },
+            },
+            required=["question"],
+        ),
+        "response_model": "DeepResearchReportResponse",
+    },
     # Persona-consult tools. Each takes a single `question` arg (the
     # orchestrator-scoped prompt sent to the persona subagent) and returns
     # a `GuruResearchMemo`-shaped payload. See
-    # `docs/agent/architecture.md#orchestrator-persona-subagents`.
+    # `docs/harness/architecture.md#orchestrator--persona-subagents`.
     "consult_warren_buffett": {
         "input_schema": _object_schema(
             properties={"question": {"type": "string", "minLength": 1}},
@@ -567,6 +613,8 @@ def _check_value(name: str, value: Any, schema: dict[str, Any]) -> list[str]:
         errors.append(f"{name}: {value} is above the maximum of {schema['maximum']}")
     if "minLength" in schema and isinstance(value, str) and len(value) < schema["minLength"]:
         errors.append(f"{name}: must be at least {schema['minLength']} character(s)")
+    if "minItems" in schema and isinstance(value, list) and len(value) < schema["minItems"]:
+        errors.append(f"{name}: at least {schema['minItems']} item(s), got {len(value)}")
     if "maxItems" in schema and isinstance(value, list) and len(value) > schema["maxItems"]:
         errors.append(f"{name}: at most {schema['maxItems']} item(s), got {len(value)}")
     if isinstance(value, list) and isinstance(schema.get("items"), dict):

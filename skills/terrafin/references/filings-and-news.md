@@ -10,8 +10,9 @@ TF="http://${TERRAFIN_HOST:-127.0.0.1}:${TERRAFIN_PORT:-8001}${TERRAFIN_BASE_PAT
 
 Three-step recipe for analyzing US-listed company filings:
 
-1. `sec_filings(ticker)` — list recent 10-K / 10-Q / 8-K with EDGAR URLs and
-   `latestByForm[<form>]` shortcut.
+1. `sec_filings(ticker)` — list recent 10-K / 10-Q / 8-K filings and registration
+   statements (S-1, F-1, their amendments, 424B1 / 424B4) with EDGAR URLs and a
+   `latestByForm[<form>]` shortcut. `ticker` also takes `CIK<digits>` or a company name.
 2. `sec_filing_document(ticker, accession, primaryDocument)` — get the
    filing's table of contents (sections + char counts) WITHOUT pulling the
    full body. Keeps the agent's context small.

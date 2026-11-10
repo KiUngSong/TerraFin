@@ -636,10 +636,20 @@ def _run_response(
 
 
 def _raise_http_error(exc: Exception) -> None:
+    # Imported at call time: loading the deepresearch package while `TerraFin.agent` initialises closes an import cycle.
+    from TerraFin.agent.deepresearch.flag import DeepResearchDisabledError
+
     if isinstance(exc, AppRuntimeError):
         raise exc
     if isinstance(exc, HTTPException):
         raise exc
+    if isinstance(exc, DeepResearchDisabledError):
+        raise AppRuntimeError(
+            str(exc),
+            code="agent_deepresearch_disabled",
+            status_code=503,
+            details={"feature": "agent_deepresearch"},
+        ) from exc
     if isinstance(exc, TerraFinOpenAIConfigError):
         raise AppRuntimeError(
             str(exc),

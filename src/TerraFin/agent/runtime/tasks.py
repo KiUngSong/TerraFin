@@ -69,9 +69,12 @@ class TerraFinTaskContext:
         store: "HostedSessionStore",
         call: Callable[..., dict[str, Any]],
         turn_runner: Callable[[], Callable[..., Any] | None],
+        focus_items: tuple[str, ...] = (),
     ) -> None:
         self.task_id = task_id
         self.session_id = session_id
+        # The session's focus when the task started.
+        self.focus_items = focus_items
         self._heartbeat = heartbeat
         self._cancel_event = cancel_event
         self._store = store
@@ -192,9 +195,10 @@ class TerraFinTaskRegistry:
     ) -> TerraFinTaskRecord:
         """Heartbeat a running task mid-execution.
 
-        Unlike `mark_running`, this keeps `started_at`, so elapsed time is not
-        reset on every tick, and renews the lease when `lease_expires_at` is
-        given, so another worker does not re-claim a task still making progress.
+        Unlike `mark_running`, this preserves `started_at` (so elapsed time is
+        not reset on every tick) and renews the lease when `lease_expires_at`
+        is supplied, so a long-running task is not re-claimed by another worker
+        while it is still making progress.
         """
         with self._lock:
             previous = self._tasks[task_id]
@@ -268,13 +272,20 @@ class TerraFinTaskRegistry:
             self._tasks[task_id] = record
             return record
 
-    def prune_terminal(self, *, completed_before: datetime) -> tuple[TerraFinTaskRecord, ...]:
+    def prune_terminal(
+        self,
+        *,
+        completed_before: datetime,
+        keep: Callable[[TerraFinTaskRecord], bool] = lambda record: False,
+    ) -> tuple[TerraFinTaskRecord, ...]:
         removed: list[TerraFinTaskRecord] = []
         with self._lock:
             for task_id, record in list(self._tasks.items()):
                 if not _is_terminal_task_status(record.status):
                     continue
                 if record.completed_at is None or record.completed_at >= completed_before:
+                    continue
+                if keep(record):
                     continue
                 removed.append(record)
                 del self._tasks[task_id]

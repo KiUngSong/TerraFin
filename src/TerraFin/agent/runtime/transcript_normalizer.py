@@ -11,6 +11,11 @@ from ..contracts.conversation import (
 from ..contracts.conversation_state import TOOL_CALL_HISTORY_METADATA_KEY, get_tool_call_record
 
 
+# A background task's full result, kept on its completion note for
+# `read_tool_result(task_id=...)` and never sent to the model.
+COMPLETION_REPORT_METADATA_KEY = "completionReport"
+
+
 class TranscriptNormalizer:
     def normalize_loaded_conversation(
         self,
@@ -107,6 +112,9 @@ class TranscriptNormalizer:
 
             if message.role == "assistant" and not message.content.strip():
                 continue
+            if for_model and COMPLETION_REPORT_METADATA_KEY in message.metadata:
+                metadata = {k: v for k, v in message.metadata.items() if k != COMPLETION_REPORT_METADATA_KEY}
+                message = replace(message, metadata=metadata)
             normalized.append(message)
         return tuple(normalized)
 

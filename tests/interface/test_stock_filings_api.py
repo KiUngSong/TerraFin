@@ -24,7 +24,7 @@ def cik_mapping(monkeypatch):
 
 
 def test_build_filings_list_payload_returns_filings_with_edgar_links(monkeypatch, cik_mapping) -> None:
-    monkeypatch.setattr(payloads, "get_company_filings", lambda cik, include_8k=False: _stub_filings_df())
+    monkeypatch.setattr(payloads, "get_company_filings", lambda cik, include_8k=False, include_registration=False: _stub_filings_df())
 
     result = payloads.build_filings_list_payload("AAPL")
 
@@ -44,7 +44,7 @@ def test_build_filings_list_payload_returns_filings_with_edgar_links(monkeypatch
 
 
 def test_build_filings_list_payload_prioritizes_forms_for_frontend_dropdown(monkeypatch, cik_mapping) -> None:
-    monkeypatch.setattr(payloads, "get_company_filings", lambda cik, include_8k=False: _stub_filings_df())
+    monkeypatch.setattr(payloads, "get_company_filings", lambda cik, include_8k=False, include_registration=False: _stub_filings_df())
 
     result = payloads.build_filings_list_payload("AAPL")
 
@@ -70,7 +70,7 @@ def test_build_filings_list_payload_surfaces_latestByForm_even_when_buried(monke
             "primaryDocDescription": ["8-K", "8-K", "10-K", "8-K", "10-Q"],
         }
     )
-    monkeypatch.setattr(payloads, "get_company_filings", lambda cik, include_8k=False: eight_k_heavy)
+    monkeypatch.setattr(payloads, "get_company_filings", lambda cik, include_8k=False, include_registration=False: eight_k_heavy)
 
     result = payloads.build_filings_list_payload("AAPL")
 
@@ -90,7 +90,7 @@ def test_build_filings_list_payload_raises_for_unknown_ticker(monkeypatch) -> No
 
 
 def test_build_filings_list_payload_handles_empty_upstream(monkeypatch, cik_mapping) -> None:
-    monkeypatch.setattr(payloads, "get_company_filings", lambda cik, include_8k=False: pd.DataFrame())
+    monkeypatch.setattr(payloads, "get_company_filings", lambda cik, include_8k=False, include_registration=False: pd.DataFrame())
 
     result = payloads.build_filings_list_payload("AAPL")
     assert result["filings"] == []

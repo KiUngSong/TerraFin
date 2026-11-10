@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, Any
 
 from ..contracts.definitions import TerraFinAgentDefinition, is_internal_agent_definition
 from ..contracts.tool_contracts import (
+    ASK_USER_TOOL_NAME,
     HOSTED_TOOL_CONTRACT_VERSION,
     get_hosted_tool_contract,
     validate_tool_arguments,
@@ -34,6 +35,39 @@ from .types import (
 
 if TYPE_CHECKING:
     from ..runtime.loop import TerraFinHostedAgentLoop
+
+
+def _deepresearch_enabled() -> bool:
+    try:
+        from TerraFin.agent.deepresearch import deepresearch_enabled
+
+        return deepresearch_enabled()
+    except Exception:
+        return False
+
+
+def _deepresearch_tool_names() -> frozenset[str]:
+    try:
+        from TerraFin.agent.deepresearch import DEEPRESEARCH_TOOL_NAMES
+
+        return DEEPRESEARCH_TOOL_NAMES
+    except Exception:
+        return frozenset()
+
+
+def _ask_user_payload(arguments: Mapping[str, Any]) -> dict[str, Any]:
+    """The question and its options as the chat shows them: trimmed, blanks and repeats dropped."""
+    options: list[str] = []
+    for option in arguments.get("options") or []:
+        label = _optional_string(option)
+        if label and label not in options:
+            options.append(label)
+    return {
+        "accepted": True,
+        "question": _optional_string(arguments.get("question")) or "",
+        "options": options,
+        "note": "Shown to the user. Your turn ends here; the answer arrives as the user's next message.",
+    }
 
 
 class TerraFinHostedToolAdapter:
@@ -100,10 +134,13 @@ class TerraFinHostedToolAdapter:
             elif tool.name == READ_TOOL_RESULT_TOOL_NAME:
                 payload = self.runtime.read_tool_result(
                     session_id,
-                    call_id=str(resolved_arguments["call_id"]),
+                    call_id=_optional_string(resolved_arguments.get("call_id")),
+                    task_id=_optional_string(resolved_arguments.get("task_id")),
                     offset=resolved_arguments.get("offset") or 0,
                     limit=resolved_arguments.get("limit") or 8000,
                 )
+            elif tool.name == ASK_USER_TOOL_NAME:
+                payload = _ask_user_payload(resolved_arguments)
             elif tool.name in _PERSONA_CONSULT_TOOLS:
                 if self._loop is None:
                     raise RuntimeError(
@@ -233,7 +270,13 @@ class TerraFinHostedToolAdapter:
                 continue
             if capability.name == "open_chart" and not definition.chart_access:
                 continue
-            tools.append(self._build_tool_definition(capability, execution_mode="invoke"))
+            if capability.name in _deepresearch_tool_names() and not _deepresearch_enabled():
+                continue
+            # A `background_only` capability must never be invokable inline by
+            # the model (it would block the conversation); expose only the
+            # `start_<cap>_task` variant.
+            if not capability.background_only:
+                tools.append(self._build_tool_definition(capability, execution_mode="invoke"))
             if definition.allow_background_tasks and capability.backgroundable:
                 tools.append(self._build_tool_definition(capability, execution_mode="task"))
         tools.append(self._build_current_view_context_tool())
@@ -243,6 +286,8 @@ class TerraFinHostedToolAdapter:
         # must not recurse through consult_* onto each other, so they are
         # filtered out by `is_internal_agent_definition`.
         if not is_internal_agent_definition(definition):
+            # Hidden persona sessions have no user to answer.
+            tools.append(self._build_ask_user_tool())
             tools.append(self._build_consult_warren_buffett_tool())
             tools.append(self._build_consult_howard_marks_tool())
             tools.append(self._build_consult_stanley_druckenmiller_tool())
@@ -401,6 +446,33 @@ class TerraFinHostedToolAdapter:
         session_id: str,
         arguments: Mapping[str, Any],
     ) -> TerraFinToolInvocationResult | None:
+        if tool.name == ASK_USER_TOOL_NAME:
+            # The schema checks the raw options. Trimming and dropping repeats can leave fewer.
+            asked = _ask_user_payload(arguments)
+            if asked["question"] and len(asked["options"]) >= 2:
+                return None
+            message = "ask_user needs a non-blank question and at least 2 different options."
+            return TerraFinToolInvocationResult(
+                tool_name=tool.name,
+                capability_name=tool.capability_name,
+                session_id=session_id,
+                execution_mode=tool.execution_mode,
+                payload={
+                    "accepted": False,
+                    "error": {
+                        "code": "tool_invalid_arguments",
+                        "message": message,
+                        "detail": {"question": asked["question"], "options": asked["options"]},
+                        "retryable": True,
+                        "modelHint": "Retry with a question and 2 to 4 distinct, non-blank options.",
+                    },
+                },
+                task=None,
+                is_error=True,
+                retryable=True,
+                error_code="tool_invalid_arguments",
+                error_message=message,
+            )
         business_only_tools = {"company_info", "earnings", "financials", "fundamental_screen", "growth_series"}
         if tool.capability_name not in business_only_tools:
             return None
@@ -450,7 +522,16 @@ class TerraFinHostedToolAdapter:
         tool_name = capability.name
         if execution_mode == "task":
             tool_name = f"start_{capability.name}_task"
-            description = f"Start a background TerraFin task for: {capability.description}"
+            if capability.background_only:
+                description = (
+                    f"Start the background TerraFin task for: {capability.description} "
+                    "This runs asynchronously and is the ONLY way to invoke this "
+                    "capability — there is no synchronous variant. Call this tool to "
+                    "kick off the run, then keep the conversation going; the result is "
+                    "delivered when the task completes. Do NOT wait inline."
+                )
+            else:
+                description = f"Start a background TerraFin task for: {capability.description}"
 
         return TerraFinToolDefinition(
             name=tool_name,
@@ -527,6 +608,33 @@ class TerraFinHostedToolAdapter:
             },
         )
 
+    def _build_ask_user_tool(self) -> TerraFinToolDefinition:
+        contract = get_hosted_tool_contract(ASK_USER_TOOL_NAME)
+        return TerraFinToolDefinition(
+            name=ASK_USER_TOOL_NAME,
+            capability_name=ASK_USER_TOOL_NAME,
+            description=(
+                "Ask the user one question with 2 to 4 short options, shown as buttons under your "
+                "question. The user can also type their own answer. Calling it ENDS YOUR TURN: no "
+                "further step runs, and the answer arrives as the user's next message. Use it when "
+                "the user must choose and the choice changes what you do next, such as whether to "
+                "start a slow deep research run. Do not use it for a fact you can look up, or to "
+                "ask which ticker the user means while `current_view_context` can tell you. Write "
+                "the question and the options in the user's language. Call it ALONE, as the only "
+                "tool call of its step: any other call in the same step runs before the user "
+                "answers. Put anything you want to say first in the question."
+            ),
+            input_schema=contract["input_schema"],
+            execution_mode="invoke",
+            side_effecting=False,
+            metadata={
+                "backgroundable": False,
+                "capabilityName": ASK_USER_TOOL_NAME,
+                "contractVersion": HOSTED_TOOL_CONTRACT_VERSION,
+                "responseModel": contract["response_model"],
+            },
+        )
+
     def _build_read_tool_result_tool(self) -> TerraFinToolDefinition:
         contract = get_hosted_tool_contract(READ_TOOL_RESULT_TOOL_NAME)
         return TerraFinToolDefinition(
@@ -536,9 +644,11 @@ class TerraFinHostedToolAdapter:
                 "Read the full text of an earlier tool result in this conversation. A result "
                 "that was cut to fit the prompt ends with `[full result: call_id=..., N chars; "
                 "read_tool_result(call_id, offset, limit)]`. Pass that call_id to get the exact "
-                "characters from `offset`, up to `limit` (default 8000). `nextOffset` is where "
-                "the next slice starts, or null at the end. Use it before quoting a filing or "
-                "citing a figure that the cut result no longer shows."
+                "characters from `offset`, up to `limit` (default 8000). A background task's "
+                "completion note names its full report as `read_tool_result(task_id=...)`: pass "
+                "that task_id instead of a call_id. `nextOffset` is where the next slice starts, "
+                "or null at the end. Use it before quoting a filing or citing a figure that the "
+                "cut result or the note no longer shows."
             ),
             input_schema=contract["input_schema"],
             execution_mode="invoke",

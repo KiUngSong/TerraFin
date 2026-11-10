@@ -1,0 +1,858 @@
+---
+title: Interface Layer
+summary: How TerraFin's FastAPI app is started, how routes are organized, and how session-scoped state works.
+read_when:
+  - Adding or modifying API endpoints
+  - Integrating with the chart or dashboard from Python
+  - Debugging session isolation or caching
+  - Building or serving the frontend
+---
+
+# Interface Layer
+
+Package paths on this page drop the leading `src/TerraFin/`: `data/` means `src/TerraFin/data/`.
+
+The interface layer exposes TerraFin through one FastAPI application, six page
+routes, and several API families. It lives under `interface/`.
+
+The key design choice is that interactive state is session-scoped. Unless a
+request says otherwise, TerraFin uses the `default` session.
+
+For deployment and upstream data-usage responsibilities, see
+[License & Data Rights](../development/legal.md).
+
+## Server
+
+Source: `interface/server.py`
+
+The server owns:
+
+- application startup and shutdown
+- router registration
+- cache manager lifecycle
+- readiness and health endpoints
+- static frontend serving
+
+### App factory
+
+```python
+create_app(
+    initial_data: TimeSeriesDataFrame | None = None,
+    base_path: str = "",
+) -> FastAPI
+```
+
+`create_app(...)`:
+
+- resets session state
+- registers routers
+- installs exception handlers
+- wires the private-data cache callbacks
+- mounts the frontend static assets
+
+### CLI
+
+```bash
+python server.py [run|start|stop|status|restart]
+```
+
+Run these commands from `src/TerraFin/interface/`.
+
+| Command | Behavior |
+|---------|----------|
+| `run` | Start in the foreground |
+| `start` | Start in the background and write a PID file |
+| `stop` | Stop the background process if it exists |
+| `status` | Show whether the background process is running |
+| `restart` | Stop and start again |
+
+Runtime config comes from `interface/core/config.py`.
+
+| Field | Default | Env var | Notes |
+|-------|---------|---------|-------|
+| `host` | `127.0.0.1` | `TERRAFIN_HOST` | Empty values fall back to the default |
+| `port` | `8001` | `TERRAFIN_PORT` | Must be an integer in `1..65535` |
+| `base_path` | `""` | `TERRAFIN_BASE_PATH` | Normalized to leading slash, no trailing slash |
+| `cache_timezone` | `"UTC"` | `TERRAFIN_CACHE_TIMEZONE` | Must be a valid IANA timezone; used for cache/date-bound scheduling |
+
+### Root routes
+
+| Method | Path | Behaviour |
+|--------|------|-----------|
+| `GET` | `/` | Redirect to the terminal page, respecting `base_path` |
+| `GET` | `/resolve-ticker?q=...` | Resolve a query string to a ticker symbol and company name |
+| `GET` | `/health` | Multi-component status page (HTML) |
+| `GET` | `/health.json` | Same data as JSON for scripting |
+| `GET` | `/ready` | Readiness endpoint with cache-manager and private-data checks |
+
+`/health`, `/health.json`, and `/ready` stay at the root even when
+`TERRAFIN_BASE_PATH` is set. Feature routes are prefixed by the base path.
+
+`/health` runs active probes on each request (no background polling) for
+three components:
+
+- **Agent**: provider auth env vars set.
+- **Telegram**: `getMe` against the configured bot token.
+- **Signals Provider**: proxies the upstream monitor's `/health`, surfacing
+  per-broker WS state and last-tick age.
+
+Probe behaviour:
+
+- Each probe has a 2 s timeout.
+- Results are cached in-process for 30 s.
+- Append `?refresh=1` to force a fresh probe.
+
+### Error handling
+
+Errors use a uniform JSON envelope:
+
+```json
+{"error": {"code": "...", "message": "...", "request_id": "..."}}
+```
+
+`details` is included when the handler has structured extra context to return.
+
+### Session isolation
+
+Stateful APIs read `X-Session-ID` and default to `"default"`. Chart payloads,
+chart selections, and calendar selections are all stored per session.
+
+In browser flows, TerraFin usually generates a per-tab session id and sends it
+on every chart request. Notebook and direct Python helpers intentionally use the
+`default` chart session unless an explicit session id is provided.
+
+Use the accessors in `interface/pages/chart/state.py` and
+`interface/pages/calendar/state.py` instead of
+touching their internal storage directly.
+
+## Page routes
+
+> Frontend UI conventions (the "TerraFin Terminal" design language: type spine,
+> color tokens, casing, layout primitives, accessibility) live in
+> [UI / UX Design System](../reference/ui-design-system.md). Read it before changing any
+> frontend component.
+
+| Route | Purpose |
+|-------|---------|
+| `/chart` | Interactive chart page |
+| `/terminal` | Watchlist, breadth, valuation, and cache status |
+| `/market-insights` | Regime summary, guru portfolios, top companies |
+| `/calendar` | Earnings and macro event calendar |
+| `/stock` and `/stock/{ticker}` | Stock Analysis page with chart-first loading |
+| `/watchlist` | Personal watchlist management page |
+
+Each page route respects `TERRAFIN_BASE_PATH`.
+
+---
+
+## Chart
+
+Source: `interface/pages/chart/`
+
+The chart is TerraFin's main visualization surface.
+
+- It stores, per session: source payload, display payload, named series, pin
+  state, and per-series history metadata.
+- Stock Analysis, Market Insights, the chart page, and notebook helpers all use
+  this same backend chart session model.
+
+For the full processing and management flow, see
+[chart-architecture.md](../reference/chart-architecture.md).
+
+### API endpoints
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/chart/api/chart-data` | Get the current display payload plus entries and `historyBySeries` |
+| `POST` | `/chart/api/chart-data` | Set the current session from raw payload data and mark those series complete |
+| `POST` | `/chart/api/chart-view` | Rebuild the display payload for a new view such as daily or monthly |
+| `GET` | `/chart/api/chart-selection` | Read the current chart selection |
+| `POST` | `/chart/api/chart-selection` | Save the current chart selection |
+| `POST` | `/chart/api/chart-series/add` | Add a named series by TerraFin lookup name, seeded with recent history |
+| `POST` | `/chart/api/chart-series/set` | Reset the session to one named series, seeded with recent history |
+| `POST` | `/chart/api/chart-series/progressive/set` | Explicit progressive seed route for one named series |
+| `POST` | `/chart/api/chart-series/progressive/backfill` | Backfill older history for a seeded series |
+| `POST` | `/chart/api/chart-series/remove` | Remove a named series |
+| `GET` | `/chart/api/chart-series/names` | List currently loaded named series |
+| `GET` | `/chart/api/chart-series/search` | Search available indicator, index, and economic names |
+| `GET` | `/chart` | Serve the chart page |
+
+### Auto-computed indicators
+
+When the payload contains exactly one candlestick series, TerraFin appends:
+
+| Indicator | Default params | Indicator group |
+|-----------|---------------|-----------------|
+| Moving Averages | SMA 20, 60, 120, 200 | `ma-20`, `ma-60`, `ma-120`, `ma-200` |
+| Bollinger Bands | window 20, ±2σ | `bb` |
+| RSI | window 14, levels at 70/30 | `rsi` |
+| MACD | fast 12, slow 26, signal 9 | `macd` |
+| Realized Volatility | window 21 | `realized-vol` |
+| Range Volatility | window 20 (Parkinson) | `range-vol` |
+| Mandelbrot Fractal Dimension | windows 65, 130, 260 | `mfd` |
+
+Indicator adapter source: `interface/pages/chart/indicators/adapter.py`.
+
+### Chart client (Python)
+
+Source: `interface/pages/chart/client.py`
+
+| Function | Description |
+|----------|-------------|
+| `display_chart(df)` | Open chart in browser. Starts server if needed. Blocks. |
+| `display_chart_notebook(data)` | Display in Jupyter notebook. Waits for readiness, seeds the default chart session, and returns an IFrame bound to that same session. |
+| `update_chart(data, pinned=False, session_id=None)` | POST data to a running server. Returns `True` on success. |
+| `get_chart_selection()` | GET the current selection from the server. |
+
+These helpers accept `TimeSeriesDataFrame` or `list[TimeSeriesDataFrame]`.
+Single OHLC series render as candlesticks. Multi-series payloads render as
+comparison lines.
+
+Notebook and embedded use:
+
+- `import TerraFin` does not auto-load `.env`
+- env-backed features lazy-load `.env` on first use unless
+  `TERRAFIN_DISABLE_DOTENV=1`
+- for deterministic notebook or script setup, call:
+
+```python
+from TerraFin import configure
+
+configure()
+```
+
+- if the kernel runs outside the repo root, use
+  `configure(dotenv_path="/absolute/path/to/.env")`
+- if you need the resolved typed settings, inspect
+  `load_terrafin_config()` instead of reading env vars directly
+
+---
+
+## Terminal
+
+Source: `interface/pages/terminal/`
+
+- The dashboard is the main consumer of `PrivateDataService`.
+- It mixes private source data, cache status, and a few valuation-style summary
+  endpoints.
+- If the private source is unavailable, TerraFin falls back to bundled
+  public-safe fixtures or empty defaults for those widgets.
+
+Important boundary:
+
+- dashboard/widget payloads are not automatically chart-series contracts
+- if a private-source feature needs optimized chart serving, promote it into
+  the data layer as a `TimeSeriesDataFrame` series first
+- otherwise keep it as a widget payload in `PrivateDataService`
+
+### API endpoints
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/terminal/api/watchlist` | Watchlist snapshot (symbols, names, moves) |
+| `GET` | `/terminal/api/market-breadth` | Market breadth metrics (label, value, tone) |
+| `GET` | `/terminal/api/trailing-forward-pe-spread` | Trailing minus forward P/E spread summary and history |
+| `GET` | `/terminal/api/cape` | Current CAPE snapshot |
+| `GET` | `/terminal/api/fear-greed` | Fear and Greed summary if available |
+| `GET` | `/terminal/api/cache-status` | Status of all registered cache sources |
+| `POST` | `/terminal/api/cache-refresh` | Refresh cache sources (`?force=bool`) |
+| `GET` | `/terminal/api/gex/spx` | SPX GEX live snapshot from CBOE options (regime, spot, zero-gamma, call/put walls, per-strike and per-expiration buckets) |
+| `GET` | `/terminal/api/gex/spx/history` | SPX GEX daily history from SqueezeMetrics (2011–present) |
+
+The practical rule for future private-source additions is:
+
+- chart/search/progressive use case -> build a private series contract first
+  Examples: `Fear & Greed`, `Net Breadth`
+- dashboard-only use case -> keep a private widget payload
+
+---
+
+## Calendar
+
+Source: `interface/pages/calendar/`
+
+- The calendar merges private calendar data and TerraFin-fetched macro events
+  into one session-aware view.
+- Events are categorized as `earning`, `macro`, or `event`.
+- The page stays usable in public/demo mode:
+    - earnings and macro events are still fetched through TerraFin's local
+      provider paths
+    - private calendar events use the same fallback chain as the dashboard
+- As with the dashboard, a warmed private-source cache is not a substitute
+  public data source.
+
+### API endpoints
+
+| Method | Path | Query params | Description |
+|--------|------|-------------|-------------|
+| `GET` | `/calendar/api/events` | `month`, `year`, `categories`, `limit` | Filtered events |
+| `POST` | `/calendar/api/events` | — | Upsert events |
+| `GET` | `/calendar/api/selection` | — | Get selection state |
+| `POST` | `/calendar/api/selection` | — | Set selection state |
+
+---
+
+## Market Insights
+
+Source: `interface/pages/market_insights/`
+
+Market insights provides higher-level market context and institutional
+positioning.
+
+- The regime endpoint is currently a static placeholder response.
+- Guru portfolio data is fully backed by the SEC EDGAR provider.
+- The top-companies widget degrades cleanly when the private source is not
+  configured.
+
+### API endpoints
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/market-insights/api/regime` | Market regime (placeholder) |
+| `GET` | `/market-insights/api/macro-info` | Macro instrument summary (`?name=`) |
+| `GET` | `/market-insights/api/investor-positioning/gurus` | List available guru names |
+| `GET` | `/market-insights/api/investor-positioning/holdings` | Guru portfolio (`?guru=`, optional `?filing_date=`) |
+| `GET` | `/market-insights/api/investor-positioning/history` | Filing index for period dropdown (`?guru=`) |
+| `GET` | `/market-insights/api/top-companies` | Private-source top-companies snapshot |
+
+### SPX Gamma Exposure
+
+The Market Insights page includes an SPX GEX accordion panel.
+
+- GEX data is fetched eagerly at page mount (not on accordion open) via
+  `GET /terminal/api/gex/spx`, so the panel renders immediately when the user expands it.
+- Historical data comes from `GET /terminal/api/gex/spx/history`.
+- The snapshot card hides while loading or when CBOE data is unavailable
+  (`available: false`).
+
+### Investor positioning loading strategy
+
+Three-tier loading minimises time-to-first-render:
+
+1. **Fast path** (`/holdings` without `filing_date`): fetches exactly 2 XMLs (latest + previous quarter) so colour coding works immediately.
+2. **Index only** (`/history`): returns the SEC submissions index with no XML fetch, used to populate the period dropdown.
+3. **Background prefetch**: triggered by `/history`, caches remaining quarters via `asyncio.Task` so historical periods load instantly when selected.
+
+**Cancellation pattern** (`data_routes.py: _submit_prefetch`):
+
+```python
+_prefetch_tasks: dict[str, asyncio.Task] = {}
+
+async def _submit_prefetch(guru, filings):
+    for task in _prefetch_tasks.values():
+        if not task.done():
+            task.cancel()          # cancel ALL existing prefetch tasks
+    _prefetch_tasks.clear()
+    _prefetch_tasks[f"prefetch:{guru}"] = asyncio.create_task(
+        _prefetch_holdings_async(guru, filings)
+    )
+```
+
+- When the user switches gurus, every in-flight prefetch is cancelled immediately.
+- `run_in_executor` runs the blocking SEC download in a thread.
+- `CancelledError` fires between iterations (not mid-download).
+
+To add a new cancellable background job type, follow the same pattern:
+
+- key the task dict by a domain-specific string
+- clear all on new submission if mutual exclusion is desired
+- or key per-domain for independent queues
+
+Market Insights now uses the shared TerraFin chart routes directly:
+
+- `POST /chart/api/chart-series/progressive/set` for initial seed
+- `POST /chart/api/chart-series/add` for warm add
+- `POST /chart/api/chart-series/remove` for warm remove
+
+`macro-info` is the page-specific helper for the focused header block. The
+chart session itself is no longer managed through separate `macro-focus`
+routes.
+
+---
+
+## Stock Analysis
+
+Source: `interface/pages/stock/`
+
+Stock Analysis combines a chart-first page route with a small API family for
+company profile, earnings history, financials, SEC filings, and search routing.
+The page itself uses the shared TerraFin chart session and progressive
+`3Y -> full` history loading described in
+[chart-architecture.md](../reference/chart-architecture.md).
+
+### Page routes
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/stock` and `/stock/` | Stock landing page |
+| `GET` | `/stock/{ticker}` | Stock Analysis page for one ticker |
+
+### API endpoints
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/stock/api/company-info` | Company profile and price summary (`?ticker=`) |
+| `GET` | `/stock/api/earnings` | Earnings history (`?ticker=`) |
+| `GET` | `/stock/api/financials` | Financial statements (`?ticker=`, `statement=`, `period=`) |
+| `GET` | `/stock/api/fcf-history` | Annual FCF/share history + 3yr-avg/latest-annual/TTM candidates and the source the `auto` cascade would pick (`?ticker=`, `years=10`). Also returns `ttmFcfPerShare` + `ttmSource` (how the TTM value was computed: `quarterly_ttm` or `annual`). See [api-reference.md](../skills/api-reference.md#stock-analysis). |
+| `GET` / `POST` | `/stock/api/dcf` | Forward DCF. POST body accepts `projectionYears` (5/10/15), `fcfBaseSource` (`auto`/`3yr_avg`/`ttm`/`latest_annual`), and turnaround inputs (`breakevenYear`, `breakevenCashFlowPerShare`, `postBreakevenGrowthPct`) on top of the base overrides. |
+| `GET` / `POST` | `/stock/api/reverse-dcf` | Reverse DCF (market-implied growth). POST accepts `projectionYears`, `growthProfile`, base overrides. |
+| `GET` | `/stock/api/beta-estimate` | TerraFin's `beta_5y_monthly` estimate against the mapped benchmark. |
+| `GET` | `/stock/api/gex` | GEX snapshot for a ticker (`?ticker=`). Returns regime, spot, zero-gamma strike, call/put walls, by-strike and by-expiration GEX buckets. |
+| `GET` | `/stock/api/filings` | Recent 10-K / 10-Q / 8-K filings and registration statements (S-1, F-1, their amendments, 424B1 / 424B4 prospectuses) with EDGAR URLs (`?ticker=`, which also takes `CIK<digits>`, `limit=`) |
+| `GET` | `/stock/api/filing-document` | Parsed markdown + TOC for one filing (`?ticker=`, `accession=`, `primaryDocument=`, `form=`, `includeImages=`) |
+| `GET` | `/resolve-ticker?q=...` | Resolve a query string to a ticker symbol and company name (root route — no `/stock/api/` prefix) |
+
+### Page layout (`/stock/{ticker}`)
+
+The stock-detail page is a vertical stack of sections. Row 2 (Earnings + FCF
+history) is height-capped on desktop so the page stays scannable. Longer
+content scrolls inside the cards rather than expanding them.
+
+| Row | Left card | Right card |
+|---|---|---|
+| 1 | **Market Chart** (price history + indicators) | **Overview & Valuation** (company profile, price context, key metrics) |
+| 2 *(capped at 280px desktop)* | **Earnings History** (EPS estimate / reported / surprise table, vertical scroll) | **FCF / Share History** (annual FCF/share bars, latest-TTM right-gutter callout, 3yr-Avg dashed reference line) |
+| 3 | **DCF Valuation** (input form + Projected FCF chart at the bottom) | **DCF Valuation Result** (intrinsic value tiles, sensitivity heatmap, projection table) |
+| 4 | **Reverse DCF** *(toggled, collapsed by default)* — when expanded, shows input + result side-by-side mirroring Row 3. The Reverse DCF Result card carries its own Projected FCF chart at the bottom. |
+| 5 | **SEC Filings** (US-listed issuers only; auto-hidden otherwise). |
+
+### DCF Valuation card
+
+The forward-DCF input card hosts:
+
+- **Forecast Horizon**: segmented control (`5` / `10` / `15` years) and a
+  **Turnaround Mode** checkbox.
+    - Turnaround mode swaps `Base Growth %` for `Breakeven Year` /
+      `Breakeven FCF / Share` / `Post-Breakeven Growth %` inputs.
+- **FCF Base Source**: segmented control (`Auto` / `3yr Avg` / `TTM` /
+  `Latest Annual`).
+    - Selecting a source auto-fills the *Base FCF / Share* field with the
+      corresponding candidate value (read from `/stock/api/fcf-history`'s
+      `candidates`).
+    - If the user types over the auto-filled value, a
+      `↺ Revert to {source} ($X)` chip surfaces under the field.
+    - Clicking the chip restores the source's value.
+- **Model Inputs grid**: Base FCF / Share, Base Growth %, Terminal Growth %,
+  Beta (with a `Compute Beta` button that runs `beta_5y_monthly`), Equity
+  Risk Premium %.
+- **Explain inputs** toggle (top-right of the card header).
+    - OFF by default: hides every "i" icon for clean entry by power users.
+    - ON reveals all input hints.
+    - State is persisted in `localStorage` (`terrafin.dcf.explainInputs`)
+      via the `useExplainInputs` hook.
+    - Implemented through an `InfoHintVisibilityContext` provider. The
+      `InfoHint` component reads the context and returns `null` when hidden.
+- **Projected FCF / Share chart**: appears at the bottom after running DCF.
+    - Bars for ≤15-year horizons.
+    - Line + shaded band (bear/bull envelope, base line) for longer horizons.
+    - In bar mode with multi-scenario data, each base bar carries a vertical
+      whisker from bear to bull with colored end-caps so the scenario spread
+      is visible.
+    - The Reverse DCF Result card uses the same component (single-scenario,
+      implied-schedule label).
+
+### FCF / Share History chart
+
+`FcfHistoryChart` renders:
+
+- historical annual FCF/share as filled bars (green/red)
+- the latest TTM as a small blue pill in the right gutter, connected by a
+  dashed leader line to the last annual bar's top
+- the 3yr Avg as a teal dashed horizontal line with a halo'd inline label at
+  the left-inside of the plot
+
+Other behaviour:
+
+- Y-axis uses nice-number ticks tightly clipped to the data range (no forced 0
+  inclusion when all values share a sign).
+- Hover on any bar / TTM marker / 3yr Avg line shows a small white tooltip
+  with the value.
+
+### SEC Filings panel
+
+The `/stock/{ticker}` page includes a **SEC Filings** card for every US-listed
+issuer. The card is hidden automatically for tickers without an SEC CIK (e.g.
+KOSPI / TSE / HKEX issuers) so non-US pages stay uncluttered.
+
+For supported tickers the card surfaces:
+
+- a form dropdown derived from `df.form.unique()` (covers 10-K, 10-Q,
+  amendments, 8-K, 20-F, 40-F, etc.);
+- a chronological filing list with a **View on EDGAR** link per row pointing
+  at the SEC inline-XBRL viewer (`/ix?doc=/Archives/...`);
+- a reader that opens inline below the list, with:
+    - a two-level accordion preserving Part I / Part II as outer collapsibles
+      and Items (Item 1, Item 2 MD&A, …) as nested inner collapsibles;
+    - a compact custom markdown renderer that handles our `parse_sec_filing`
+      output (`##`/`###` headings, paragraphs, GFM pipe tables, blockquote
+      fallbacks, inline-image placeholders) without pulling in a general
+      markdown dep;
+    - a "View source on EDGAR" pill in the reader header.
+
+The parsed markdown is cached for 30 days via the shared `sec_filings`
+CacheManager namespace (see [caching.md](../reference/caching.md)), so reopening a filing
+is free across sessions. See [data-layer.md](../reference/data-layer.md) for the
+underlying `parse_sec_filing` / `build_toc` / `fetch_and_parse_filing` helpers.
+
+For 8-K (and 8-K/A) filings, the route returns the parsed cover doc plus any
+EX-99.x exhibits (earnings press release as `## Exhibit 99.1 — Press Release`,
+CFO commentary as `## Exhibit 99.2 — ...`, etc.) so the substantive content is
+reachable from the sidebar TOC. The sidebar bumps to `max_level=3` for 8-Ks so
+exhibit-body subheadings (e.g. `### Q1 FY27 Summary`) surface as navigable
+entries.
+
+### Agent integration
+
+- When the user opens a filing, the panel publishes the currently-focused
+  section to the agent side-panel via `publishAgentViewContext`.
+- The `selection` carries `ticker`, `form`, `accession`, `primaryDocument`,
+  `sectionSlug`, `sectionTitle`, a bounded `sectionExcerpt` (≤ 4 KB), and
+  EDGAR URLs.
+- The hosted agent's `current_view_context` tool reads this payload.
+- When the excerpt is not enough, the agent can call `sec_filings`,
+  `sec_filing_document`, or `sec_filing_section` to fetch the full body.
+    - Example: "summarize their business" on a 10-Q will trigger a
+      cross-filing pivot to the most recent 10-K's Item 1. Business.
+- See the `sec_filings` row in the common-tasks table at
+  [agent/usage.md](../skills/usage.md#common-tasks).
+
+For the view-context pipeline (how `publishAgentViewContext` reaches the
+agent, session/context identity, and how `current_view_context()` reads
+the current panel), see [agent/architecture.md](../harness/architecture.md)
+and [agent/hosted-runtime.md](../harness/hosted-runtime.md).
+
+---
+
+## Watchlist
+
+Source: `interface/pages/watchlist/`
+
+The watchlist page is a dedicated personal-management surface. It reuses the
+dashboard watchlist API family rather than exposing a separate `/watchlist/api`
+namespace.
+
+- The per-item bell (🔔) toggles the reserved `monitor` tag.
+- The tag selects which watchlist tickers the **realtime intraday monitor**
+  subscribes to, and nothing else.
+- EOD signal alerts (daily/weekly/monthly, sent by the DataFactory EOD scan)
+  cover the full watchlist regardless of the bell.
+- To stop EOD alerts for a name, remove it from the watchlist.
+
+### Page routes
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/watchlist` and `/watchlist/` | Personal watchlist page |
+
+### API endpoints
+
+The watchlist page uses the `/terminal/api/watchlist` API family.
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/terminal/api/watchlist` | Full watchlist snapshot (items with symbol, name, move %, tags) |
+| `POST` | `/terminal/api/watchlist` | Add a symbol (`body: {symbol, tags?: []}`) |
+| `DELETE` | `/terminal/api/watchlist/{symbol}` | Remove a symbol. Pass `?group=<tag>` to remove only from that group. |
+| `PATCH` | `/terminal/api/watchlist/{symbol}/tags` | Update tags (`body: {tags, mode: "set"|"add"|"remove"}`) |
+| `GET` | `/terminal/api/watchlist/groups` | List groups with item counts |
+| `POST` | `/terminal/api/watchlist/groups` | Create an empty named group (`body: {name}`) |
+| `DELETE` | `/terminal/api/watchlist/groups/{tag}` | Delete a group; items whose only group it was are removed from the watchlist, items also in other groups just lose the tag |
+| `POST` | `/terminal/api/watchlist/groups/rename` | Rename a group (`body: {old, new}`) |
+| `PUT` | `/terminal/api/watchlist/groups/order` | Persist group display order (`body: {groups: [name, ...]}`) |
+| `PUT` | `/terminal/api/watchlist/groups/{group}/item-order` | Persist item order within a group (`body: {symbols: [...]}`) |
+| `PUT` | `/terminal/api/watchlist` | Bulk-update all symbols and tags (`body: {symbols: [{symbol, tags}]}`) |
+
+### Drag reorder
+
+- The watchlist frontend uses `@dnd-kit/core` for touch- and pointer-compatible drag reorder.
+- Groups and ticker rows are independently sortable.
+- Order is persisted optimistically: the client applies the new order immediately via `itemOrderOverride` state, then POSTs to the backend.
+- On error the override is cleared and the server order is restored.
+
+---
+
+## Agent API
+
+Source: `interface/agent/data_routes.py`
+
+The Agent API exposes TerraFin's optimized processing pipeline for programmatic
+consumers. It is backed by the shared service in `agent/service/service.py`
+rather than a separate simplified path.
+
+That means:
+
+- market and macro requests use the same progressive-history aware data contract
+- view transforms match the chart stack
+- indicator computation matches chart indicator math
+- every response includes top-level `processing` metadata
+
+For most consumers, prefer the Python client in `agent/client.py`
+or the `terrafin-agent` CLI over calling raw routes directly.
+
+### API endpoints
+
+| Method | Path | Query Params | Description |
+|--------|------|-------------|-------------|
+| `GET` | `/agent/api/resolve` | `q` | Resolve a free-form name into TerraFin's stock or macro path |
+| `GET` | `/agent/api/market-data` | `ticker`, `depth`, `view` | Market or macro series plus processing metadata |
+| `GET` | `/agent/api/indicators` | `ticker`, `indicators`, `depth`, `view` | Raw indicator results computed from the shared processing pipeline |
+| `GET` | `/agent/api/market-snapshot` | `ticker`, `depth`, `view` | Price action + indicator summaries + breadth + watchlist |
+| `GET` | `/agent/api/company` | `ticker` | Company profile and price summary |
+| `GET` | `/agent/api/earnings` | `ticker` | Earnings history |
+| `GET` | `/agent/api/financials` | `ticker`, `statement`, `period` | Financial statement table |
+| `GET` | `/agent/api/portfolio` | `guru` | Guru portfolio holdings |
+| `GET` | `/agent/api/economic` | `indicators` (comma-separated FRED codes) | Economic indicator series |
+| `GET` | `/agent/api/macro-focus` | `name`, `depth`, `view` | Macro instrument summary plus series data |
+| `GET` | `/agent/api/lppl` | `name`, `depth`, `view` | LPPL bubble-confidence summary from the shared agent/chart processing pipeline |
+| `GET` | `/agent/api/calendar` | `year`, `month`, `categories`, `limit` | Calendar events with processing metadata |
+| `GET` | `/agent/api/runtime/agents` | - | Hosted runtime agent catalog plus exposed tools and runtime readiness metadata |
+| `POST` | `/agent/api/runtime/sessions` | body: `agentName`, optional `sessionId`, `systemPrompt`, `metadata` | Create a hosted runtime conversation session when the selected hosted model is configured |
+| `GET` | `/agent/api/runtime/sessions` | - | List hosted sessions from the transcript-derived session index |
+| `GET` | `/agent/api/runtime/sessions/{session_id}` | - | Read hosted runtime session state, transcript-derived message history, and tools |
+| `DELETE` | `/agent/api/runtime/sessions/{session_id}` | - | Archive a hosted session transcript and remove it from active history |
+| `POST` | `/agent/api/runtime/sessions/{session_id}/messages` | body: `content` | Append a user turn and run the hosted model/tool loop |
+| `POST` | `/agent/api/runtime/sessions/{session_id}/interrupt` | - | Stop the running turn: no further tool runs, and the next model call writes the answer, marked `turnEnding: interrupted`. A no-op when no turn is running |
+| `GET` | `/agent/api/runtime/sessions/{session_id}/tasks` | - | List background tasks for a hosted session |
+| `GET` | `/agent/api/runtime/sessions/{session_id}/approvals` | - | List approval requests for a hosted session |
+| `GET` | `/agent/api/runtime/tasks/{task_id}` | - | Read a hosted background task |
+| `POST` | `/agent/api/runtime/tasks/{task_id}/cancel` | - | Cancel a hosted background task |
+| `GET` | `/agent/api/runtime/approvals/{approval_id}` | - | Read one approval request |
+| `POST` | `/agent/api/runtime/approvals/{approval_id}/approve` | body: optional `note` | Approve a pending request |
+| `POST` | `/agent/api/runtime/approvals/{approval_id}/deny` | body: optional `note` | Deny a pending request |
+
+Time-series endpoints use `depth=auto|recent|full`.
+
+- `auto` starts with the optimized recent/progressive path for market and macro series
+- `full` forces complete-history loading from the start
+
+LPPL route note:
+
+- `/agent/api/lppl` uses TerraFin's calibrated default LPPL scan from the
+  shared analytics helper.
+- The full article-style 750→50 ladder is kept as a notebook / research option
+  via `lppl(..., n_windows=None)` and is not exposed over HTTP.
+
+Runtime route note:
+
+- `/agent/api/runtime/*` is the stateful hosted-agent family.
+- It uses the same shared capability layer as the Python client, CLI, and
+  stateless `/agent/api/*` routes.
+- It persists conversation history through append-only local transcripts plus
+  a transcript-derived session index.
+- Tasks, approvals, audit, and published view context remain in the hosted
+  runtime store.
+- Hosted model execution is provider-driven rather than OpenAI-only.
+
+Supported `view` values:
+
+- `daily`
+- `weekly`
+- `monthly`
+- `yearly`
+
+Supported indicator names for `/agent/api/indicators`:
+
+- `rsi`
+- `macd`
+- `bb`
+- `sma_N` such as `sma_20`
+- `realized_vol`
+- `range_vol`
+- `mfd`
+- `mfd_65`
+- `mfd_130`
+- `mfd_260`
+
+Unknown indicator names are skipped and returned in the `unknown` field.
+
+For chart overlays, TerraFin shows the medium-horizon `MFD 130` line by
+default to preserve readability. The agent/API still exposes the explicit
+`mfd_65`, `mfd_130`, and `mfd_260` series plus the aggregate `mfd` response.
+
+### Python client and CLI
+
+Preferred public entrypoints:
+
+- `TerraFin.agent.TerraFinAgentClient`
+- `terrafin-agent`
+
+Both wrap the same service layer and normalized response shapes exposed by the
+HTTP API.
+
+### OpenAPI
+
+The FastAPI schema is available at `/openapi.json`. The agent routes use
+explicit response models so generic agents can inspect the contract without
+reverse-engineering route handlers.
+
+---
+
+## Frontend
+
+Source: `interface/frontend/`
+
+The frontend is a React SPA. Built assets live in `interface/frontend/build/` and are
+served directly by FastAPI, so Node.js is only needed when you are editing the
+frontend itself.
+
+### Building from source
+
+```bash
+cd src/TerraFin/interface/frontend
+npm install
+npm run build
+```
+
+Do not commit `node_modules/`. The built output is committed so the server can
+run in environments without a frontend toolchain.
+
+## Signals
+
+Source: `interface/infra/monitor/` (inbound webhook), `signals/alerting/cli.py` (scanner CLI), `analytics/reports/` (weekly reports), `interface/infra/channels/` (Telegram sink).
+
+TerraFin has two related output paths:
+
+- **Alerting** (`interface/infra/monitor/`): real-time threshold alerts (RSI, breakout, etc.) pushed when an external monitoring service POSTs to TerraFin.
+    - The `terrafin-signals` scanner CLI (`signals/alerting/cli.py`) scans the watchlist with `analytics/reports/scanner.py`.
+- **Reports** (`analytics/reports/`, scheduled by `interface/infra/jobs/weekly_report.py`): scheduled narrative briefings (currently weekly) generated locally and surfaced on the dashboard.
+- **Channels** (`interface/infra/channels/`): the Telegram sink used by the monitor webhook and the terminal's monitor toggle.
+
+### Alerting
+
+TerraFin supports a push-model alert pipeline: an external real-time service monitors tickers and POSTs signals back to TerraFin, which forwards them to Telegram.
+
+### Architecture
+
+```
+External alert API ──register tickers──▶ TerraFin (outbound)
+External alert API ──POST /signals/api/signal──▶ TerraFin (inbound)
+TerraFin ──sendMessage──▶ Telegram Bot API ──▶ User
+```
+
+TerraFin never handles real-time tick data. Signal computation stays in the external service.
+
+### Inbound webhook
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/signals/api/signal` | Receive signal from external API → forward to Telegram |
+| `POST` | `/alerting/api/signal` | Legacy alias for the above (kept for existing senders) |
+
+Request body (`InboundSignal`):
+```json
+{
+  "ticker": "AAPL",
+  "signal": "20-day MA touch",
+  "severity": "high",
+  "signal_id": "uuid-from-sender",
+  "fired_at": "2026-04-30T09:00:00",
+  "name": "Apple Inc.",
+  "snapshot": {"close": 192.5, "rsi": 68.2}
+}
+```
+
+- `fired_at`: optional ISO 8601 datetime string.
+    - Naive datetimes (no timezone offset) are accepted and stored as-is. TerraFin does not normalize to UTC.
+    - Omit or pass `null` if unknown.
+- `signal_id` is optional but required for deduplication (sender-provided UUID, not TerraFin-generated)
+- `name`: optional company/indicator display name. If blank, TerraFin enriches it from the watchlist cache before forwarding
+- `snapshot`: optional open key/value map of detector context at fire time (e.g. OHLCV fields, indicator values).
+    - The Telegram formatter reads `close` to derive price direction (▲ if `close` > previous close, ▼ if lower, — if absent or equal).
+    - All other keys are informational and forwarded as-is.
+    - `snapshot: null` or omitting the field produces — for direction.
+- `X-Signature` header: HMAC-SHA256 of request body, keyed with `TERRAFIN_SIGNALS_WEBHOOK_SECRET`
+- **If `TERRAFIN_SIGNALS_WEBHOOK_SECRET` is unset, the endpoint returns `503` and refuses all signals.** The secret is required, not optional
+- Per-IP rate limit: 60 requests / 60 seconds, and excess returns `429`
+
+### Env vars
+
+| Variable | Purpose | Required |
+|----------|---------|----------|
+| `TERRAFIN_SIGNALS_PROVIDER_URL` | External alert API base URL | To enable outbound registration |
+| `TERRAFIN_SIGNALS_PROVIDER_KEY` | Bearer token for external API | If API requires auth |
+| `TERRAFIN_SIGNALS_WEBHOOK_SECRET` | HMAC secret for inbound verification | Required (endpoint returns 503 if unset) |
+| `TERRAFIN_SIGNALS_CHANNEL` | `telegram` to forward via Telegram Bot | To enable Telegram |
+
+### Telegram setup
+
+1. Create a bot via [@BotFather](https://t.me/BotFather): `/newbot` → copy token
+
+2. Save token:
+```bash
+terrafin-signals telegram setup 123456789:AAHfiq...
+```
+
+3. Pair: run the command, then DM your bot on Telegram:
+```bash
+terrafin-signals telegram pair
+```
+Chat ID is captured automatically and saved to `~/.terrafin/telegram.json`.
+
+4. Test:
+```bash
+terrafin-signals telegram test
+```
+
+5. Add to `.env`:
+```bash
+TERRAFIN_SIGNALS_CHANNEL=telegram
+TERRAFIN_SIGNALS_PROVIDER_URL=https://your-alert-api.com
+TERRAFIN_SIGNALS_WEBHOOK_SECRET=your-hmac-secret
+```
+
+### Reports
+
+Source: `analytics/reports/`, scheduled by `interface/infra/jobs/weekly_report.py`
+
+- The dashboard auto-generates a weekly markdown report every Friday at 16:30 ET (`TERRAFIN_CACHE_TIMEZONE`).
+- Reports persist under `~/.terrafin/reports/weekly/<as_of>.{md,json}` indefinitely. Disk cost is negligible and trend stacking is the value.
+
+#### Pipeline
+
+1. Universe: `watchlist_service.get_watchlist_snapshot()`. Falls back to Magnificent 7 (AAPL/MSFT/NVDA/GOOGL/AMZN/META/TSLA) when the watchlist is empty / MongoDB unavailable. M7 reports are explicitly labeled "Sample" in the title and footer CTA.
+2. Per-ticker: yfinance close + volume → 5-trading-day WoW; intra-week ≥4% moves; volume ratio vs 20-day avg; ticker-relevant Google News headlines (date-ranged via `after:`/`before:`); upcoming earnings (yfinance).
+3. Action wording driven by `(anomaly_flag, has_headline, vol_ratio)` decision tree.
+4. Optional **agent enrichment** (when TerraFin agent runtime is configured): index context paragraph (vs ^GSPC/^SOX/^RUT), SEC 8-K drill on unattributed events, macro calendar context. Each section is independently optional, and failures don't block the deterministic core.
+
+#### Terminal surface
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/terminal/api/reports/weekly` | List most recent reports (max 12) |
+| `GET` | `/terminal/api/reports/weekly/{as_of}` | Fetch markdown for a specific report |
+| `POST` | `/terminal/api/reports/weekly/run` | Manually trigger generation (CLI/cron) |
+
+The dashboard top bar shows a 🔔 bell that opens a panel rendering report markdown. A red dot on the bell indicates an unread report (compared against `localStorage["tf-weekly-report-seen"]`).
+
+#### CLI
+
+```bash
+# Generate the current week's report (writes to disk + sends to channel if TERRAFIN_SIGNALS_CHANNEL set)
+terrafin-signals weekly
+
+# Backtest: anchor to a historical date — useful for verifying pipeline determinism
+terrafin-signals weekly --as-of 2026-03-13 --out /tmp/backtest.md
+```
+
+#### Telegram delivery
+
+When `TERRAFIN_SIGNALS_CHANNEL=telegram`, the Friday scheduler also pushes the report. Markdown is converted to Telegram-flavored HTML (`<b>`, `<i>`, bullets, code) and chunked under the 4096-char per-message limit.
+
+### Outbound alert provider
+
+Server startup registers current watchlist with the external API and starts a 60-second heartbeat to re-register on provider restart.
+
+### Extending
+
+To swap the external API provider, implement `SignalProvider` from `data/contracts/signal_provider.py` and return it from `get_signal_provider_from_env` (`interface/infra/monitor/http_provider.py`) in place of `HttpSignalProvider`. The inbound webhook and Telegram forwarding are provider-agnostic.
+
+---
+
+## See also
+
+- [data-layer.md](../reference/data-layer.md) for the provider and output model underneath these APIs
+- [chart-architecture.md](../reference/chart-architecture.md) for chart sessions, mutations, progressive history, and notebook flow
+- [feature-integration.md](../reference/feature-integration.md) for the cross-layer checklist when exposing a new feature through UI or APIs
+- [analytics.md](../reference/analytics.md) for the indicator functions used by chart and agent routes
+- [caching.md](../reference/caching.md) for cache-manager behavior exposed through the dashboard

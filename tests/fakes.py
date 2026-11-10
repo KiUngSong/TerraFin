@@ -61,19 +61,35 @@ class BaseFakeService:
         return {"type": "stock", "name": query.upper(), "path": f"/stock/{query.upper()}", "processing": processing()}
 
     def market_data(self, name: str, *, depth: str = "auto", view: str = "daily") -> dict[str, object]:
-        return {"ticker": name, "seriesType": "candlestick", "count": 1, "data": [], "processing": {**processing(), "requestedDepth": depth, "view": view}}
+        return {
+            "ticker": name,
+            "seriesType": "candlestick",
+            "count": 1,
+            "data": [],
+            "processing": {**processing(), "requestedDepth": depth, "view": view},
+        }
 
     def patterns(self, name: str, *, depth: str = "auto", view: str = "daily") -> dict[str, object]:
-        return {"ticker": name, "signals": [], "total": 0, "processing": {**processing(), "requestedDepth": depth, "view": view}}
+        return {
+            "ticker": name,
+            "signals": [],
+            "total": 0,
+            "processing": {**processing(), "requestedDepth": depth, "view": view},
+        }
 
     def fcf_history(self, ticker: str, years: int = 10) -> dict[str, object]:
         return {
-            "ticker": ticker, "years": years, "rows": [],
+            "ticker": ticker,
+            "years": years,
+            "rows": [],
             "candidates": {"threeYearAvg": None, "latestAnnual": None, "ttm": None},
-            "autoSelectedSource": "annual", "processing": processing(),
+            "autoSelectedSource": "annual",
+            "processing": processing(),
         }
 
-    def similarity_search(self, ticker: str, universe: str = "sp500+nasdaq100+kospi200", period: str = "1y", top_n: int = 20) -> dict[str, object]:
+    def similarity_search(
+        self, ticker: str, universe: str = "sp500+nasdaq100+kospi200", period: str = "1y", top_n: int = 20
+    ) -> dict[str, object]:
         return {"ticker": ticker, "period": period, "pool": {}, "results": [], "count": 0, "processing": processing()}
 
     def indicators(
@@ -111,7 +127,14 @@ class BaseFakeService:
         return {"ticker": ticker, "earnings": [], "processing": processing()}
 
     def financials(self, ticker: str, *, statement: str = "income", period: str = "annual") -> dict[str, object]:
-        return {"ticker": ticker, "statement": statement, "period": period, "columns": [], "rows": [], "processing": processing()}
+        return {
+            "ticker": ticker,
+            "statement": statement,
+            "period": period,
+            "columns": [],
+            "rows": [],
+            "processing": processing(),
+        }
 
     def portfolio(self, guru: str) -> dict[str, object]:
         return {"guru": guru, "info": {}, "holdings": [], "count": 0, "processing": processing()}
@@ -122,7 +145,14 @@ class BaseFakeService:
     def macro_focus(self, name: str, *, depth: str = "auto", view: str = "daily") -> dict[str, object]:
         return {
             "name": name,
-            "info": {"name": name, "type": "index", "description": "Macro", "currentValue": 1.0, "change": 0.0, "changePercent": 0.0},
+            "info": {
+                "name": name,
+                "type": "index",
+                "description": "Macro",
+                "currentValue": 1.0,
+                "change": 0.0,
+                "changePercent": 0.0,
+            },
             "seriesType": "line",
             "count": 1,
             "data": [],
@@ -137,7 +167,15 @@ class BaseFakeService:
         categories: str | None = None,
         limit: int | None = None,
     ) -> dict[str, object]:
-        return {"events": [], "count": 0, "month": month, "year": year, "categories": categories, "limit": limit, "processing": processing()}
+        return {
+            "events": [],
+            "count": 0,
+            "month": month,
+            "year": year,
+            "categories": categories,
+            "limit": limit,
+            "processing": processing(),
+        }
 
     def fundamental_screen(self, ticker: str) -> dict[str, object]:
         return {
@@ -210,12 +248,30 @@ class BaseFakeService:
     def sec_filing_document(
         self, ticker: str, accession: str, primaryDocument: str, *, form: str = "10-Q"
     ) -> dict[str, object]:
-        return {"ticker": ticker, "accession": accession, "primaryDocument": primaryDocument, "toc": [], "charCount": 0, "indexUrl": "", "documentUrl": "", "processing": processing()}
+        return {
+            "ticker": ticker,
+            "accession": accession,
+            "primaryDocument": primaryDocument,
+            "toc": [],
+            "charCount": 0,
+            "indexUrl": "",
+            "documentUrl": "",
+            "processing": processing(),
+        }
 
     def sec_filing_section(
         self, ticker: str, accession: str, primaryDocument: str, sectionSlug: str, *, form: str = "10-Q"
     ) -> dict[str, object]:
-        return {"ticker": ticker, "accession": accession, "sectionSlug": sectionSlug, "sectionTitle": "stub", "markdown": "", "charCount": 0, "documentUrl": "", "processing": processing()}
+        return {
+            "ticker": ticker,
+            "accession": accession,
+            "sectionSlug": sectionSlug,
+            "sectionTitle": "stub",
+            "markdown": "",
+            "charCount": 0,
+            "documentUrl": "",
+            "processing": processing(),
+        }
 
     def fear_greed(self) -> dict[str, object]:
         return {"score": 50, "rating": "Neutral", "processing": processing()}

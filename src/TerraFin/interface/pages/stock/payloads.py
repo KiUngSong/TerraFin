@@ -1,5 +1,6 @@
 import functools
 import math
+import re
 from datetime import datetime
 from typing import Any
 from urllib.parse import quote
@@ -304,33 +305,45 @@ def _edgar_urls(cik: int, accession_number: str, primary_doc: str) -> dict[str, 
     }
 
 
+# A CIK passed in place of a ticker, for a filer with no ticker yet. The prefix
+# keeps a bare numeric ticker (a 6-digit KRX code) from being read as a CIK.
+_CIK_TICKER_RE = re.compile(r"CIK0*(\d{1,10})", re.IGNORECASE)
+
+
 def _resolve_cik(ticker: str) -> int:
-    cik = get_ticker_to_cik_dict_cached().get(ticker.upper())
+    """The CIK for a ticker, or for `CIK<digits>`."""
+    text = ticker.strip()
+    cik = get_ticker_to_cik_dict_cached().get(text.upper())
+    if cik is None and (as_cik := _CIK_TICKER_RE.fullmatch(text)):
+        cik = int(as_cik.group(1))
     if cik is None:
         raise HTTPException(status_code=404, detail=f"CIK not found for ticker '{ticker}'.")
     return int(cik)
 
 
 def build_filings_list_payload(ticker: str, *, limit: int = 20) -> dict[str, Any]:
-    """List recent 10-K / 10-Q / 8-K filings with EDGAR links."""
+    """List recent 10-K / 10-Q / 8-K filings and registration statements with EDGAR links.
+
+    `ticker` may also be `CIK<digits>`.
+    """
     normalized = ticker.upper()
-    cik = _resolve_cik(normalized)
+    cik = _resolve_cik(ticker)
     try:
-        df = get_company_filings(cik, include_8k=True)
+        df = get_company_filings(cik, include_8k=True, include_registration=True)
     except SecEdgarError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
     if df is None or df.empty:
         return {"ticker": normalized, "cik": cik, "forms": [], "filings": []}
 
-    df = df.sort_values("filingDate", ascending=False).head(limit)
+    df = df.sort_values("filingDate", ascending=False)
 
-    filings: list[dict[str, Any]] = []
+    every_filing: list[dict[str, Any]] = []
     for _, row in df.iterrows():
         accession = str(row.get("accessionNumber", ""))
         primary_doc = str(row.get("primaryDocument", ""))
         urls = _edgar_urls(cik, accession, primary_doc)
-        filings.append(
+        every_filing.append(
             {
                 "accession": accession,
                 "form": str(row.get("form", "")),
@@ -343,23 +356,28 @@ def build_filings_list_payload(ticker: str, *, limit: int = 20) -> dict[str, Any
             }
         )
 
+    filings = every_filing[:limit]
+
     # Forms present in this result, in canonical order (10-K first, then 10-Q, 8-K,
-    # then anything else). Lets the frontend build a form dropdown without
+    # the prospectus forms, then anything else). Lets the frontend build a form dropdown without
     # guessing what exists for this ticker (e.g. 20-F for foreign filers).
     seen: list[str] = []
     for f in filings:
         form = f["form"]
         if form and form not in seen:
             seen.append(form)
-    priority = {"10-K": 0, "10-K/A": 1, "10-Q": 2, "10-Q/A": 3, "8-K": 4, "8-K/A": 5}
+    priority = {"10-K": 0, "10-K/A": 1, "10-Q": 2, "10-Q/A": 3, "8-K": 4, "8-K/A": 5,
+                "424B4": 6, "424B1": 7, "S-1/A": 8, "S-1": 9, "F-1/A": 10, "F-1": 11}
     seen.sort(key=lambda f: priority.get(f, 100))
 
     # Per-form shortcut so an agent can do `latestByForm["10-K"]` directly
     # instead of scanning a chronological list that mixes 8-Ks in front of
     # quarterly/annual filings. Each entry carries enough to call
-    # `sec_filing_section` / `sec_filing_document` with no follow-up.
+    # `sec_filing_section` / `sec_filing_document` with no follow-up. It covers
+    # every filing, so a registration statement older than the newest `limit`
+    # filings still has an entry.
     latest_by_form: dict[str, dict[str, Any]] = {}
-    for f in filings:
+    for f in every_filing:
         form = f["form"]
         if form and form not in latest_by_form:
             latest_by_form[form] = {

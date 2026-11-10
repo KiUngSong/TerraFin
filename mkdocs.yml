@@ -75,6 +75,7 @@ extra_css:
 
 extra_javascript:
   - javascripts/header-home-link.js
+  - javascripts/mermaid-zoom.js
 
 extra:
   social:
@@ -86,34 +87,36 @@ extra:
 nav:
   - Home: index.md
   - Getting Started:
-      - Overview: getting-started.md
-      - Configuration: configuration.md
-      - Deployment & Operations: deployment.md
-      - Model Management: agent/models.md
+      - Overview: getting-started/index.md
+      - Configuration: getting-started/configuration.md
+      - Deployment & Operations: getting-started/deployment.md
+      - Model Management: getting-started/models.md
   - Skills:
       - Overview: skills/index.md
-      - For External Agents: agent/external-agents.md
-      - Usage: agent/usage.md
-      - API Reference: api-reference.md
-      - Glossary: agent/index.md
+      - For External Agents: skills/external-agents.md
+      - Usage: skills/usage.md
+      - API Reference: skills/api-reference.md
+      - Glossary: skills/glossary.md
   - Agent Harness Internals:
       - Overview: harness/index.md
       - The Agent Loop: harness/loop.md
-      - Hosted Runtime: agent/hosted-runtime.md
-      - Architecture and Personas: agent/architecture.md
+      - Deep Research: harness/deep-research.md
+      - Hosted Runtime: harness/hosted-runtime.md
+      - Architecture and Personas: harness/architecture.md
   - Product Guides:
-      - Interface Overview: interface.md
-      - Examples & Workflows: examples.md
+      - Interface Overview: guides/interface.md
+      - Examples & Workflows: guides/examples.md
   - Reference:
-      - Architecture Overview: architecture.md
-      - Data Layer: data-layer.md
-      - Private Data Wire Spec: private-data-wire-spec.md
-      - Analytics: analytics.md
-      - Analytics Notes: analytics-notes.md
-      - Caching: caching.md
-      - Chart Architecture: chart-architecture.md
-      - Feature Integration: feature-integration.md
+      - Architecture Overview: reference/architecture.md
+      - Data Layer: reference/data-layer.md
+      - Private Data Wire Spec: reference/private-data-wire-spec.md
+      - Analytics: reference/analytics.md
+      - Analytics Notes: reference/analytics-notes.md
+      - Caching: reference/caching.md
+      - Chart Architecture: reference/chart-architecture.md
+      - Feature Integration: reference/feature-integration.md
+      - UI Design System: reference/ui-design-system.md
   - Development:
-      - Development Guide: development.md
-      - Notebooks: notebooks.md
-      - License & Data Rights: legal.md
+      - Development Guide: development/index.md
+      - Notebooks: development/notebooks.md
+      - License & Data Rights: development/legal.md

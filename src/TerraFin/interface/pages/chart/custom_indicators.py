@@ -2,7 +2,7 @@
 
 A spec is one JSON dict; specs merge by name (later wins) from a local
 ``default_indicators.json`` < Mongo ``market_data.indicator_specs`` < local
-``indicators.json``. See docs/chart-architecture.md → "Custom indicators".
+``indicators.json``. See docs/reference/chart-architecture.md → "Custom indicators".
 """
 
 import json

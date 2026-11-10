@@ -2,8 +2,11 @@ import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from '
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { AgentShellDrawer } from './layout';
+import { ResearchReportCard } from './ResearchReportCard';
+import { readResearchReport, ResearchReport } from './researchReport';
 import { TurnActivityGroup, TurnFooter } from './TurnActivityGroup';
 import {
+  askUserOptions,
   buildTurnActivities,
   formatTurnFooter,
   sessionTokens,
@@ -236,6 +239,60 @@ const DEFAULT_PROMPTS = [
   'Review the current setup and tell me what deserves a second look.',
 ];
 
+// Renders the agent's markdown. A research report is model text written from
+// web pages too, so it goes through the same link and image guards.
+const AgentMarkdown = ({ content }: { content: string }) => (
+  <div className="tf-agent-message__body tf-agent-message__body--md">
+    <ReactMarkdown
+      remarkPlugins={[remarkGfm]}
+      components={{
+        a: ({ node, ...props }) => (
+          // Without this the first citation click replaces the document,
+          // closing the panel and killing any in-flight turn.
+          <a {...props} target="_blank" rel="noopener noreferrer" />
+        ),
+        img: ({ node, src, alt, ...props }) => {
+          // A remote src is an outbound GET, with its query string, that
+          // the model or injected filing text chose — and there is no CSP.
+          // Same-origin only; anything else degrades to its alt text.
+          if (typeof src !== 'string' || !src || !isSameOriginUrl(src)) {
+            return (
+              <span className="tf-agent-message__img-blocked">
+                {alt || '[image omitted]'}
+              </span>
+            );
+          }
+          return (
+            <img
+              {...props}
+              src={src}
+              alt={alt || ''}
+              className="tf-agent-message__img"
+              onLoad={(event) => {
+                // An unloaded image is a zero-height box, so the pin ran
+                // against a scrollHeight that excluded it. Only re-pin if
+                // the user is still at the bottom — re-pinning always
+                // yanked anyone who had scrolled up to read.
+                const scroller = event.currentTarget.closest('.tf-agent-transcript');
+                if (!scroller) {
+                  return;
+                }
+                const distance =
+                  scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight;
+                if (distance < SCROLL_PIN_SLACK_PX) {
+                  scroller.scrollTop = scroller.scrollHeight;
+                }
+              }}
+            />
+          );
+        },
+      }}
+    >
+      {content}
+    </ReactMarkdown>
+  </div>
+);
+
 type AgentMessageItemProps = {
   message: HostedConversationMessage;
   messageKey: string;
@@ -256,55 +313,7 @@ const AgentMessageItem = memo(
           // The agent answers in markdown. Rendering it as a raw string put every
           // ##, ** and list dash on screen as literal characters. Only assistant
           // turns: user text is shown as typed, and tool/system bodies are JSON.
-          <div className="tf-agent-message__body tf-agent-message__body--md">
-            <ReactMarkdown
-              remarkPlugins={[remarkGfm]}
-              components={{
-                a: ({ node, ...props }) => (
-                  // Without this the first citation click replaces the document,
-                  // closing the panel and killing any in-flight turn.
-                  <a {...props} target="_blank" rel="noopener noreferrer" />
-                ),
-                img: ({ node, src, alt, ...props }) => {
-                  // A remote src is an outbound GET, with its query string, that
-                  // the model or injected filing text chose — and there is no CSP.
-                  // Same-origin only; anything else degrades to its alt text.
-                  if (typeof src !== 'string' || !src || !isSameOriginUrl(src)) {
-                    return (
-                      <span className="tf-agent-message__img-blocked">
-                        {alt || '[image omitted]'}
-                      </span>
-                    );
-                  }
-                  return (
-                    <img
-                      {...props}
-                      src={src}
-                      alt={alt || ''}
-                      className="tf-agent-message__img"
-                      onLoad={(event) => {
-                        // An unloaded image is a zero-height box, so the pin ran
-                        // against a scrollHeight that excluded it. Only re-pin if
-                        // the user is still at the bottom — re-pinning always
-                        // yanked anyone who had scrolled up to read.
-                        const scroller = event.currentTarget.closest('.tf-agent-transcript');
-                        if (!scroller) {
-                          return;
-                        }
-                        const distance =
-                          scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight;
-                        if (distance < SCROLL_PIN_SLACK_PX) {
-                          scroller.scrollTop = scroller.scrollHeight;
-                        }
-                      }}
-                    />
-                  );
-                },
-              }}
-            >
-              {message.content}
-            </ReactMarkdown>
-          </div>
+          <AgentMarkdown content={message.content} />
         ) : (
           <div className="tf-agent-message__body">{message.content}</div>
         )}
@@ -787,6 +796,7 @@ const GlobalAgentWidget: React.FC = () => {
   const lastCatalogLoadedAtRef = useRef(0);
   const lastHistoryLoadedAtRef = useRef(0);
   const [historyPinnedSession, setHistoryPinnedSession] = useState(false);
+  const [openReportTaskId, setOpenReportTaskId] = useState<string | null>(null);
 
   const currentAgent = useMemo(() => agents[0] || null, [agents]);
   const activeSession = session;
@@ -856,6 +866,16 @@ const GlobalAgentWidget: React.FC = () => {
     () => orderedTasks.filter((task) => !isTerminalTaskStatus(task.status)),
     [orderedTasks]
   );
+  const finishedReports = useMemo(() => {
+    const reports = new Map<string, ResearchReport>();
+    for (const task of orderedTasks) {
+      const report = task.status === 'completed' ? readResearchReport(task.result) : null;
+      if (report) {
+        reports.set(task.taskId, report);
+      }
+    }
+    return reports;
+  }, [orderedTasks]);
   // Each ended task sits after the last message sent before it ended.
   const taskNoticesByMessage = useMemo(() => {
     const notices = new Map<string, HostedTask[]>();
@@ -2126,6 +2146,22 @@ const GlobalAgentWidget: React.FC = () => {
     refocusApprovalRef.current = approvalId;
     setDenyNote(null);
   };
+  // Opens a report from a drawer. Closing the drawer unmounts the button that
+  // asked, so focus moves to the report's notice.
+  const showReport = (taskId: string) => {
+    setActiveDrawer(null);
+    // A report's notice exists only once the transcript has a message to sit after.
+    if (!finishedReports.has(taskId) || visibleMessageEntries.length === 0) {
+      setError('That research report is not in this chat. Open the chat it ran in to read it.');
+      return;
+    }
+    setOpenReportTaskId(taskId);
+    window.requestAnimationFrame(() => {
+      const notice = document.getElementById(`tf-agent-report-${taskId}`);
+      notice?.scrollIntoView({ block: 'nearest' });
+      notice?.querySelector('button')?.focus({ preventScroll: true });
+    });
+  };
 
   const canClear = Boolean(draft.trim() || activeSession || error);
   const runtimeState = currentAgent
@@ -2353,6 +2389,15 @@ const GlobalAgentWidget: React.FC = () => {
                         <div className="tf-agent-task-card__detail">{formatTaskDetail(task)}</div>
                         <div className="tf-agent-task-card__actions">
                           <span className="tf-agent-task-card__capability">{task.capabilityName}</span>
+                          {finishedReports.has(task.taskId) && visibleMessageEntries.length > 0 ? (
+                            <button
+                              type="button"
+                              className="tf-agent-task-card__cancel"
+                              onClick={() => showReport(task.taskId)}
+                            >
+                              View report
+                            </button>
+                          ) : null}
                         </div>
                       </div>
                     ))}
@@ -2383,7 +2428,7 @@ const GlobalAgentWidget: React.FC = () => {
                   : 'tf-agent-transcript--idle'
               }`}
             >
-              {visibleMessageEntries.map(({ key, message }) => {
+              {visibleMessageEntries.map(({ key, message }, index) => {
                 const turn =
                   message.role === 'user' ? turnActivities.byUserMessage.get(message.createdAt) : undefined;
                 const answered =
@@ -2392,6 +2437,22 @@ const GlobalAgentWidget: React.FC = () => {
                 return (
                   <React.Fragment key={key}>
                     <AgentMessageItem message={message} messageKey={key} />
+                    {index === visibleMessageEntries.length - 1 && askUserOptions(message).length > 0 ? (
+                      <div className="tf-agent-turn tf-agent-ask" role="group" aria-label="Answer options">
+                        {askUserOptions(message).map((option) => (
+                          <button
+                            key={option}
+                            type="button"
+                            className="tf-agent-suggestion"
+                            disabled={!chatAvailable || sending || creatingSession || loadingCatalog}
+                            onClick={() => void handleSend(option, false)}
+                          >
+                            {option}
+                          </button>
+                        ))}
+                        <div className="tf-agent-ask__hint">Or type your own answer below.</div>
+                      </div>
+                    ) : null}
                     {turnEndingRow(message) ? (
                       <div className="tf-agent-turn tf-agent-task-notice">{turnEndingRow(message)}</div>
                     ) : null}
@@ -2414,15 +2475,39 @@ const GlobalAgentWidget: React.FC = () => {
                         )}
                       />
                     ) : null}
-                    {(taskNoticesByMessage.get(key) || []).map((task) => (
-                      <div
-                        key={task.taskId}
-                        className={`tf-agent-turn tf-agent-task-notice tf-agent-task-notice--${task.status}`}
-                      >
-                        {TASK_END_WORD[task.status]} · {formatTaskLabel(task)}
-                        {task.status === 'failed' && task.error ? ` · ${task.error}` : ''}
-                      </div>
-                    ))}
+                    {(taskNoticesByMessage.get(key) || []).map((task) => {
+                      const { taskId } = task;
+                      const report = finishedReports.get(taskId);
+                      if (!report) {
+                        return (
+                          <div
+                            key={taskId}
+                            className={`tf-agent-turn tf-agent-task-notice tf-agent-task-notice--${task.status}`}
+                          >
+                            {TASK_END_WORD[task.status]} · {formatTaskLabel(task)}
+                            {task.status === 'failed' && task.error ? ` · ${task.error}` : ''}
+                          </div>
+                        );
+                      }
+                      const reportOpen = openReportTaskId === taskId;
+                      return (
+                        <div key={taskId} id={`tf-agent-report-${taskId}`} className="tf-agent-turn">
+                          <button
+                            type="button"
+                            className="tf-agent-turn__toggle"
+                            onClick={() => setOpenReportTaskId(reportOpen ? null : taskId)}
+                            aria-expanded={reportOpen}
+                          >
+                            Research finished · {report.title} · {reportOpen ? 'Hide report' : 'View report'}
+                          </button>
+                          {reportOpen ? (
+                            <ResearchReportCard report={report}>
+                              <AgentMarkdown content={report.report} />
+                            </ResearchReportCard>
+                          ) : null}
+                        </div>
+                      );
+                    })}
                   </React.Fragment>
                 );
               })}

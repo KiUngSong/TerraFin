@@ -329,9 +329,7 @@ def _prompt_secret(label: str) -> str:
 
 def _confirm_overwrite(provider_label: str) -> None:
     if not sys.stdin.isatty():
-        raise RuntimeError(
-            f"Saved {provider_label} credentials already exist. Re-run with --yes to overwrite them."
-        )
+        raise RuntimeError(f"Saved {provider_label} credentials already exist. Re-run with --yes to overwrite them.")
     answer = input(f"Overwrite saved {provider_label} credentials? [y/N] ").strip().lower()
     if answer not in {"y", "yes"}:
         raise RuntimeError("Cancelled.")
@@ -454,9 +452,7 @@ def _models_auth_login_payload(
         selected_model_ref = str(model_ref or "").strip() or catalog.default_model_ref
         resolved = _model_payload_from_ref(selected_model_ref)
         if resolved["providerId"] != provider_id:
-            raise RuntimeError(
-                f"Model ref '{selected_model_ref}' does not belong to provider '{provider_id}'."
-            )
+            raise RuntimeError(f"Model ref '{selected_model_ref}' does not belong to provider '{provider_id}'.")
         set_saved_default_model_ref(resolved["modelRef"])
         default_payload = {
             **resolved,
@@ -473,9 +469,22 @@ def _models_auth_login_payload(
     }
 
 
-def _capabilities_payload(
-    *, name_filter: str | None = None, with_schema: bool = False
-) -> dict[str, Any]:
+def _resolve_schema_refs(node: Any, components: dict[str, Any], seen: frozenset[str] = frozenset()) -> Any:
+    """Inline `#/components/schemas/*` refs, so a POST body schema stands alone without the OpenAPI document."""
+    if isinstance(node, list):
+        return [_resolve_schema_refs(item, components, seen) for item in node]
+    if not isinstance(node, dict):
+        return node
+    ref = node.get("$ref")
+    if isinstance(ref, str) and ref.startswith("#/components/schemas/"):
+        name = ref.rsplit("/", 1)[-1]
+        if name in seen or name not in components:
+            return node
+        return _resolve_schema_refs(components[name], components, seen | {name})
+    return {key: _resolve_schema_refs(value, components, seen) for key, value in node.items()}
+
+
+def _capabilities_payload(*, name_filter: str | None = None, with_schema: bool = False) -> dict[str, Any]:
     """Emit the agent capability registry as a JSON-serializable payload.
 
     External agents (Claude Code, Codex, ad-hoc scripts) call this to enumerate
@@ -487,12 +496,14 @@ def _capabilities_payload(
 
     registry = build_default_capability_registry()
     schemas: dict[str, Any] = {}
+    components: dict[str, Any] = {}
     if with_schema:
         try:
             from TerraFin.interface.server import create_app
 
             app = create_app()
             openapi = app.openapi()
+            components = (openapi.get("components") or {}).get("schemas") or {}
             for path, methods in (openapi.get("paths") or {}).items():
                 if not path.startswith("/agent/api/"):
                     continue
@@ -512,13 +523,14 @@ def _capabilities_payload(
             "description": capability.description,
             "cli_subcommand_name": capability.cli_subcommand_name,
             "http_route_path": capability.http_route_path,
+            "http_method": capability.http_method,
             "response_model_name": capability.response_model_name,
             "transport": "hosted-only" if capability.http_route_path is None else "stateless+hosted",
             "side_effecting": capability.side_effecting,
             "backgroundable": capability.backgroundable,
         }
         if with_schema and capability.http_route_path:
-            entry["input_schema"] = schemas.get(capability.http_route_path)
+            entry["input_schema"] = _resolve_schema_refs(schemas.get(capability.http_route_path), components)
         capabilities.append(entry)
 
     return {
@@ -542,7 +554,9 @@ def main(argv: list[str] | None = None) -> int:
                 payload = _models_use_payload(args.model_ref)
             elif args.models_command == "auth":
                 if args.models_auth_command == "status":
-                    provider_filter = None if args.provider is None else get_provider_catalog(args.provider).provider_id
+                    provider_filter = (
+                        None if args.provider is None else get_provider_catalog(args.provider).provider_id
+                    )
                     payload = _models_auth_status_payload(provider_filter)
                 elif args.models_auth_command == "login":
                     payload = _models_auth_login_payload(

@@ -23,13 +23,15 @@ from fakes import BaseFakeService, fake_chart_opener
 
 from TerraFin.agent.contracts.tool_contracts import HOSTED_TOOL_CONTRACTS
 from TerraFin.agent.runtime import build_default_capability_registry
+from TerraFin.agent.runtime.capability import CAPABILITY_CATEGORIES
 
 
 # Hosted-only tools live outside the capability registry: the three guru
-# consults, `current_view_context` and `read_tool_result` need a live session,
-# so they are wired straight into the tool adapter instead.
+# consults, `current_view_context`, `read_tool_result` and `ask_user` need a
+# live session, so they are wired straight into the tool adapter instead.
 HOSTED_ONLY_TOOLS = frozenset(
     {
+        "ask_user",
         "consult_warren_buffett",
         "consult_howard_marks",
         "consult_stanley_druckenmiller",
@@ -39,7 +41,9 @@ HOSTED_ONLY_TOOLS = frozenset(
 )
 
 # `open_chart` mutates hosted session state and has no stateless HTTP surface.
-CAPABILITIES_WITHOUT_ROUTE = frozenset({"open_chart"})
+# `deep_research` is background-only: the model reaches it through
+# `start_deep_research_task`, never a synchronous HTTP call.
+CAPABILITIES_WITHOUT_ROUTE = frozenset({"open_chart", "deep_research"})
 
 # `open_chart` is handed the injected `chart_opener` callable rather than a
 # `TerraFinAgentService` method, so its handler name never matches the
@@ -137,6 +141,13 @@ def test_every_capability_declares_generator_metadata(capabilities) -> None:
     assert not missing_route_path, f"capabilities missing `http_route_path`: {missing_route_path}"
 
 
+def test_every_capability_has_an_allowed_category(capabilities) -> None:
+    uncategorised = sorted(
+        f"{c.name} -> {c.category!r}" for c in capabilities if c.category not in CAPABILITY_CATEGORIES
+    )
+    assert not uncategorised, f"capabilities whose `category` is not a CAPABILITY_CATEGORIES key: {uncategorised}"
+
+
 def test_declared_response_models_exist(capabilities) -> None:
     """Weak existence check: the name matches *some* class under src/TerraFin.
 
@@ -229,6 +240,10 @@ def test_declared_cli_subcommands_are_wired(capabilities) -> None:
 #   open_chart — `client` is the `TerraFinAgentClient` the CLI passes in-process;
 #                a model naming its own HTTP client makes no sense.
 INTERNAL_ONLY_HANDLER_PARAMS = {
+    # deep_research — `progress` and `task` are the reporter and task context the
+    #                 runtime injects when the capability runs as a background
+    #                 task; a caller never sends them.
+    "deep_research": {"progress", "task"},
     "valuation": {"base_growth_pct", "terminal_growth_pct", "beta"},
     "macro_focus": {"session_id"},
     "open_chart": {"session_id", "client"},
@@ -290,6 +305,26 @@ def test_declared_properties_are_acceptable_by_the_handler(real_capabilities) ->
             broken[capability.name] = missing
 
     assert not broken, f"schema declares properties the handler cannot accept: {broken}"
+
+
+@pytest.fixture(scope="module")
+def live_route_methods() -> dict[str, set[str]]:
+    """Map each served `/agent/api/*` path to the HTTP methods the app accepts on it."""
+
+    from TerraFin.interface.server import create_app
+
+    paths = create_app().openapi()["paths"]
+    return {path: {method.upper() for method in operations} for path, operations in paths.items()}
+
+
+def test_declared_http_routes_use_the_declared_method(capabilities, live_route_methods) -> None:
+    wrong = sorted(
+        f"{c.name} -> {c.http_route_path} serves {sorted(live_route_methods.get(c.http_route_path, ()))}, "
+        f"expected {c.http_method}"
+        for c in capabilities
+        if c.http_route_path and live_route_methods.get(c.http_route_path) != {c.http_method}
+    )
+    assert not wrong, f"capability routes served with the wrong HTTP method: {wrong}"
 
 
 def test_declared_http_routes_exist(capabilities, live_route_paths) -> None:

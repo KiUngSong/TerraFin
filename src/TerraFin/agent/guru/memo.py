@@ -17,7 +17,7 @@ from ..tools import TerraFinToolDefinition
 GuruStance = Literal["bullish", "bearish", "neutral", "abstain"]
 # `consult` is the only route type today. It marks a hidden persona subagent
 # session that was spawned by a `consult_<persona>` tool-call from the main
-# orchestrator agent (see `docs/agent/architecture.md#orchestrator--persona-subagents`).
+# orchestrator agent (see `docs/harness/architecture.md#orchestrator--persona-subagents`).
 # Legacy literal values stay in the type for transcript-log replay of sessions
 # created before the orchestrator-as-tool refactor.
 GuruRouteType = Literal["consult", "explicit", "portfolio", "macro", "valuation"]

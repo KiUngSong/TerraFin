@@ -72,6 +72,24 @@ model: set `TERRAFIN_AGENT_MODEL_REF` (`provider/model`, default
 Without one, the panel shows setup guidance instead of a chat. See the
 [live demo](https://huggingface.co/spaces/sk851/TerraFin).
 
+**Deep research.** Ask TerraFin's agent for deep research and it writes a
+cited report. On internal benchmarks, Opus in the TerraFin harness wrote
+higher-scoring reports than Opus in Claude Code, in less time. Even gpt-6-luna,
+a tier below Opus, scored higher on a judged quality rubric in the TerraFin
+harness than Opus in Claude Code.
+
+What it does differently:
+
+- **Any model:** the same research loop runs on any model TerraFin connects to.
+- **Checks its own work:** a reviewer in a fresh context checks the figures
+  against the sources and sends problems back.
+- **Built for finance:** it reads SEC filings, market and macro data from
+  TerraFin's own pipeline, not just the open web.
+- **Fast and safe:** tool calls run in parallel. Web text is fenced as
+  untrusted data, and no model-written code runs.
+
+How it works: [Deep research](docs/harness/deep-research.md).
+
 Not sure where to start? The docs site lays out each path:
 [Pick your track](https://kiungsong.github.io/TerraFin/#pick-your-track).
 
@@ -108,9 +126,9 @@ turnaround mode: pass `breakeven_year` and `breakeven_cash_flow_per_share`.
 
 - Formal docs site: <https://kiungsong.github.io/TerraFin/>
 - Getting started: <https://kiungsong.github.io/TerraFin/getting-started/>
-- Agent usage: <https://kiungsong.github.io/TerraFin/agent/usage/>
-- Interface guide: <https://kiungsong.github.io/TerraFin/interface/>
-- Model management: <https://kiungsong.github.io/TerraFin/agent/models/>
+- Agent usage: <https://kiungsong.github.io/TerraFin/skills/usage/>
+- Interface guide: <https://kiungsong.github.io/TerraFin/guides/interface/>
+- Model management: <https://kiungsong.github.io/TerraFin/getting-started/models/>
 
 ## Development
 
@@ -129,7 +147,7 @@ frontend source, rebuild and commit the generated assets too.
 - The `./setup` install pattern is adapted from
   [gstack](https://github.com/garrytan/gstack).
 - The CLI model-management UX was inspired by OpenClaw. The boundary is in
-  [Model management](https://kiungsong.github.io/TerraFin/agent/models/).
+  [Model management](https://kiungsong.github.io/TerraFin/getting-started/models/).
 
 ## License And Data Rights
 
@@ -140,4 +158,4 @@ content, trademarks, or services accessed through this project.
 Operator-managed deployments remain responsible for the sources they enable and
 their own compliance/privacy posture. Access to the public demo does not create
 any right to upstream data. For the full notice, read
-<https://kiungsong.github.io/TerraFin/legal/> and [LICENSE](LICENSE).
+<https://kiungsong.github.io/TerraFin/development/legal/> and [LICENSE](LICENSE).

@@ -1,5 +1,5 @@
 """Offline tests for deferred-on-next-turn delivery of backgroundable task
-completions, tested with a stub `deep_research` capability.
+completions, such as `deep_research`.
 
 A backgrounded task's report is NOT pushed through a server-initiated model
 turn. Instead, on completion the worker stashes a pending-completion marker in
@@ -12,17 +12,18 @@ The `deep_research` capability is stubbed with a canned serialized report so the
 tests stay deterministic and offline (no live LLM / web).
 """
 
+import json
 import time
 
 import pytest
 from test_loop import _fake_chart_opener, _FakeService
 
-from TerraFin.agent.contracts import tool_contracts
 from TerraFin.agent.contracts.conversation import (
     TerraFinConversationMessage,
     TerraFinHostedConversation,
     utc_now,
 )
+from TerraFin.agent.deepresearch.reader import UNTRUSTED_SOURCE_NOTE
 from TerraFin.agent.definitions import DEFAULT_HOSTED_AGENT_NAME, TerraFinAgentDefinition
 from TerraFin.agent.hosted_runtime import TerraFinHostedAgentRuntime
 from TerraFin.agent.loop import (
@@ -36,24 +37,17 @@ from TerraFin.agent.providers.google import (
 from TerraFin.agent.providers.openai_compatible import OpenAICompatibleResponsesRunner
 from TerraFin.agent.runtime import build_default_capability_registry
 from TerraFin.agent.runtime.capability import TerraFinCapability
+from TerraFin.agent.runtime.context_budget import DEFAULT_TEXT_MESSAGE_CHAR_BUDGET
 from TerraFin.agent.runtime.tasks import TerraFinTaskRecord
+from TerraFin.agent.runtime.transcript_normalizer import COMPLETION_REPORT_METADATA_KEY
 from TerraFin.agent.session_store import SQLiteHostedSessionStore
 
 
 _CANNED_REPORT = {
     "question": "How is Apple doing?",
     "title": "AAPL deep dive",
-    "claims": [
-        {
-            "claimId": "g1",
-            "text": "Revenue grew to a record.",
-            "value": None,
-            "quote": "",
-            "unit": None,
-            "citations": [],
-        },
-    ],
-    "gaps": [],
+    "status": "ok",
+    "report": "Revenue grew to a record.",
 }
 
 
@@ -67,28 +61,9 @@ def _stub_deep_research(*, ticker, question=None, progress=None):
     return report
 
 
-@pytest.fixture(autouse=True)
-def _stub_tool_contract(monkeypatch):
-    # The stub capability is test-only, so its hosted tool contract lives only
-    # for each test's scope.
-    monkeypatch.setitem(
-        tool_contracts.HOSTED_TOOL_CONTRACTS,
-        "deep_research",
-        {
-            "input_schema": {
-                "type": "object",
-                "properties": {"ticker": {"type": "string"}, "question": {"type": "string"}},
-                "required": [],
-                "additionalProperties": False,
-            },
-            "response_model": None,
-        },
-    )
-
-
 def _stubbed_registry(service):
     registry = build_default_capability_registry(service, chart_opener=_fake_chart_opener)
-    # Register a stub `deep_research` with a canned report so the async
+    # Replace the live spine-backed handler with a canned one so the async
     # execution path runs fully offline.
     registry._capabilities["deep_research"] = TerraFinCapability(
         name="deep_research",
@@ -475,6 +450,95 @@ def test_delivered_completion_is_valid_on_google_adapter() -> None:
         if "text" in part
     ]
     assert any("AAPL deep dive" in text for text in user_texts)
+
+
+def _deliver_big_report(loop, session_id):
+    conversation = loop.create_session(DEFAULT_HOSTED_AGENT_NAME, session_id=session_id)
+    report = {
+        "title": "Big " + "t" * 400,
+        "status": "ok",
+        "stopReason": "model finished",
+        "turns": 30,
+        "toolCalls": 50,
+        "reviews": ["r"] * 2,
+        "report": "x" * 60_000,
+    }
+    loop.runtime.session_store.append_pending_completion(
+        conversation.session_id,
+        marker={"taskId": "t1", "capabilityName": "deep_research", "result": report},
+    )
+    loop.submit_user_message(conversation.session_id, "What did it find?")
+    return loop.get_conversation(conversation.session_id), report
+
+
+def test_completion_note_for_a_large_report_stays_within_the_text_budget() -> None:
+    model = _DirectAnswerModel()
+    loop = _loop(model)
+    try:
+        conversation, _ = _deliver_big_report(loop, "deferred:compact")
+    finally:
+        loop.runtime.shutdown()
+
+    (note,) = _delivery_notes(conversation.snapshot())
+    assert len(note.content) <= DEFAULT_TEXT_MESSAGE_CHAR_BUDGET
+    assert 'read_tool_result(task_id="t1")' in note.content
+    assert "tool calls: 50" in note.content
+    assert "reviews: 2" in note.content
+    (seen,) = _delivery_notes(model.seen_messages or ())
+    assert COMPLETION_REPORT_METADATA_KEY not in seen.metadata
+
+
+def test_full_report_is_readable_by_task_id_in_its_own_session_only() -> None:
+    loop = _loop(_DirectAnswerModel())
+    try:
+        conversation, report = _deliver_big_report(loop, "deferred:read-full")
+        other = loop.create_session(DEFAULT_HOSTED_AGENT_NAME, session_id="deferred:read-other")
+
+        slices = []
+        offset = 0
+        while offset is not None:
+            result = loop.tool_adapter.run_tool(
+                conversation.session_id, "read_tool_result", {"task_id": "t1", "offset": offset, "limit": 20000}
+            )
+            slices.append(result.payload["text"])
+            offset = result.payload["nextOffset"]
+        foreign = loop.tool_adapter.run_tool(other.session_id, "read_tool_result", {"task_id": "t1"})
+    finally:
+        loop.runtime.shutdown()
+
+    assert len(slices) > 1
+    assert all(piece.startswith(UNTRUSTED_SOURCE_NOTE) for piece in slices)
+    # A slice that starts inside the fence reopens it; the reader drops the reopening tag.
+    text = slices[0] + "".join(
+        piece.removeprefix(f"{UNTRUSTED_SOURCE_NOTE}\n").removeprefix("<untrusted_source>") for piece in slices[1:]
+    )
+    assert report["report"] in json.loads(text.split("\n", 1)[1])["report"]
+    assert foreign.payload["found"] is False
+    assert "text" not in foreign.payload
+
+
+def test_completion_note_for_a_non_research_result_shows_its_data() -> None:
+    model = _DirectAnswerModel()
+    loop = _loop(model)
+    try:
+        conversation = loop.create_session(DEFAULT_HOSTED_AGENT_NAME, session_id="deferred:valuation")
+        loop.runtime.session_store.append_pending_completion(
+            conversation.session_id,
+            marker={
+                "taskId": "t9",
+                "capabilityName": "valuation",
+                "result": {"ticker": "AAPL", "fairValue": 212.4, "upside": 0.08},
+            },
+        )
+        loop.submit_user_message(conversation.session_id, "What did it find?")
+        conversation = loop.get_conversation(conversation.session_id)
+    finally:
+        loop.runtime.shutdown()
+
+    (note,) = _delivery_notes(conversation.snapshot())
+    assert '"fairValue": 212.4' in note.content
+    assert 'read_tool_result(task_id="t9")' in note.content
+    assert "Report head:" not in note.content
 
 
 # --- Idempotency + robustness ----------------------------------------------

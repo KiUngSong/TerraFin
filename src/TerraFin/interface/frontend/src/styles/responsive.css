@@ -576,6 +576,17 @@
   opacity: 0.6;
 }
 
+.tf-agent-ask {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.tf-agent-ask__hint {
+  color: var(--tf-muted-strong);
+  font-size: var(--tf-fs-base);
+}
+
 .tf-agent-chat-shell {
   display: flex;
   flex-direction: column;
@@ -981,6 +992,18 @@
   line-height: 1.45;
   color: var(--tf-down);
   word-break: break-word;
+}
+
+/* Research report: a deep_research result, opened from its transcript notice. */
+.tf-agent-report {
+  display: grid;
+  gap: var(--tf-space-2);
+  min-width: 0;
+  padding-top: var(--tf-space-2);
+  border-top: 1px solid var(--tf-border);
+  font-size: var(--tf-fs-base);
+  line-height: 1.45;
+  color: var(--tf-text);
 }
 
 .tf-agent-sr-only {

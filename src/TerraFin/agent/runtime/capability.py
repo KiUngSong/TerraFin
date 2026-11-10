@@ -33,6 +33,21 @@ if TYPE_CHECKING:
     from .tasks import TerraFinTaskContext
 
 
+# The allowed values of `TerraFinCapability.category`, in display order, mapped
+# to the heading the generated docs print. Group by the question an investor
+# is asking, not by data provider.
+CAPABILITY_CATEGORIES: Mapping[str, str] = {
+    "market_macro": "Market, macro and news",
+    "fundamentals_valuation": "Company fundamentals and valuation",
+    "filings_research": "SEC filings and research",
+    "sentiment_regime": "Sentiment, risk and market regime",
+    "screening_patterns": "Screening and patterns",
+    "portfolio_memory": "Portfolio and watchlist",
+    "investor_personas": "Investor personas",
+    "charts_session": "Charts and session",
+}
+
+
 @dataclass(frozen=True, slots=True)
 class TerraFinCapability:
     name: str
@@ -42,6 +57,12 @@ class TerraFinCapability:
     artifact_builder: ArtifactBuilder | None = None
     side_effecting: bool = False
     backgroundable: bool = False
+    # When true, only the background `start_<cap>_task` tool is exposed to the
+    # model; the synchronous tool variant is suppressed so the model cannot run
+    # this capability inline and block the conversation. The capability still
+    # exists in the registry (runtime.start_task / direct invocation work).
+    # Implies `backgroundable`.
+    background_only: bool = False
     # Optional metadata consumed by the agent-artefacts generator (Part E of
     # the single-source-of-truth refactor) and by `terrafin-agent
     # capabilities`. All default-None / empty so existing registrations stay
@@ -52,6 +73,17 @@ class TerraFinCapability:
     http_route_path: str | None = None
     response_model_name: str | None = None
     examples: tuple[str, ...] = ()
+    # A key of `CAPABILITY_CATEGORIES`. The generated docs and `deep_research`'s data tools read it.
+    category: str | None = None
+    # Set only when a read-only route still needs a request body too large for a query string.
+    http_method_override: str | None = None
+
+    @property
+    def http_method(self) -> str:
+        """A side-effecting route takes POST, so a cross-site GET or a link prefetch cannot write."""
+        if self.http_method_override:
+            return self.http_method_override
+        return "POST" if self.side_effecting else "GET"
 
     def extract_focus(self, inputs: Mapping[str, Any], payload: Mapping[str, Any]) -> tuple[str, ...]:
         if self.focus_extractor is None:
@@ -125,8 +157,9 @@ def build_default_capability_registry(
     service: "TerraFinAgentService | None" = None,
     *,
     chart_opener: Callable[..., dict[str, Any]] | None = None,
-) -> TerraFinCapabilityRegistry:
+) -> "TerraFinCapabilityRegistry":
     from ..service import TerraFinAgentService
+    from .deep_research_capability import build_deep_research_handler
 
     if chart_opener is None:
         from ..cli.tasks import open_chart as default_open_chart
@@ -138,6 +171,7 @@ def build_default_capability_registry(
         [
             TerraFinCapability(
                 name="resolve",
+                category="market_macro",
                 description="Resolve a free-form market or macro query into TerraFin routing.",
                 handler=resolved_service.resolve,
                 focus_extractor=_resolve_focus,
@@ -148,6 +182,7 @@ def build_default_capability_registry(
             ),
             TerraFinCapability(
                 name="indicator_search",
+                category="market_macro",
                 description=(
                     "Search the indicator catalog by substring to find what a market or "
                     "macro series is called here. Use before market_data when the exact "
@@ -162,6 +197,7 @@ def build_default_capability_registry(
             ),
             TerraFinCapability(
                 name="market_data",
+                category="market_macro",
                 description="Fetch chart-ready market data for a single asset.",
                 handler=resolved_service.market_data,
                 focus_extractor=_focus_from_input_keys("name"),
@@ -173,6 +209,7 @@ def build_default_capability_registry(
             ),
             TerraFinCapability(
                 name="indicators",
+                category="market_macro",
                 description="Compute chart-matching technical indicators for a single asset.",
                 handler=resolved_service.indicators,
                 focus_extractor=_focus_from_input_keys("name"),
@@ -184,6 +221,7 @@ def build_default_capability_registry(
             ),
             TerraFinCapability(
                 name="patterns",
+                category="screening_patterns",
                 description="Evaluate every named market pattern (MA20_GOLDEN_CROSS, MINERVINI_TEMPLATE, 52W_NEW_HIGH, etc.) against the latest bar of a single asset and return whichever patterns currently match.",
                 handler=resolved_service.patterns,
                 focus_extractor=_focus_from_input_keys("name"),
@@ -195,6 +233,7 @@ def build_default_capability_registry(
             ),
             TerraFinCapability(
                 name="news",
+                category="market_macro",
                 description=(
                     "Recent headlines for a ticker or free-form query — the "
                     "'why now' behind a move. Use it to find or confirm a "
@@ -241,6 +280,7 @@ def build_default_capability_registry(
             ),
             TerraFinCapability(
                 name="consensus",
+                category="fundamentals_valuation",
                 description=(
                     "Forward analyst consensus for one ticker: EPS and revenue "
                     "estimate levels, ESTIMATE REVISIONS, and price targets. "
@@ -314,6 +354,7 @@ def build_default_capability_registry(
             ),
             TerraFinCapability(
                 name="pattern_scan",
+                category="screening_patterns",
                 description=(
                     "Sweep MANY symbols for pattern triggers in one call — the "
                     "cross-sectional counterpart to `patterns`, which checks a "
@@ -364,6 +405,7 @@ def build_default_capability_registry(
             ),
             TerraFinCapability(
                 name="market_snapshot",
+                category="market_macro",
                 description=(
                     "Fetch a compact market snapshot for a single asset. "
                     "Response carries `asof` (ISO date of the last bar served) "
@@ -388,6 +430,7 @@ def build_default_capability_registry(
             ),
             TerraFinCapability(
                 name="lppl_analysis",
+                category="sentiment_regime",
                 description="Run LPPL bubble analysis for a single asset.",
                 handler=resolved_service.lppl_analysis,
                 focus_extractor=_focus_from_input_keys("name"),
@@ -399,6 +442,7 @@ def build_default_capability_registry(
             ),
             TerraFinCapability(
                 name="company_info",
+                category="fundamentals_valuation",
                 description="Fetch company profile and valuation fields for a ticker.",
                 handler=resolved_service.company_info,
                 focus_extractor=_focus_from_input_keys("ticker"),
@@ -409,6 +453,7 @@ def build_default_capability_registry(
             ),
             TerraFinCapability(
                 name="earnings",
+                category="fundamentals_valuation",
                 description="Fetch earnings history for a ticker.",
                 handler=resolved_service.earnings,
                 focus_extractor=_focus_from_input_keys("ticker"),
@@ -419,6 +464,7 @@ def build_default_capability_registry(
             ),
             TerraFinCapability(
                 name="financials",
+                category="fundamentals_valuation",
                 description="Fetch a financial statement table for a ticker.",
                 handler=resolved_service.financials,
                 focus_extractor=_focus_from_input_keys("ticker"),
@@ -430,6 +476,7 @@ def build_default_capability_registry(
             ),
             TerraFinCapability(
                 name="portfolio",
+                category="investor_personas",
                 description="Fetch a named guru's 13F book (Buffett/Marks/Druckenmiller). This is NOT the user's holdings.",
                 handler=resolved_service.portfolio,
                 focus_extractor=_focus_from_input_keys("guru"),
@@ -441,6 +488,7 @@ def build_default_capability_registry(
             ),
             TerraFinCapability(
                 name="economic",
+                category="market_macro",
                 description="Fetch economic indicator series.",
                 handler=resolved_service.economic,
                 focus_extractor=_economic_focus,
@@ -452,6 +500,7 @@ def build_default_capability_registry(
             ),
             TerraFinCapability(
                 name="macro_focus",
+                category="market_macro",
                 description="Fetch macro summary plus chart-ready series for an instrument.",
                 handler=resolved_service.macro_focus,
                 focus_extractor=_focus_from_input_keys("name"),
@@ -463,6 +512,7 @@ def build_default_capability_registry(
             ),
             TerraFinCapability(
                 name="calendar_events",
+                category="market_macro",
                 description="Fetch TerraFin calendar events for a month.",
                 handler=resolved_service.calendar_events,
                 backgroundable=True,
@@ -480,6 +530,7 @@ def build_default_capability_registry(
             # diverge (DA audit: High-3/4/5, Med-6).
             TerraFinCapability(
                 name="fear_greed",
+                category="sentiment_regime",
                 description=(
                     "Fetch the CNN Fear & Greed index — same data as the "
                     "`/terminal/api/fear-greed` widget. Returns score, rating, "
@@ -492,6 +543,7 @@ def build_default_capability_registry(
             ),
             TerraFinCapability(
                 name="sp500_dcf",
+                category="fundamentals_valuation",
                 description=(
                     "Fetch the full S&P 500 DCF valuation — same shape as "
                     "`/market-insights/api/dcf/sp500`. Includes scenarios, "
@@ -505,6 +557,7 @@ def build_default_capability_registry(
             ),
             TerraFinCapability(
                 name="beta_estimate",
+                category="fundamentals_valuation",
                 description=(
                     "Fetch a 5-year monthly beta estimate with adjusted beta, "
                     "R², and benchmark — same shape as `/stock/api/beta-estimate`. "
@@ -520,6 +573,7 @@ def build_default_capability_registry(
             ),
             TerraFinCapability(
                 name="fcf_history",
+                category="fundamentals_valuation",
                 description=(
                     "Fetch FCF-per-share history and the three candidate base values "
                     "(3yr_avg, latest_annual, TTM) that the DCF tool's `auto` cascade "
@@ -535,6 +589,7 @@ def build_default_capability_registry(
             ),
             TerraFinCapability(
                 name="similarity_search",
+                category="screening_patterns",
                 description=(
                     "Find stocks whose 1-year price chart most closely resembles the "
                     "target ticker, ranked by normalized shape similarity. "
@@ -552,6 +607,7 @@ def build_default_capability_registry(
             ),
             TerraFinCapability(
                 name="top_companies",
+                category="market_macro",
                 description=(
                     "Fetch the market-insights top-companies list — same data as "
                     "`/market-insights/api/top-companies`. Falls back to a yfinance-"
@@ -564,6 +620,7 @@ def build_default_capability_registry(
             ),
             TerraFinCapability(
                 name="market_regime",
+                category="sentiment_regime",
                 description=(
                     "Fetch the market regime summary — same data as "
                     "`/market-insights/api/regime`. Returns a short summary, "
@@ -576,6 +633,7 @@ def build_default_capability_registry(
             ),
             TerraFinCapability(
                 name="trailing_forward_pe",
+                category="sentiment_regime",
                 description=(
                     "Fetch the trailing vs. forward P/E spread — same data as "
                     "`/terminal/api/trailing-forward-pe-spread`."
@@ -588,6 +646,7 @@ def build_default_capability_registry(
             ),
             TerraFinCapability(
                 name="market_breadth",
+                category="sentiment_regime",
                 description=(
                     "Fetch standalone market-breadth metrics — same data as the "
                     "MarketBreadthCard widget. Was previously bundled inside "
@@ -601,6 +660,7 @@ def build_default_capability_registry(
             ),
             TerraFinCapability(
                 name="watchlist",
+                category="portfolio_memory",
                 description=(
                     "Fetch the user's current watchlist — same data as the "
                     "WatchlistSection widget. Standalone now; was previously "
@@ -613,6 +673,7 @@ def build_default_capability_registry(
             ),
             TerraFinCapability(
                 name="open_chart",
+                category="charts_session",
                 description="Create or update a TerraFin chart session and return a chart artifact.",
                 handler=resolved_chart_opener,
                 focus_extractor=_chart_focus,
@@ -627,6 +688,7 @@ def build_default_capability_registry(
             ),
             TerraFinCapability(
                 name="fundamental_screen",
+                category="fundamentals_valuation",
                 description="Run fundamental quality and moat screening for a ticker (ROE, margins, earnings quality, balance sheet, pricing power).",
                 handler=resolved_service.fundamental_screen,
                 focus_extractor=_focus_from_input_keys("ticker"),
@@ -637,6 +699,7 @@ def build_default_capability_registry(
             ),
             TerraFinCapability(
                 name="growth_series",
+                category="fundamentals_valuation",
                 description="Fetch revenue and EPS values with their year-over-year change, from the annual and quarterly income statements.",
                 handler=resolved_service.growth_series,
                 focus_extractor=_focus_from_input_keys("ticker"),
@@ -648,6 +711,7 @@ def build_default_capability_registry(
             ),
             TerraFinCapability(
                 name="risk_profile",
+                category="sentiment_regime",
                 description="Compute statistical risk profile for an asset (tail risk, convexity, volatility regime, drawdown).",
                 handler=resolved_service.risk_profile,
                 focus_extractor=_focus_from_input_keys("name"),
@@ -658,6 +722,7 @@ def build_default_capability_registry(
             ),
             TerraFinCapability(
                 name="valuation",
+                category="fundamentals_valuation",
                 description=(
                     "Run DCF, reverse DCF, relative valuation, and Graham Number for a ticker. "
                     "Optional inputs let the agent mirror the frontend's DCF input form: "
@@ -680,8 +745,14 @@ def build_default_capability_registry(
             ),
             TerraFinCapability(
                 name="sec_filings",
+                category="filings_research",
                 description=(
-                    "List recent 10-K / 10-Q / 8-K filings for a ticker with SEC EDGAR links. "
+                    "List recent 10-K / 10-Q / 8-K filings and registration statements (S-1, F-1, "
+                    "their amendments, and 424B1 / 424B4 prospectuses) with SEC EDGAR links. `ticker` takes a "
+                    "ticker, a CIK written `CIK<digits>`, or a company name; a company that has filed to "
+                    "list but has no ticker yet is found by name, and `matchedCompany` names the filer "
+                    "found. Pass the returned `ticker` (then `CIK<digits>`) to `sec_filing_document` "
+                    "and `sec_filing_section`. "
                     "Call this ONCE when you need to pivot to a filing not currently in view. The "
                     "response's `latestByForm` dict is the direct lookup: "
                     "`latestByForm['10-K'].accession` / `.primaryDocument` give you everything "
@@ -722,17 +793,19 @@ def build_default_capability_registry(
                 ),
                 handler=resolved_service.sec_filings,
                 focus_extractor=_focus_from_input_keys("ticker"),
-                summary="List recent 10-K / 10-Q / 8-K filings for a ticker with EDGAR URLs.",
+                summary="List recent 10-K / 10-Q / 8-K filings and registration statements with EDGAR URLs.",
                 http_route_path="/agent/api/sec-filings",
                 response_model_name="SecFilingsListResponse",
             ),
             TerraFinCapability(
                 name="sec_filing_document",
+                category="filings_research",
                 description=(
                     "Fetch the table of contents (section titles, slugs, and sizes) for a specific "
-                    "10-K, 10-Q, or other SEC filing. Returns structure only — use `sec_filing_section` "
+                    "10-K, 10-Q, S-1, or other SEC filing. Returns structure only — use `sec_filing_section` "
                     "to pull the actual prose. Requires the accession and primaryDocument fields from "
-                    "`sec_filings` or the current view context.\n"
+                    "`sec_filings` or the current view context. Pass the filing's `form`: a registration "
+                    "statement or prospectus is split by its own index only when `form` names it.\n"
                     "Analyst discovery protocol — do NOT assume fixed item numbers across different "
                     "forms. Instead, scan the TOC for titles containing these keywords:\n"
                     "• Financial Data: 'Financial Statements', 'Notes', 'Consolidated Statements'.\n"
@@ -750,6 +823,7 @@ def build_default_capability_registry(
             ),
             TerraFinCapability(
                 name="sec_filing_section",
+                category="filings_research",
                 description=(
                     "Fetch the verbatim markdown body of a single filing section by slug. "
                     "The slug MUST come verbatim from a prior `sec_filing_document` call's TOC — "
@@ -796,6 +870,28 @@ def build_default_capability_registry(
                 summary="Verbatim markdown body of one filing section by slug.",
                 http_route_path="/agent/api/sec-filing-section",
                 response_model_name="SecFilingSectionResponse",
+            ),
+            TerraFinCapability(
+                name="deep_research",
+                category="filings_research",
+                description=(
+                    "Research a question in depth and write a cited report. A research agent searches "
+                    "the web, reads pages, filings and any `documents` the user supplied, calls "
+                    "TerraFin's data tools, calculates figures, and decides when it has enough; "
+                    "a reviewer checks the report before it returns. Pass the user's question as asked. "
+                    "It takes minutes. ASK FIRST: unless the user asked for deep research or a report by "
+                    "name, call `ask_user` with options such as 'Run deep research (a few minutes)' and "
+                    "'Quick answer now', in the user's language, and start it only after the user picks "
+                    "deep research. Not for a single lookup such as a price or a filing section."
+                ),
+                handler=build_deep_research_handler(resolved_service, lambda: registry.list()),
+                backgroundable=True,
+                background_only=True,
+                summary="Agent-run deep research: searches, reads, computes, and writes a cited report.",
+                # Hosted-only: no parity HTTP route. Runs as a background task
+                # bound to the active session.
+                http_route_path=None,
+                response_model_name="DeepResearchReportResponse",
             ),
         ]
     )

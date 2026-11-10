@@ -982,10 +982,11 @@ class SQLiteHostedSessionStore(HostedSessionStore):
                 ON hosted_view_contexts(updated_at)
                 """
             )
-            # Background-task completions awaiting delivery on the user's next
-            # turn. They live outside the session payload so a whole-record
-            # persist() cannot drop one, and every read hits this table, so all
-            # workers see the same markers. (session_id, task_id) dedupes them.
+            # Deferred background-task completion markers awaiting delivery on
+            # the user's next turn. Isolated from the session payload so that an
+            # unrelated whole-record persist() cannot clobber a freshly-appended
+            # marker. Every read/write hits this table fresh, so it is naturally
+            # cross-worker coherent. (session_id, task_id) is the dedupe key.
             connection.execute(
                 """
                 CREATE TABLE IF NOT EXISTS hosted_pending_completions (
@@ -1554,8 +1555,9 @@ class SQLiteHostedSessionStore(HostedSessionStore):
         *,
         marker: dict[str, Any],
     ) -> None:
-        # `INSERT OR IGNORE` on the (session_id, task_id) key keeps the first
-        # marker when two workers record the same completion.
+        # `INSERT OR IGNORE` on the (session_id, task_id) primary key dedupes at
+        # the DB level, so two workers re-claiming an expired lease and both
+        # recording the same completion collapse to a single marker.
         with self._lock:
             with self._connect() as connection:
                 connection.execute("BEGIN IMMEDIATE")

@@ -13,7 +13,7 @@ def _stub_payloads(monkeypatch):
     """Intercept network-facing payload builders with deterministic stubs."""
     monkeypatch.setattr(payloads, "get_ticker_to_cik_dict_cached", lambda: {"AAPL": 320193})
 
-    def fake_filings_df(cik, include_8k=False):
+    def fake_filings_df(cik, include_8k=False, include_registration=False):
         import pandas as pd
 
         return pd.DataFrame(

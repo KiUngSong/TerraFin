@@ -2,6 +2,8 @@ import logging
 import math
 from typing import Any, Iterable
 
+from fastapi import HTTPException
+
 from TerraFin.analytics.analysis.fundamental.dcf import (
     build_stock_dcf_payload,
     build_stock_reverse_dcf_payload,
@@ -11,8 +13,9 @@ from TerraFin.analytics.analysis.fundamental.growth import build_growth_series
 from TerraFin.analytics.analysis.fundamental.screen import run_fundamental_screen
 from TerraFin.analytics.analysis.risk.profile import run_risk_profile
 from TerraFin.analytics.analysis.risk.returns import extract_close_series
-from TerraFin.data import DataFactory, get_data_factory, indicator_registry
+from TerraFin.data import DataFactory, find_company, get_data_factory, indicator_registry
 from TerraFin.data.contracts import TimeSeriesDataFrame
+from TerraFin.data.watchlist_service import get_watchlist_service
 from TerraFin.interface.pages.market_insights.payloads import (
     build_macro_info_payload,
     canonical_macro_name,
@@ -28,7 +31,21 @@ from TerraFin.interface.pages.stock.payloads import (
     build_financial_statement_payload,
     resolve_ticker_query,
 )
-from TerraFin.data.watchlist_service import get_watchlist_service
+
+from ._formatters import (
+    DEFAULT_RECENT_PERIOD,
+    _calendar_processing,
+    _chunk_processing,
+    _compute_indicator_results,
+    _full_processing,
+    _normalize_depth,
+    _normalize_view,
+    _price_action,
+    _primary_series,
+    _series_closes,
+    _series_points,
+)
+
 
 _logger = logging.getLogger(__name__)
 
@@ -50,21 +67,6 @@ _FORCE_REFRESH_INDIRECT_MARKET_INDICATORS = frozenset(
         "Trailing-Forward P/E Spread",
         "SPX GEX",
     }
-)
-
-
-from ._formatters import (
-    DEFAULT_RECENT_PERIOD,
-    _calendar_processing,
-    _chunk_processing,
-    _compute_indicator_results,
-    _full_processing,
-    _normalize_depth,
-    _normalize_view,
-    _price_action,
-    _primary_series,
-    _series_closes,
-    _series_points,
 )
 
 
@@ -155,9 +157,7 @@ class TerraFinAgentService:
         return {
             "query": query,
             "count": len(matches),
-            "matches": [
-                {"symbol": m.symbol, "name": m.name, "group": m.group} for m in matches
-            ],
+            "matches": [{"symbol": m.symbol, "name": m.name, "group": m.group} for m in matches],
             "processing": _full_processing(
                 requested_depth="full",
                 source_version="indicator-catalog",
@@ -560,8 +560,18 @@ class TerraFinAgentService:
         return payload
 
     def sec_filings(self, ticker: str) -> dict[str, Any]:
-        """List recent 10-K / 10-Q / 8-K filings for a ticker with EDGAR links."""
-        payload = build_filings_list_payload(ticker)
+        """List recent 10-K / 10-Q / 8-K filings and registration statements for a ticker, CIK or company name.
+
+        A query that is no ticker or CIK goes to EDGAR's entity search, and the
+        filer it found is named in `matchedCompany`.
+        """
+        try:
+            payload = build_filings_list_payload(ticker)
+        except HTTPException as exc:
+            match = find_company(ticker) if exc.status_code == 404 else None
+            if match is None:
+                raise
+            payload = {**build_filings_list_payload(f"CIK{match['cik']}"), "matchedCompany": match["name"]}
         return {
             **payload,
             "processing": _full_processing(

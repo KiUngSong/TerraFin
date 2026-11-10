@@ -32,7 +32,7 @@ class SECClient:
     """
 
     def __init__(self, user_agent: str, host_url: str = "data.sec.gov"):
-        assert host_url in ["www.sec.gov", "data.sec.gov"]
+        assert host_url in ["www.sec.gov", "data.sec.gov", "efts.sec.gov"]
         self._session: Session = requests.Session()
         self._session.headers.update(
             {

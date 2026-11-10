@@ -49,6 +49,7 @@ from .errors import (
 )
 from .session import TerraFinAgentSession
 from .tasks import TerraFinTaskContext, TerraFinTaskRecord, TerraFinTaskRegistry, task_restart_limit_reached
+from .transcript_normalizer import COMPLETION_REPORT_METADATA_KEY
 
 
 def _utc_now() -> datetime:
@@ -787,28 +788,61 @@ class TerraFinHostedAgentRuntime:
             "metadata": dict(context.metadata),
         }
 
-    def read_tool_result(self, session_id: str, *, call_id: str, offset: int, limit: int) -> dict[str, Any]:
-        """A slice of a stored tool result. Only the session's own transcript is
-        searched, so another session's call_id is refused as not found."""
+    def read_tool_result(
+        self,
+        session_id: str,
+        *,
+        call_id: str | None = None,
+        task_id: str | None = None,
+        offset: int,
+        limit: int,
+    ) -> dict[str, Any]:
+        """A slice of a stored tool result, or of a background task's full report.
+        Only the session's own transcript is searched, so another session's
+        call_id or task_id is refused as not found."""
+        if (call_id is None) == (task_id is None):
+            return {"found": False, "reason": "Pass exactly one of call_id or task_id."}
         conversation = self.get_session_record(session_id).conversation
         messages = conversation.messages if conversation is not None else ()
-        # Newest first: providers may reuse a call_id across steps, and the
-        # prompt's pointer always names the newest result with that id.
-        content = next(
-            (m.content for m in reversed(messages) if m.role == "tool" and m.tool_call_id == call_id),
-            None,
-        )
+        if task_id is not None:
+            key = {"taskId": task_id}
+            report = next(
+                (
+                    m.metadata[COMPLETION_REPORT_METADATA_KEY]
+                    for m in reversed(messages)
+                    if m.metadata.get("taskId") == task_id and COMPLETION_REPORT_METADATA_KEY in m.metadata
+                ),
+                None,
+            )
+            content = None if report is None else _report_text(report)
+            missing = (
+                f"No delivered task result with task_id {task_id!r} in this session. "
+                "Use the task_id from a completion note in this conversation."
+            )
+        else:
+            key = {"callId": call_id}
+            # Newest first: a call_id reused across steps resolves to its newest result.
+            content = next(
+                (m.content for m in reversed(messages) if m.role == "tool" and m.tool_call_id == call_id),
+                None,
+            )
+            missing = f"No tool result with call_id {call_id!r} in this session. Use a call_id from this conversation."
         if content is None:
-            return {
-                "found": False,
-                "callId": call_id,
-                "reason": f"No tool result with call_id {call_id!r} in this session. Use a call_id from this conversation.",
-            }
+            return {"found": False, **key, "reason": missing}
         text = content[offset : offset + limit]
         end = offset + len(text)
+        if offset > 0:
+            from ..deepresearch.reader import UNTRUSTED_SOURCE_NOTE, inside_untrusted_source
+
+            # Every slice of fenced text carries the note, and a slice that
+            # starts inside a fence reopens it.
+            if content.startswith(UNTRUSTED_SOURCE_NOTE):
+                if inside_untrusted_source(content, offset):
+                    text = f"<untrusted_source>{text}"
+                text = f"{UNTRUSTED_SOURCE_NOTE}\n{text}"
         return {
             "found": True,
-            "callId": call_id,
+            **key,
             "totalChars": len(content),
             "offset": offset,
             "text": text,
@@ -931,6 +965,7 @@ class TerraFinHostedAgentRuntime:
             store=self.session_store,
             call=scratch.call,
             turn_runner=lambda: self._turn_runner,
+            focus_items=tuple(record.context.session.focus_items),
         )
         try:
             result = scratch.registry.invoke(
@@ -1374,7 +1409,10 @@ class TerraFinHostedAgentRuntime:
         if self.task_retention_seconds <= 0:
             return
         cutoff = _utc_now() - timedelta(seconds=self.task_retention_seconds)
-        removed = record.context.task_registry.prune_terminal(completed_before=cutoff)
+        # The chat shows a deep research task's report or failure from the task, so it stays as long as the session.
+        removed = record.context.task_registry.prune_terminal(
+            completed_before=cutoff, keep=lambda task: task.capability_name == "deep_research"
+        )
         if not removed:
             return
         for task in removed:
@@ -1385,3 +1423,24 @@ class TerraFinHostedAgentRuntime:
         removed_sessions = self.session_store.cleanup_expired(session_ttl_seconds=self.session_ttl_seconds)
         for record in removed_sessions:
             self._drop_task_handles_for_session(record.session_id)
+
+
+def _report_text(report: Any) -> str:
+    """`report` as JSON with its web spans fenced, under the note that explains the fence."""
+    report, fenced = _fence_web_spans(report)
+    text = json.dumps(report, ensure_ascii=False, separators=(",", ":"))
+    if not fenced:
+        return text
+    from ..deepresearch.reader import UNTRUSTED_SOURCE_NOTE
+
+    return f"{UNTRUSTED_SOURCE_NOTE}\n{text}"
+
+
+def _fence_web_spans(report: Any) -> tuple[Any, bool]:
+    """`report` with its report text, written from web pages, fenced as
+    untrusted; the flag says whether anything was fenced."""
+    if not isinstance(report, Mapping) or not isinstance(report.get("report"), str):
+        return report, False
+    from ..deepresearch.reader import untrusted_source
+
+    return {**report, "report": untrusted_source("deep-research-report", report["report"])}, True

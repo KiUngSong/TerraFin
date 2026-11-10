@@ -1,5 +1,6 @@
-"""SEC 10-K / 10-Q / 8-K HTML → markdown conversion for LLM consumption."""
+"""SEC 10-K / 10-Q / 8-K and registration-statement HTML → markdown conversion for LLM consumption."""
 
+import html as html_lib
 import logging
 import re
 
@@ -154,7 +155,8 @@ def parse_sec_filing(html_content, filing_form="10-Q", *, include_images: bool =
     Args:
         html_content: Raw HTML content from SEC filing.
         filing_form: Filing form descriptor (e.g. "10-Q", "10-K", "10-K/A",
-            "FORM 10-Q", or anything containing "10-K" / "10-Q" / "8-K" / "S-1").
+            "FORM 10-Q", or anything containing "10-K" / "10-Q" / "8-K" / "S-1" /
+            "F-1", or a 424B prospectus form).
         include_images: When True, emit markdown image tags for inline images.
             Default is False because a 10-K often embeds many signature/chart
             images whose src URLs the downstream LLM cannot fetch, so enabling
@@ -187,14 +189,72 @@ def parse_sec_filing(html_content, filing_form="10-Q", *, include_images: bool =
             include_images=include_images,
             heading_re=_EIGHT_K_SECTION_HEADING_RE,
         )
-    if "S-1" in form:
-        # `FilingType` lists S-1, but nothing parsed it. A registration
-        # statement has no Part/Item scaffold, so the 10-K path yields its
-        # body under the prospectus's own headings (checked on SpaceX's S-1/A,
-        # 0001628280-26-040364).
-        log.info("Parsing S-1 filing with Edgar10QParser (no S-1 parser in sec_parser)")
-        return _parse_filing(html_content, include_images=include_images)
+    if _is_prospectus_form(form):
+        # A registration statement or prospectus has no Part/Item scaffold before
+        # Part II, and sec_parser fuses most of its section titles into body
+        # text. Its own index links each section to an anchor at the section's
+        # start, so those anchors become the level-2 headings.
+        log.info("Parsing %s filing with Edgar10QParser and its linked index", form)
+        marked, titles = _mark_linked_sections(html_content)
+        markdown = _parse_filing(marked, include_images=include_images)
+        return _promote_section_markers(markdown, titles)
     raise ValueError(f"Filing form '{filing_form}' not supported.")
+
+
+def _is_prospectus_form(form: str) -> bool:
+    """S-1 and F-1 registration statements, their amendments, and 424B prospectuses."""
+    return "S-1" in form or "F-1" in form or form.startswith("424B")
+
+
+# An index link points at `#anchor`. Its text is the section title, a page
+# number, or the running "Table of Contents" link back to the index itself.
+_INDEX_LINK_RE = re.compile(r"<a\b[^>]*?\bhref=\"#([^\"]+)\"[^>]*>(.*?)</a>", re.IGNORECASE | re.DOTALL)
+_TAG_RE = re.compile(r"<[^>]+>")
+# Plain letters and digits, so the marker survives sec_parser's text handling
+# wherever the section's first element lands.
+_SECTION_MARKER = "TFSECTIONSTART{}END"
+_SECTION_MARKER_RE = re.compile(r"TFSECTIONSTART(\d+)END")
+_EMPTY_HEADING_LINE_RE = re.compile(r"^#{1,6}[ \t]*\n", re.MULTILINE)
+
+
+def _linked_sections(html_content: str) -> list[tuple[str, str]]:
+    """`(anchor id, title)` for each anchor the document links to by name, in first-link order."""
+    links = [
+        (target, _WHITESPACE_RE.sub(" ", html_lib.unescape(_TAG_RE.sub("", inner))).strip())
+        for target, inner in _INDEX_LINK_RE.findall(html_content)
+    ]
+    # The running header can be split into several links ("Table", "of Contents"),
+    # so an anchor ever linked as "Table of Contents" is the index, never a section.
+    index_targets = {target for target, title in links if title.lower() == "table of contents"}
+    sections: dict[str, str] = {}
+    for target, title in links:
+        if target in sections or target in index_targets or not title or title.isdigit():
+            continue
+        sections[target] = title
+    return list(sections.items())
+
+
+def _mark_linked_sections(html_content: str) -> tuple[str, dict[int, str]]:
+    """The HTML with a marker after each linked anchor's opening tag, and each marker's title."""
+    inserts: list[tuple[int, int, str]] = []
+    for number, (target, title) in enumerate(_linked_sections(html_content)):
+        anchor = re.search(r"(?<![\w-])(?:id|name)=\"" + re.escape(target) + r"\"[^>]*>", html_content)
+        if anchor is not None:
+            inserts.append((anchor.end(), number, title))
+    inserts.sort()
+    pieces: list[str] = []
+    cursor = 0
+    for position, number, _title in inserts:
+        pieces += [html_content[cursor:position], _SECTION_MARKER.format(number)]
+        cursor = position
+    pieces.append(html_content[cursor:])
+    return "".join(pieces), {number: title for _position, number, title in inserts}
+
+
+def _promote_section_markers(markdown: str, titles: dict[int, str]) -> str:
+    """Each marker becomes a level-2 heading on its own line."""
+    promoted = _SECTION_MARKER_RE.sub(lambda m: f"\n\n## {titles[int(m.group(1))]}\n\n", markdown)
+    return _EMPTY_HEADING_LINE_RE.sub("", promoted)
 
 
 def _split_into_heading_chunks(

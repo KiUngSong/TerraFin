@@ -253,6 +253,29 @@ def get_ticker_to_cik_dict_cached() -> dict[Any, Any]:
     return get_cache_manager().get_payload(_TICKER_TO_CIK_SOURCE).payload  # type: ignore[return-value]
 
 
+ENTITY_SEARCH_URL = "https://efts.sec.gov/LATEST/search-index?keysTyped={query}"
+
+
+def find_company(query: str) -> dict[str, Any] | None:
+    """EDGAR's best match for a company name: `{"cik": int, "name": str}`, or None.
+
+    This is EDGAR's own entity search, which also finds a company that has filed
+    but has no ticker yet. It ranks by name match, so the caller should show the
+    matched name rather than assume it is the company meant.
+    """
+    from urllib.parse import quote
+
+    payload = _fetch_json(ENTITY_SEARCH_URL.format(query=quote(query.strip())), host_url="efts.sec.gov")
+    hits = (payload.get("hits") or {}).get("hits") or []
+    for hit in hits:
+        try:
+            cik = int(hit.get("_id") or "")
+        except ValueError:
+            continue
+        return {"cik": cik, "name": str((hit.get("_source") or {}).get("entity") or "")}
+    return None
+
+
 def _block_to_df(block: dict, target_filing_form: list[str]) -> pd.DataFrame:
     df = pd.DataFrame(block)
     if df.empty or "form" not in df.columns:
@@ -260,10 +283,16 @@ def _block_to_df(block: dict, target_filing_form: list[str]) -> pd.DataFrame:
     return df[df.form.isin(target_filing_form)]
 
 
+# Registration statements, their amendments, and final prospectuses: the filings a
+# company makes before and at its listing, when it has no 10-K or 10-Q yet.
+REGISTRATION_FORMS = ("S-1", "S-1/A", "F-1", "F-1/A", "424B1", "424B4")
+
+
 def get_company_filings(
     cik: int | None,
     include_8k: bool = False,
     include_history: bool = False,
+    include_registration: bool = False,
 ) -> pd.DataFrame | None:
     """
     Get SEC filings (8-K, 10-K, 10-Q) for a company by CIK.
@@ -271,6 +300,7 @@ def get_company_filings(
     Args:
         cik: Company CIK number
         include_8k: Whether to include 8-K filings (default: False)
+        include_registration: Whether to include `REGISTRATION_FORMS` (default: False)
         include_history: If True, paginate through `filings.files` to include
             older filings beyond the 1000-entry `recent` block. Each extra file
             adds one HTTP call (or cache hit), so keep this off unless deep
@@ -292,6 +322,8 @@ def get_company_filings(
     target_filing_form = ["10-K", "10-Q"]
     if include_8k:
         target_filing_form.append("8-K")
+    if include_registration:
+        target_filing_form.extend(REGISTRATION_FORMS)
 
     _ensure_submissions_registered(cik)
     cik_metadata = get_cache_manager().get_payload(_submissions_source(cik)).payload

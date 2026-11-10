@@ -173,3 +173,61 @@
 .md-typeset table:not([class]) {
   font-size: 0.72rem;
 }
+
+/* Mermaid zoom controls: docs/javascripts/mermaid-zoom.js */
+.tf-mermaid {
+  margin: 1em 0;
+}
+
+.tf-mermaid__bar {
+  display: flex;
+  justify-content: flex-end;
+  gap: 4px;
+  margin-bottom: 4px;
+}
+
+.tf-mermaid__bar button {
+  min-width: 2.4em;
+  padding: 2px 8px;
+  border: 1px solid var(--md-default-fg-color--lightest);
+  border-radius: 4px;
+  background: var(--md-default-bg-color);
+  color: var(--md-default-fg-color--light);
+  font: inherit;
+  font-size: 0.7rem;
+  cursor: pointer;
+}
+
+.tf-mermaid__bar button:hover,
+.tf-mermaid__bar button:focus-visible {
+  border-color: var(--md-accent-fg-color);
+  color: var(--md-typeset-a-color);
+}
+
+.tf-mermaid__view {
+  overflow: auto;
+}
+
+.tf-mermaid__view--pannable {
+  cursor: grab;
+}
+
+.tf-mermaid__view--dragging {
+  cursor: grabbing;
+  user-select: none;
+}
+
+.tf-mermaid__view > .mermaid {
+  margin: 0;
+}
+
+.tf-mermaid:fullscreen {
+  display: flex;
+  flex-direction: column;
+  padding: 16px;
+  background: var(--md-default-bg-color);
+}
+
+.tf-mermaid:fullscreen .tf-mermaid__view {
+  flex: 1 1 auto;
+}

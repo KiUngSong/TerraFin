@@ -23,7 +23,7 @@ method, so check before calling one.
 | Get forward consensus, revisions, and price targets        | `consensus(ticker)`                                                 |
 | Find recent headlines / the catalyst behind a move         | `news(ticker, query, days, limit)`                                  |
 | Get income / balance / cashflow statement                  | `financials(ticker, statement, period)`                             |
-| List a ticker's recent 10-K / 10-Q / 8-K filings           | `sec_filings(ticker)`                                               |
+| List recent 10-K / 10-Q / 8-K filings and registration statements | `sec_filings(ticker)`                                        |
 | Get a single filing's TOC (no full body)                   | `sec_filing_document(ticker, accession, primaryDocument, form)`     |
 | Pull one filing section's markdown body                    | `sec_filing_section(..., sectionSlug, form)`                        |
 | Run DCF / reverse DCF / Graham / relative valuation        | `valuation(ticker, ...)` (see [valuation.md](valuation.md) for turnaround inputs)|
@@ -47,7 +47,7 @@ method, so check before calling one.
 | Sweep many symbols for pattern triggers (idea sourcing)    | `pattern_scan(group, tickers, severity_min)`                        |
 | Read which panel/form the user is currently looking at     | `current_view_context()` (TerraFin's own agent only)                |
 | Open a chart artifact bound to the session                 | `open_chart(name)` (TerraFin's own agent only)                      |
-| List / authenticate / switch hosted models                 | `terrafin-agent models ...` (see [Model management](https://kiungsong.github.io/TerraFin/agent/models/))          |
+| List / authenticate / switch hosted models                 | `terrafin-agent models ...` (see [Model management](https://kiungsong.github.io/TerraFin/getting-started/models/))          |
 | Discover capability schemas programmatically               | `GET /openapi.json`, filtered to `/agent/api/*`                     |
 
 Signatures, parameter ranges, and worked examples live in [SKILL.md](../SKILL.md)

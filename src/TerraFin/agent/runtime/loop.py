@@ -19,6 +19,7 @@ from ..contracts.conversation import (
 from ..contracts.conversation_state import RUNTIME_MODEL_METADATA_KEY, record_tool_call_history
 from ..contracts.definitions import TerraFinAgentDefinition
 from ..contracts.model_client import TerraFinHostedModelClient, TerraFinTurnOptions
+from ..contracts.tool_contracts import ASK_USER_TOOL_NAME
 from ..models.runtime import TerraFinModelResponseError
 from ..tools import TerraFinHostedToolAdapter, TerraFinToolDefinition, TerraFinToolInvocationResult
 from ..tools.execution import ToolExecutionEngine
@@ -34,7 +35,7 @@ from .hosted import TerraFinHostedAgentRuntime
 from .recovery import RecoveryPolicy, RecoveryTracker
 from .session import TerraFinAgentSession
 from .tool_batch import run_tool_batch
-from .transcript_normalizer import TranscriptNormalizer
+from .transcript_normalizer import COMPLETION_REPORT_METADATA_KEY, TranscriptNormalizer
 
 
 _logger = logging.getLogger(__name__)
@@ -45,12 +46,17 @@ USAGE_TOTALS_METADATA_KEY = "usageTotals"
 # user stopped it, "length" when the reply is cut at the output limit, and
 # "step_limit" when the last step had to answer with tools off.
 TURN_ENDING_METADATA_KEY = "turnEnding"
+# The question an `ask_user` call put to the user, with its options, on the reply that ends the turn.
+ASK_USER_METADATA_KEY = "askUser"
 # The token usage of every model call in the turn, summed onto its final reply.
 TURN_TOKEN_USAGE_METADATA_KEY = "turnTokenUsage"
 
 # A text reply cut at the output limit is continued this many times before the
 # partial is returned as the answer.
 MAX_LENGTH_CONTINUATIONS = 2
+
+# Characters of a result shown in its completion note: a report's head, or any other result's JSON.
+_SUMMARY_PREVIEW_CHARS = 1500
 
 # The last step cannot run tools, so it asks for an answer from what is in hand.
 # Sent as pinned context, never as a system message the budget could drop.
@@ -404,8 +410,11 @@ class TerraFinHostedAgentLoop:
         total_tool_calls = 0
         recovery_tracker = RecoveryTracker(self.recovery_policy)
 
-        # Background tasks that finished since the last turn are delivered
-        # before the model sees this one. See `docs/agent/hosted-runtime.md`.
+        # Deferred-completion delivery: before the model sees this turn, drain
+        # any background tasks (e.g. deep_research) that finished while the user
+        # was away and inject their reports into the transcript so the
+        # orchestrator integrates them and can answer follow-ups. See
+        # `docs/harness/hosted-runtime.md`.
         self._drain_pending_completions(session_id, conversation, added=added)
 
         # A hook re-adds what it owns each turn, so last turn's copy is dropped
@@ -427,7 +436,7 @@ class TerraFinHostedAgentLoop:
         # No pre-intercept router. The orchestrator agent's own LLM decides
         # when to consult a hidden persona (Buffett / Marks / Druckenmiller)
         # via `consult_<persona>` tool-calls handled by the tool adapter.
-        # See `docs/agent/architecture.md#orchestrator-persona-subagents`.
+        # See `docs/harness/architecture.md#orchestrator--persona-subagents`.
 
         # Track (tool_name, canonical_args) call counts across this run so we
         # can break LLM loops that re-issue the same tool call step after step.
@@ -557,6 +566,39 @@ class TerraFinHostedAgentLoop:
                 )
                 self._append_conversation_message(conversation, fallback_message, added=added)
                 final_message = fallback_message
+                self._persist_conversation_runtime_state(session_id, conversation)
+                return TerraFinHostedRunResult(
+                    session_id=session_id,
+                    agent_name=conversation.agent_name,
+                    final_message=final_message,
+                    messages_added=tuple(added),
+                    tool_results=tuple(tool_results),
+                    steps=step,
+                )
+            # A question to the user ends the turn. Its answer arrives as the next user message.
+            asked = next(
+                (
+                    result
+                    for result in batch.invocations
+                    if result.tool_name == ASK_USER_TOOL_NAME and not result.is_error
+                ),
+                None,
+            )
+            if asked is not None:
+                question = str(asked.payload.get("question") or "")
+                final_message = TerraFinConversationMessage(
+                    role="assistant",
+                    content=question,
+                    metadata={
+                        ASK_USER_METADATA_KEY: {
+                            "question": question,
+                            "options": list(asked.payload.get("options") or []),
+                        },
+                        **_turn_usage_metadata(turn_usage),
+                    },
+                    blocks=(make_text_block(question),),
+                )
+                self._append_conversation_message(conversation, final_message, added=added)
                 self._persist_conversation_runtime_state(session_id, conversation)
                 return TerraFinHostedRunResult(
                     session_id=session_id,
@@ -743,15 +785,25 @@ class TerraFinHostedAgentLoop:
     ) -> None:
         """Deliver background-task completions queued since the last turn.
 
-        A marker is cleared only after its note is appended to the transcript,
-        so a failed append leaves it for the next turn. A marker whose task
-        already has a note in the transcript is cleared without a second note.
-        A missing session is a no-op.
+        Peek-then-clear: a marker is only cleared AFTER its delivery message is
+        durably appended to the transcript, so a mid-drain failure (message
+        budget, etc.) leaves the marker intact for redelivery next turn — no
+        silent loss, no half-appended orphan. If the session was
+        deleted/archived, the drain is a graceful no-op.
 
-        Each completion is delivered as one user-role note. Every provider
-        adapter forwards a user message as is, while a synthesized tool result
-        with no matching tool call is rejected. `internalOnly` hides the note
-        from the UI but not from the model.
+        Delivery is deduped by taskId twice over: `INSERT OR IGNORE` collapses
+        duplicate markers at the store, and here a marker whose note already
+        exists in the transcript is skipped-and-cleared. This keeps a re-claimed
+        task or a clear that didn't commit last turn from re-appending the note.
+
+        Each completion is delivered as a single USER-role context message (a
+        background-note) carrying a bounded summary of the report and a pointer
+        to the full report, which `read_tool_result(task_id=...)` reads. Unlike a synthesized tool_use /
+        tool_result pair, a user message is forwarded verbatim by every provider
+        adapter (OpenAI Responses drops assistant/tool_use turns and only sends
+        user messages + function_call_output — a fabricated function_call_output
+        with no matching server-side function_call is rejected with HTTP 400).
+        `internalOnly` hides it from the UI transcript but not from the model.
         """
         try:
             markers = self.runtime.session_store.peek_pending_completions(session_id)
@@ -767,10 +819,17 @@ class TerraFinHostedAgentLoop:
         for marker in markers:
             task_id = str(marker.get("taskId") or "").strip()
             if task_id and task_id in delivered_task_ids:
+                # Already delivered in a prior turn (e.g. a clear that never
+                # committed). Drop the stale marker without re-appending.
                 self.runtime.session_store.clear_pending_completions(session_id, task_ids=(task_id,))
                 continue
             note_message = self._build_completion_delivery_message(marker)
             self._append_conversation_message(conversation, note_message, added=added)
+            # A background task's model turns count toward the session that started it.
+            result = marker.get("result")
+            task_usage = result.get("usage") if isinstance(result, Mapping) else None
+            if isinstance(task_usage, Mapping):
+                _add_usage_totals(conversation, task_usage)
             if task_id:
                 delivered_task_ids.add(task_id)
                 self.runtime.session_store.clear_pending_completions(session_id, task_ids=(task_id,))
@@ -782,23 +841,25 @@ class TerraFinHostedAgentLoop:
         marker: Mapping[str, Any],
     ) -> TerraFinConversationMessage:
         capability_name = str(marker.get("capabilityName") or "deep_research")
+        task_id = str(marker.get("taskId") or "")
         report = marker.get("result")
-        report_text = (
-            json.dumps(report, ensure_ascii=False, separators=(",", ":")) if report is not None else "(no report)"
-        )
         if isinstance(report, Mapping) and "error" in report:
             content = (
                 "[Automated system note: background task failed]\n\n"
                 f"A background TerraFin '{capability_name}' task the user started earlier failed. "
                 "In your reply to the user's next message, tell them it failed and that they can start it again.\n\n"
-                f"{report_text}"
+                f"Error: {truncate_text(json.dumps(report['error'], ensure_ascii=False), 500)}"
             )
         else:
+            # The pointer comes before the summary so a cut that keeps only the
+            # head of the note still says where the full report is.
             content = (
-                "[Automated system note: background research completed]\n\n"
+                "[Automated system note — background research completed]\n\n"
                 f"A background TerraFin '{capability_name}' task the user started earlier has finished. "
-                "Integrate its findings into your reply to the user's next message; do not re-run the task.\n\n"
-                f"{report_text}"
+                "Integrate its findings into your reply to the user's next message; do not re-run the task.\n"
+                f'Full report: read_tool_result(task_id="{task_id}"). Read it before quoting a figure, '
+                "a gap or a source this summary does not show.\n\n"
+                f"{_report_summary(report)}"
             )
         return TerraFinConversationMessage(
             role="user",
@@ -808,6 +869,7 @@ class TerraFinHostedAgentLoop:
                 "internalCompletionDelivery": True,
                 "capabilityName": capability_name,
                 "taskId": marker.get("taskId"),
+                COMPLETION_REPORT_METADATA_KEY: report,
             },
             blocks=(make_text_block(content),),
         )
@@ -889,6 +951,29 @@ class TerraFinHostedAgentLoop:
             guru_name=guru_name,
             question=question,
         )
+
+
+def _report_summary(report: Any) -> str:
+    """Title, status, the run's counts and the head of the report, bounded in size.
+
+    The report is written from web pages, so its text is fenced as untrusted.
+    A result without a report is not a research report and shows as a JSON head.
+    """
+    if not isinstance(report, Mapping):
+        return "(no report)"
+    if not isinstance(report.get("report"), str):
+        return truncate_text(json.dumps(report, ensure_ascii=False), _SUMMARY_PREVIEW_CHARS)
+    from ..deepresearch.reader import UNTRUSTED_SOURCE_NOTE, untrusted_source
+
+    lines = [
+        UNTRUSTED_SOURCE_NOTE,
+        f"Title: {truncate_text(str(report.get('title') or ''), 200)}",
+        f"Status: {report.get('status') or 'unknown'} ({truncate_text(str(report.get('stopReason') or ''), 120)})",
+        f"Turns: {report.get('turns')}, tool calls: {report.get('toolCalls')}, reviews: {len(report.get('reviews') or ())}",
+        "Report head:",
+        untrusted_source("deep-research-report", truncate_text(report["report"], _SUMMARY_PREVIEW_CHARS)),
+    ]
+    return "\n".join(lines)
 
 
 def _with_metadata(message: TerraFinConversationMessage, metadata: Mapping[str, Any]) -> TerraFinConversationMessage:

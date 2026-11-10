@@ -5,7 +5,7 @@ If this test fails, regenerate the artefacts:
     python scripts/generate-agent-artefacts.py
 
 and commit the result. The generator derives `skills/terrafin/SKILL.md`'s
-"Capability inventory" section and `docs/agent/usage.md`'s "Route summary"
+"Capability inventory" section and `docs/skills/usage.md`'s "Route summary"
 table from the capability registry in
 `src/TerraFin/agent/runtime/capability.py`.
 Drift is a sign that someone added or changed a capability without running
@@ -15,6 +15,7 @@ the generator — the agent surfaces would otherwise diverge silently.
 import subprocess
 import sys
 from pathlib import Path
+
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 GENERATOR = REPO_ROOT / "scripts" / "generate-agent-artefacts.py"

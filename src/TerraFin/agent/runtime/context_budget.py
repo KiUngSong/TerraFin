@@ -123,6 +123,8 @@ class ContextBudgetManager:
         older = non_system_messages[:turn_start]
         current_turn = non_system_messages[turn_start:]
         current_user = current_turn[0] if current_turn else None
+        # Deferred-completion notes are injected here too, so a completion can
+        # land near this window boundary.
         room = len(older) if level == "full" else max(self._message_window(level) - len(current_turn), 0)
         window_start = len(older) - min(room, len(older))
         # A window never opens on a tool result whose tool_use was cut.

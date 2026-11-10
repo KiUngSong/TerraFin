@@ -85,6 +85,14 @@ export const turnEndingRow = (message: ActivityMessage) => {
   return typeof ending === 'string' ? TURN_ENDING_ROW[ending] ?? '' : '';
 };
 
+// The options of a reply that asked the user a question (askUser, set in
+// agent/runtime/loop.py), or [] for any other message.
+export const askUserOptions = (message: ActivityMessage): string[] => {
+  const asked = message.role === 'assistant' ? message.metadata?.askUser : undefined;
+  const options = (asked as { options?: unknown } | undefined)?.options;
+  return Array.isArray(options) ? options.filter((option): option is string => typeof option === 'string' && option.trim() !== '') : [];
+};
+
 // The session's tokens, summed over replies that carry a turn total. Null until
 // two turns do, since one turn's total is already in its own footer.
 export const sessionTokens = (messages: ActivityMessage[]): TokenCount | null => {

@@ -62,10 +62,10 @@ symlink-based, so `git pull` upgrades every host at once.
 
     - [Skills](skills/index.md): what the skill layer is, install, the
       surfaces, discovery.
-    - [Route summary](agent/usage.md#route-summary): every capability with a route, grouped by kind.
-    - [For External Agents](agent/external-agents.md): base URL, discovery,
+    - [Route summary](skills/usage.md#route-summary): every capability with a route, grouped by kind.
+    - [For External Agents](skills/external-agents.md): base URL, discovery,
       finding a series by name.
-    - [Usage](agent/usage.md): request policy, route summary, the
+    - [Usage](skills/usage.md): request policy, route summary, the
       view-context read-only contract.
 
 === "Run TerraFin's own agent"
@@ -75,13 +75,13 @@ symlink-based, so `git pull` upgrades every host at once.
     (Buffett, Marks, Druckenmiller) run as hidden subagents. Run it locally
     or as a public deployment.
 
-    - [Getting Started](getting-started.md): install, set a model key, run
+    - [Getting Started](getting-started/index.md): install, set a model key, run
       the server.
-    - [Model Management](agent/models.md): choose a provider and model.
+    - [Model Management](getting-started/models.md): choose a provider and model.
 
     How it works, for contributors: [Agent Harness](harness/index.md),
-    [The Agent Loop](harness/loop.md), [Hosted Runtime](agent/hosted-runtime.md),
-    [Architecture and Personas](agent/architecture.md).
+    [The Agent Loop](harness/loop.md), [Hosted Runtime](harness/hosted-runtime.md),
+    [Architecture and Personas](harness/architecture.md).
 
 === "Contribute to TerraFin"
 
@@ -90,34 +90,34 @@ symlink-based, so `git pull` upgrades every host at once.
 
     - [AGENTS.md](https://github.com/KiUngSong/TerraFin/blob/main/AGENTS.md):
       the entry point for agents and people working in this codebase.
-    - [Feature Integration](feature-integration.md): where new logic
+    - [Feature Integration](reference/feature-integration.md): where new logic
       lives across the data, analytics, interface and agent layers.
-    - [Data Layer](data-layer.md), [Analytics](analytics.md),
-      [Analytics Notes](analytics-notes.md): DCF cascade, turnaround
+    - [Data Layer](reference/data-layer.md), [Analytics](reference/analytics.md),
+      [Analytics Notes](reference/analytics-notes.md): DCF cascade, turnaround
       math, indicator contract.
-    - [Chart Architecture](chart-architecture.md), [Caching](caching.md),
-      [Development Guide](development.md).
+    - [Chart Architecture](reference/chart-architecture.md), [Caching](reference/caching.md),
+      [Development Guide](development/index.md).
 
 ## Also Useful
 
-- [Configuration](configuration.md)
-- [Deployment & Operations](deployment.md)
-- [Examples & Workflows](examples.md)
-- [License & Data Rights](legal.md)
+- [Configuration](getting-started/configuration.md)
+- [Deployment & Operations](getting-started/deployment.md)
+- [Examples & Workflows](guides/examples.md)
+- [License & Data Rights](development/legal.md)
 
 !!! warning "Software rights are not data rights"
     TerraFin's code is MIT-licensed. That does **not** grant rights to Yahoo,
     SEC, FRED, private endpoints, or other upstream data sources. Read
-    [License & Data Rights](legal.md) before running a public deployment.
+    [License & Data Rights](development/legal.md) before running a public deployment.
 
 ## Read By Goal
 
 | If you want to... | Start here |
 |-------------------|------------|
-| install TerraFin and try it locally | [Getting Started](getting-started.md) |
-| understand the page routes and APIs | [Interface Overview](interface.md) |
+| install TerraFin and try it locally | [Getting Started](getting-started/index.md) |
+| understand the page routes and APIs | [Interface Overview](guides/interface.md) |
 | call TerraFin from your own agent | [Skills](skills/index.md) |
 | run TerraFin's own agent | [Agent Harness](harness/index.md) |
-| add a provider, indicator, or feature | [Data Layer](data-layer.md) and [Feature Integration](feature-integration.md) |
-| operate the server in demo or private mode | [Deployment & Operations](deployment.md) |
-| work on the repo itself | [Development Guide](development.md) |
+| add a provider, indicator, or feature | [Data Layer](reference/data-layer.md) and [Feature Integration](reference/feature-integration.md) |
+| operate the server in demo or private mode | [Deployment & Operations](getting-started/deployment.md) |
+| work on the repo itself | [Development Guide](development/index.md) |

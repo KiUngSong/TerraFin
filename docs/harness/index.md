@@ -9,17 +9,25 @@ read_when:
 # Agent harness
 
 The harness is TerraFin's own agent: a model loop that runs in the TerraFin
-server and answers from the chat widget on every page. It calls the same
-capabilities that external agents use as [skills](../skills/index.md). Both
-read from one capability registry in `src/TerraFin/agent/runtime/capability.py`.
+server and answers from the chat widget on every page.
+
+- It calls the same capabilities that external agents use as
+  [skills](../skills/index.md).
+- The harness and the skills read from one capability registry in
+  `src/TerraFin/agent/runtime/capability.py`.
 
 ## What it adds to the skills
 
-An external agent that installs the skill brings its own model and loop.
-Someone using the TerraFin web app has neither. The harness supplies them,
-plus what only a hosted agent can have: the page the user is looking at, a
-transcript that survives a reload, background tasks, approvals for actions with side effects, and investor-persona
-sub-agents.
+- An external agent that installs the skill brings its own model and loop.
+- Someone using the TerraFin web app has neither, so the harness supplies them.
+
+The harness also supplies what only a hosted agent can have:
+
+- the page the user is looking at
+- a transcript that survives a reload
+- background tasks
+- approvals for actions with side effects
+- investor-persona sub-agents
 
 Because the tools are the registry's capabilities, a fix to a capability
 reaches the skill and the harness at once. There is no second, agent-only
@@ -47,13 +55,17 @@ All paths are under `src/TerraFin/`.
    |     `-- runtime: policy, approvals, tasks agent/runtime/hosted.py
    |           |-- task records, TaskContext   agent/runtime/tasks.py
    |           `-- capability registry         agent/runtime/capability.py
+   |                 `-- deep research         agent/runtime/deep_research_capability.py
+   |                                           agent/deepresearch/
    |-- recovery                                agent/runtime/recovery.py
    `-- storage: transcript and session record  agent/storage/
 ```
 
+Deep research is on by default: `TERRAFIN_AGENT_DEEPRESEARCH_ENABLED=0` turns it
+off.
+
 The loop is wired once per process in `agent/service/hosted.py`. The
-step-by-step turn is on [The agent loop](loop.md). The sections below say
-what each component does and what it hands to the next.
+step-by-step turn is on [The agent loop](loop.md).
 
 ## Capability registry and tool layer
 
@@ -66,10 +78,22 @@ returns a tool result marked as success, retryable error or fatal error.
 adapter that builds the tool list and the engine that runs a call).
 
 Each capability says whether it has side effects and whether it can run in
-the background. The tool list for an agent holds one tool per allowed
-capability, a `start_<capability>_task` tool for capabilities that can run in
-the background, `current_view_context`, `read_tool_result`, and the
-`consult_<persona>` tools for the public agent.
+the background. The tool list for an agent holds:
+
+- one tool per allowed capability
+- a `start_<capability>_task` tool for capabilities that can run in the
+  background
+- `current_view_context` and `read_tool_result`
+- for the public agent only, `ask_user`
+  ([Asking the user](loop.md#5-asking-the-user)) and the `consult_<persona>`
+  tools
+
+Exceptions:
+
+- A capability that runs only in the background, such as `deep_research`,
+  gets only its `start_` tool.
+- `deep_research` is left out while
+  `TERRAFIN_AGENT_DEEPRESEARCH_ENABLED` is `0`.
 
 **Connects to.** The loop asks for tools each step and hands each tool call
 to the tool layer. The tool layer calls the runtime for capabilities and
@@ -86,13 +110,16 @@ turn. It also holds the default system prompt.
 **Connects to.** Everything else on this page. Full walk-through:
 [The agent loop](loop.md).
 
-A reply on the last step carries `turnEnding`, unless it only finishes a
-continued reply. A reply still cut at the output limit after the loop stops
-continuing it, and the reply of a stopped turn, carry one too. Its value is
-`step_limit`, `length` or `interrupted`. A fallback message carries one only
-when the turn was stopped. The last step runs with tools off and asks for an
-answer from the results in hand. Details:
-[Turn endings](loop.md#5-turn-endings).
+These replies carry `turnEnding`, whose value is `step_limit`, `length` or
+`interrupted`:
+
+- a reply on the last step, unless it only finishes a continued reply
+- a reply still cut at the output limit after the loop stops continuing it
+- the reply of a stopped turn
+- a fallback message, only when the turn was stopped
+
+The last step runs with tools off and asks for an answer from the results in
+hand. Details: [Turn endings](loop.md#6-turn-endings).
 
 ## Turn hooks and pinned context
 
@@ -101,8 +128,7 @@ observe it. A hook never gates a turn. A hook that raises is logged and
 skipped.
 
 **Where it lives.** `agent/runtime/hooks.py` (`TerraFinTurnHook`,
-`default_turn_hooks`). The default list is empty. A loop built with `hooks=`
-runs the hooks it is given.
+`default_turn_hooks`).
 
 A hook can implement any of these:
 
@@ -117,8 +143,10 @@ A hook can implement any of these:
   session's message cap.
 
 **Pinned context** is sent with the system text of that one request
-(`TerraFinTurnOptions.pinned_context`). It is never written to the
-transcript, so the context budget can never cut it.
+(`TerraFinTurnOptions.pinned_context`).
+
+- Pinned context is never written to the transcript, so the context budget
+  can never cut it.
 
 **Connects to.** The loop calls the hooks. Each provider adds the pinned text
 to its system instructions.
@@ -168,8 +196,8 @@ reads the exact text in slices with `read_tool_result(call_id, offset,
 limit)`.
 
 **Connects to.** The loop asks the budget manager for the prepared messages
-before each model call. The stored transcript is never shortened. Only the
-copy sent to the model is.
+before each model call. The stored transcript is never shortened, only the
+copy sent to the model.
 
 ## Sessions, background tasks and the dispatcher
 
@@ -204,14 +232,19 @@ A handler that takes a `task` argument gets a `TerraFinTaskContext`:
 The dispatcher also renews the lease of every task it is running. A task
 whose worker is lost is claimed again, up to 3 attempts.
 
-**Connects to.** The loop appends every message to the transcript and writes
-conversation metadata to the session record. The dispatcher claims pending
-tasks and runs them. The widget reads their status from the session's tasks
-route and cancels one with `POST /agent/api/runtime/tasks/{id}/cancel`. A
-completed task is delivered to the next turn as a note that carries its
-result. A task that fails after losing its worker 3 times (`restart_limit`)
-gets a note that says it failed. Details:
-[Background tasks](loop.md#background-tasks).
+**Connects to.**
+
+- The loop appends every message to the transcript and writes conversation
+  metadata to the session record.
+- The dispatcher claims pending tasks and runs them.
+- The widget reads their status from the session's tasks route and cancels one
+  with `POST /agent/api/runtime/tasks/{id}/cancel`.
+- A completed task is delivered to the next turn as a note that gives a
+  `read_tool_result(task_id=...)` pointer before its summary.
+- A task that fails after losing its worker 3 times (`restart_limit`) gets a
+  note that says it failed.
+
+Details: [Background tasks](loop.md#background-tasks).
 
 ## Stop
 
@@ -230,19 +263,27 @@ gets a note that says it failed. Details:
 
 **Connects to.** The widget's Stop button. Details: [Stop](loop.md#stop).
 
+## Deep research on the harness
+
+A background task in which a research agent searches, reads, computes and writes a cited report, on by default
+(`TERRAFIN_AGENT_DEEPRESEARCH_ENABLED=0` turns it off). Full description: [Deep research](deep-research.md).
+
 ## Model providers and model management
 
 **What it does.** Sends the prepared messages and tool list to a model and
 returns the assistant text and tool calls.
 
-**Where it lives.** `agent/models/`. The model client routes each session to
-its pinned model's provider. Providers live in `agent/models/providers/`.
-OpenAI, Google and Anthropic are registered (`agent/service/hosted.py`). Each
-reports a reply cut at the output limit as stop reason `length`. Each passes
-on the token usage the provider reports for a reply.
+**Where it lives.** `agent/models/`.
+
+- The model client routes each session to its pinned model's provider.
+- Providers live in `agent/models/providers/`.
+- OpenAI, Google and Anthropic are registered (`agent/service/hosted.py`).
+- Each provider reports a reply cut at the output limit as stop reason
+  `length`.
+- Each provider passes on the token usage it reports for a reply.
 
 **Connects to.** The loop calls the model client once per step. Choosing a
-provider and model: [Model management](../agent/models.md).
+provider and model: [Model management](../getting-started/models.md).
 
 ## Approvals and policy
 
@@ -271,8 +312,11 @@ failing, instead of looping until the step limit.
 **Where it lives.** `agent/runtime/recovery.py`.
 
 **Connects to.** The loop records each batch that had a retryable error,
-once per batch. Three failing batches in a turn, or the same error in two
-batches, stop the turn, and the loop answers with a fallback message.
+once per batch.
+
+- Three failing batches in a turn, or the same error in two batches, stop the
+  turn.
+- The loop then answers with a fallback message.
 
 ## Personas as sub-agents
 
@@ -280,15 +324,21 @@ batches, stop the turn, and the loop answers with a fallback message.
 Stanley Druckenmiller personas for a structured memo, then write its own
 answer from the memos.
 
-**Where it lives.** `agent/guru/`. A consult creates a hidden child session
-and runs a short model loop in it that must end with a memo. Each persona's
-allowed capabilities come from its YAML file in `agent/guru/personas/`.
+**Where it lives.** `agent/guru/`.
 
-**Connects to.** The tool layer routes `consult_<persona>` calls to the loop.
-The memo returns as that call's tool result. Persona sessions get no
-`consult_*` tools, so they cannot recurse. Deleting the parent session
-deletes its hidden children. Diagrams of both loops:
-[Agent architecture](../agent/architecture.md).
+- A consult creates a hidden child session and runs a short model loop in it
+  that must end with a memo.
+- Each persona's allowed capabilities come from its YAML file in
+  `agent/guru/personas/`.
+
+**Connects to.**
+
+- The tool layer routes `consult_<persona>` calls to the loop.
+- The memo returns as that call's tool result.
+- **Persona sessions get no `consult_*` tools, so they cannot recurse.**
+- Deleting the parent session deletes its hidden children.
+
+Diagrams of both loops: [Agent architecture](architecture.md).
 
 ## View context
 
@@ -322,18 +372,18 @@ context.
   `hosted_agent_turn_in_flight`.
 - `interface/frontend/src/agent/`: the chat panel. It manages sessions, sends
   and stops messages, polls and cancels tasks, lets the user approve or deny,
-  and shows each turn's tool calls.
+  and shows each turn's tool calls and research reports.
 - `agent/service/client.py`: `TerraFinAgentClient` calls the same routes, or
   the loop in-process.
 
 **Connects to.** The loop. The endpoint list and browser behavior are in
-[Hosted runtime](../agent/hosted-runtime.md).
+[Hosted runtime](hosted-runtime.md).
 
 ## Read next
 
 - [The agent loop](loop.md): one turn, step by step.
-- [Hosted runtime](../agent/hosted-runtime.md): endpoints, transcript format,
+- [Hosted runtime](hosted-runtime.md): endpoints, transcript format,
   regression surfaces.
-- [Agent architecture](../agent/architecture.md): capability layer and
+- [Agent architecture](architecture.md): capability layer and
   persona sub-agent diagrams.
-- [Model management](../agent/models.md): choosing a provider and model.
+- [Model management](../getting-started/models.md): choosing a provider and model.

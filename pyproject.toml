@@ -43,6 +43,7 @@ dependencies = [
     "httpx>=0.28.1",
     "numpy",
     "openai>=2.31.0",
+    "openpyxl",
     "pandas",
     "plotly",
     "pyrate-limiter",
@@ -51,6 +52,7 @@ dependencies = [
     "scipy",
     "sec-parser",
     "uvicorn[standard]>=0.32.0",
+    "xlrd",
     "yfinance",
 ]
 

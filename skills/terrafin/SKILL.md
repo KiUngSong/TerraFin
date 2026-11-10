@@ -100,7 +100,7 @@ UI at `/agent/*`, not the stateless `/agent/api/*` routes):
 - `TERRAFIN_AGENT_MODEL_REF` — `provider/model`, e.g. `openai/gpt-6-luna` or `google/gemini-4-argon`.
 - One of `OPENAI_API_KEY`, `GEMINI_API_KEY`, `ANTHROPIC_API_KEY` — must match the provider in `TERRAFIN_AGENT_MODEL_REF`.
 
-See [.env.example](../../.env.example) and [docs/configuration.md](../../docs/configuration.md) for the full list (MongoDB watchlist, private-access data source, host/port overrides, etc.).
+See [.env.example](../../.env.example) and [docs/getting-started/configuration.md](../../docs/getting-started/configuration.md) for the full list (MongoDB watchlist, private-access data source, host/port overrides, etc.).
 
 ## When to use
 
@@ -287,13 +287,14 @@ Stateless data + analysis (each has a matching `/agent/api/*` HTTP route):
 - `growth_series` — Revenue and EPS YoY growth series for a ticker. `GET /agent/api/growth-series`
 - `risk_profile` — Statistical risk profile (tail risk, convexity, vol regime, drawdown). `GET /agent/api/risk-profile`
 - `valuation` — DCF (incl. turnaround mode), reverse DCF, relative valuation, Graham number. `GET /agent/api/valuation`
-- `sec_filings` — List recent 10-K / 10-Q / 8-K filings for a ticker with EDGAR URLs. `GET /agent/api/sec-filings`
+- `sec_filings` — List recent 10-K / 10-Q / 8-K filings and registration statements with EDGAR URLs. `GET /agent/api/sec-filings`
 - `sec_filing_document` — Filing table-of-contents (sections + char counts) without full body. `GET /agent/api/sec-filing-document`
 - `sec_filing_section` — Verbatim markdown body of one filing section by slug. `GET /agent/api/sec-filing-section`
 
 Hosted-runtime-only tools (require a live TerraFinAgentSession; not exposed as stateless HTTP routes):
 
 - `open_chart` — Create or update a chart session bound to the conversation.
+- `deep_research` — Agent-run deep research: searches, reads, computes, and writes a cited report.
 
 <!-- generated:capability-list:end -->
 
@@ -314,16 +315,16 @@ Task helpers are also exported from `TerraFin.agent`.
 
 ## See also
 
-- [`docs/agent/usage.md`](../../docs/agent/usage.md) — full request policy,
+- [`docs/skills/usage.md`](../../docs/skills/usage.md) — full request policy,
   `processing` metadata reference, route summary by category, hosted runtime
   routes (sessions / approvals / tasks).
-- [`docs/agent/index.md`](../../docs/agent/index.md) — Glossary of terms
+- [`docs/skills/glossary.md`](../../docs/skills/glossary.md) — Glossary of terms
   used across the agent docs (Capability vs Tool vs Skill, persona allowlist
   semantics, view-context contract).
-- [`docs/api-reference.md`](../../docs/api-reference.md) — per-route
+- [`docs/skills/api-reference.md`](../../docs/skills/api-reference.md) — per-route
   documentation for `/stock/api/*` and `/agent/api/*` including the new
   fields on `POST /stock/api/dcf` (`projectionYears`, `fcfBaseSource`,
   turnaround inputs).
-- [`docs/analytics-notes.md`](../../docs/analytics-notes.md) — DCF model
+- [`docs/reference/analytics-notes.md`](../../docs/reference/analytics-notes.md) — DCF model
   math: base FCF source cascade, projection horizon, turnaround schedule
   formulas, scenario shifts.

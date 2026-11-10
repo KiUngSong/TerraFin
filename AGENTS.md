@@ -4,7 +4,7 @@ Package paths on this page drop the leading `src/TerraFin/`: `data/` means `src/
 
 Read this file first when working inside the TerraFin repository.
 
-**Agent / worker dropping in?** Start at [docs/agent/index.md](./docs/agent/index.md)
+**Agent / worker dropping in?** Start at [docs/skills/glossary.md](./docs/skills/glossary.md)
 for the glossary + start-here map, then
 [skills/terrafin/references/tool-lookup.md](./skills/terrafin/references/tool-lookup.md)
 for the **"Pick a tool"** table and the **"Don't roll your own"** anti-patterns.
@@ -42,7 +42,7 @@ directly. Local dev defaults to `http://127.0.0.1:8001`. Discovery surfaces:
 - Swagger UI: [`/docs`](http://127.0.0.1:8001/docs) — interactive, executable
 - Schema: [`/openapi.json`](http://127.0.0.1:8001/openapi.json) — machine-readable
 - Health: `GET /ready`
-- Per-route docs: [docs/api-reference.md](./docs/api-reference.md)
+- Per-route docs: [docs/skills/api-reference.md](./docs/skills/api-reference.md)
 
 Prefer Swagger over hand-written curl snippets — the schema there always
 matches the running server.
@@ -84,10 +84,13 @@ Hosted-runtime-only tools (no stateless HTTP route):
   `set_form_state` tool exists today; the agent suggests values in
   conversation and the user applies them manually. This gap is tracked.
 - `open_chart(...)` — creates a chart artifact bound to the session.
-- `read_tool_result(call_id, offset, limit)`: reads the exact text of an
+- `read_tool_result(call_id | task_id, offset, limit)`: reads the exact text of an
   earlier tool result in the same session, one slice at a time, when the
-  prompt shows it cut.
+  prompt shows it cut; task_id reads a delivered background task's full report.
   **Read-only.**
+- `ask_user(question, options)`: shows the user a question with 2 to 4 option
+  buttons and ends the turn; the answer arrives as the next user message. See
+  [docs/harness/loop.md](./docs/harness/loop.md#5-asking-the-user).
 
 ## Persona allowlists
 
@@ -115,7 +118,7 @@ Start with:
   it); it symlinks the host's skill directory at this checkout, so a `git pull`
   here upgrades every host at once. Do not `cp` the directory — a copy stops
   tracking the code it documents and drifts from the API it describes.
-- [docs/agent/usage.md](./docs/agent/usage.md)
+- [docs/skills/usage.md](./docs/skills/usage.md)
 
 Use these when the goal is to consume TerraFin through:
 
@@ -127,8 +130,8 @@ Use these when the goal is to consume TerraFin through:
 
 Start with:
 
-- [docs/agent/hosted-runtime.md](./docs/agent/hosted-runtime.md)
-- [docs/agent/architecture.md](./docs/agent/architecture.md)
+- [docs/harness/hosted-runtime.md](./docs/harness/hosted-runtime.md)
+- [docs/harness/architecture.md](./docs/harness/architecture.md)
 
 Use this when changing:
 
@@ -159,7 +162,7 @@ When you add a new capability:
    `agent/guru/personas/` if it should be persona-callable.
 6. Run `python scripts/generate-agent-artefacts.py` to refresh the
    sentinel-bounded "Capability inventory" list in SKILL.md and the "Route
-   summary" table in `docs/agent/usage.md`. The `package-smoke` CI job runs
+   summary" table in `docs/skills/usage.md`. The `package-smoke` CI job runs
    `--check` mode and fails if artefacts are stale. Verify locally with
    `terrafin-agent capabilities --name <new-cap>`.
 
@@ -167,7 +170,7 @@ When you add a new capability:
 
 Start with:
 
-- [docs/feature-integration.md](./docs/feature-integration.md)
+- [docs/reference/feature-integration.md](./docs/reference/feature-integration.md)
 
 Use this when deciding:
 
@@ -204,13 +207,13 @@ For public features:
 
 ## Related docs
 
-- [docs/data-layer.md](./docs/data-layer.md)
-- [docs/interface.md](./docs/interface.md)
-- [docs/chart-architecture.md](./docs/chart-architecture.md)
-- [docs/analytics.md](./docs/analytics.md)
-- [docs/analytics-notes.md](./docs/analytics-notes.md) — DCF model details
+- [docs/reference/data-layer.md](./docs/reference/data-layer.md)
+- [docs/guides/interface.md](./docs/guides/interface.md)
+- [docs/reference/chart-architecture.md](./docs/reference/chart-architecture.md)
+- [docs/reference/analytics.md](./docs/reference/analytics.md)
+- [docs/reference/analytics-notes.md](./docs/reference/analytics-notes.md) — DCF model details
   including the `auto` cascade, turnaround schedule math, and projection
   horizon.
-- [docs/api-reference.md](./docs/api-reference.md) — per-route documentation
+- [docs/skills/api-reference.md](./docs/skills/api-reference.md) — per-route documentation
   for `/stock/api/*` and `/agent/api/*`.
-- [docs/caching.md](./docs/caching.md)
+- [docs/reference/caching.md](./docs/reference/caching.md)

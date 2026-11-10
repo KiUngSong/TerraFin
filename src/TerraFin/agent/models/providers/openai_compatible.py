@@ -333,7 +333,7 @@ class OpenAICompatibleResponsesRunner:
 
         Keyed on `created_at`, not on a count: the loop deletes hook-owned messages
         (`TerraFinTurnHook.owned_metadata_tags`) from `conversation.messages` in place
-        on every user turn, so an absolute index silently omits one message: a
+        on every user turn, so an absolute index silently omits one message — a
         deferred research report, or in the early-return case the user's own question.
         """
         if self._strikes_active(state):
