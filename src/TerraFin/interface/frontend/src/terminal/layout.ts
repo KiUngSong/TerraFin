@@ -2,6 +2,7 @@ import type { LayoutPreset } from '../terminal/store';
 
 export type WidgetId =
   | 'ticker'
+  | 'brief'
   | 'sector'
   | 'heatmap'
   | 'watchlist'
@@ -21,6 +22,8 @@ export interface PanelDef {
   number: number;
   area: string;
   tabs: PanelTab[];
+  // A strip that labels itself and needs no tab bar.
+  headerless?: boolean;
 }
 
 export interface PresetDef {
@@ -33,9 +36,10 @@ const TRADER: PresetDef = {
   label: 'Default',
   gridTemplate: {
     columns: '340px 1fr 360px',
-    rows: '46px 1fr',
+    rows: '46px 44px 1fr',
     areas: `
       "tape tape tape"
+      "brief brief brief"
       "watch heat fng"
     `,
   },
@@ -44,6 +48,13 @@ const TRADER: PresetDef = {
       number: 1,
       area: 'tape',
       tabs: [{ id: 'ticker', label: 'Tape', source: 'yf' }],
+      headerless: true,
+    },
+    {
+      number: 5,
+      area: 'brief',
+      tabs: [{ id: 'brief', label: 'NexTick' }],
+      headerless: true,
     },
     {
       number: 2,

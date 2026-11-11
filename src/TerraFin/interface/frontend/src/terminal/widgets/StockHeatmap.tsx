@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import TradingViewEmbed, { type TradingViewTheme } from './TradingViewEmbed';
 import { useViewportTier } from '../../shared/responsive';
 import { useTerminalStore } from '../../terminal/store';
@@ -7,7 +7,6 @@ type HeatmapGrouping = 'sector' | 'name' | 'no_group';
 
 interface StockHeatmapProps {
   theme?: TradingViewTheme;
-  height?: number;
   grouping?: HeatmapGrouping;
   dataSource?: string;
 }
@@ -16,7 +15,6 @@ const SCRIPT_SRC = 'https://s3.tradingview.com/external-embedding/embed-widget-s
 
 const StockHeatmap: React.FC<StockHeatmapProps> = ({
   theme: themeProp,
-  height = 500,
   grouping = 'sector',
   dataSource = 'SPX500',
 }) => {
@@ -31,7 +29,28 @@ const StockHeatmap: React.FC<StockHeatmapProps> = ({
     const n = parseInt(raw, 10);
     return Number.isFinite(n) && n > 0 ? n : 460;
   }, []);
-  const responsiveHeight = isMobile ? mobileHeight : isTablet ? 400 : height;
+  // On desktop the map fills its panel. TradingView sizes the map once at load,
+  // so a new height reloads it, after the resize settles.
+  const boxRef = useRef<HTMLDivElement>(null);
+  const [fillHeight, setFillHeight] = useState<number | null>(null);
+  useEffect(() => {
+    const box = boxRef.current;
+    if (box == null || isMobile || isTablet) return;
+    let timer: number | undefined;
+    const observer = new ResizeObserver(([entry]) => {
+      window.clearTimeout(timer);
+      timer = window.setTimeout(() => {
+        const h = Math.floor(entry.contentRect.height / 10) * 10;
+        if (h > 0) setFillHeight(h);
+      }, 200);
+    });
+    observer.observe(box);
+    return () => {
+      window.clearTimeout(timer);
+      observer.disconnect();
+    };
+  }, [isMobile, isTablet]);
+  const responsiveHeight = isMobile ? mobileHeight : isTablet ? 400 : fillHeight ?? 0;
   const responsiveMinWidth = isMobile ? 540 : isTablet ? 640 : undefined;
 
   const config = useMemo(
@@ -55,7 +74,9 @@ const StockHeatmap: React.FC<StockHeatmapProps> = ({
   );
 
   return (
-    <TradingViewEmbed
+    <div ref={boxRef} style={{ height: isMobile || isTablet ? undefined : '100%', minHeight: 0 }}>
+    {/* On desktop the map waits for the panel's height, so it loads once. */}
+    {!isMobile && !isTablet && fillHeight == null ? null : <TradingViewEmbed
       key={theme}
       scriptSrc={SCRIPT_SRC}
       config={config}
@@ -63,7 +84,8 @@ const StockHeatmap: React.FC<StockHeatmapProps> = ({
       theme={theme}
       contentMinWidth={responsiveMinWidth}
       allowOverflowX={responsiveMinWidth != null}
-    />
+    />}
+    </div>
   );
 };
 

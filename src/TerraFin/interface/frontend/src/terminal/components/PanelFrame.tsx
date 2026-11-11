@@ -11,8 +11,7 @@ const PanelFrame: React.FC<PanelFrameProps> = ({ panel, catalog, height }) => {
   const [activeId, setActiveId] = useState<WidgetId>(panel.tabs[0].id);
   const rootRef = useRef<HTMLDivElement>(null);
   const activeTab = panel.tabs.find((t) => t.id === activeId) ?? panel.tabs[0];
-  // Tape (panel 1) headerless — the marquee is self-labeling.
-  const headerless = panel.number === 1;
+  const headerless = panel.headerless === true;
 
   const focusPanel = useCallback(() => {
     rootRef.current?.focus({ preventScroll: true });

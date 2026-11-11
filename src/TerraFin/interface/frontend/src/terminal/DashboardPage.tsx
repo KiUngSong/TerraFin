@@ -2,6 +2,7 @@ import React, { useEffect, useMemo } from 'react';
 import TerminalWorkspace from './components/TerminalWorkspace';
 import LiveTickerTape from './widgets/LiveTickerTape';
 import MacroStack from './widgets/MacroStack';
+import NextickBrief from './widgets/NextickBrief';
 import SectorGrid, { prefetchSectors } from './widgets/SectorGrid';
 import StockHeatmap from './widgets/StockHeatmap';
 import SentimentCalendarStack from './widgets/SentimentCalendarStack';
@@ -13,8 +14,9 @@ import { useTerminalStore } from '../terminal/store';
 // Wrapping in TerminalPane added a second hidden header layer (DA audit).
 const WIDGET_CATALOG: Record<WidgetId, React.ReactNode> = {
   ticker: <LiveTickerTape />,
+  brief: <NextickBrief />,
   sector: <SectorGrid />,
-  heatmap: <StockHeatmap height={500} />,
+  heatmap: <StockHeatmap />,
   fear: <SentimentCalendarStack />,
   watchlist: <WatchlistSnapshotCard />,
   macro: <MacroStack />,

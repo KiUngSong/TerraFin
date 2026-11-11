@@ -7,17 +7,10 @@ interface CatalystEvent {
   category: string;
 }
 
-const fmtDate = (iso: string): string => {
-  try {
-    const d = new Date(iso);
-    if (Number.isNaN(d.getTime())) return iso.slice(0, 10);
-    const mm = String(d.getMonth() + 1).padStart(2, "0");
-    const dd = String(d.getDate()).padStart(2, "0");
-    return `${mm}/${dd}`;
-  } catch {
-    return iso;
-  }
-};
+const MAX_EVENTS = 12;
+
+// The date part, so a midnight-UTC start shows the same day in every time zone.
+const fmtDate = (iso: string): string => `${iso.slice(5, 7)}/${iso.slice(8, 10)}`;
 
 const fmtCategory = (cat: string): string => {
   const m: Record<string, string> = {
@@ -40,12 +33,29 @@ const UpcomingCatalysts: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const now = useMemo(() => new Date(), []);
 
+  // The API returns a whole month from its first day, so this month and the next
+  // are read and only events from today on are kept.
   useEffect(() => {
-    const month = now.getMonth() + 1;
-    const year = now.getFullYear();
-    fetch(`/calendar/api/events?month=${month}&year=${year}&limit=12`)
-      .then((res) => (res.ok ? res.json() : Promise.reject(new Error(`${res.status}`))))
-      .then((payload: { events?: CatalystEvent[] }) => setEvents(payload.events || []))
+    const months = [0, 1].map((offset) => new Date(now.getFullYear(), now.getMonth() + offset, 1));
+    // `start` is a calendar date at midnight, so events compare by their date part.
+    const pad = (n: number) => String(n).padStart(2, "0");
+    const today = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+    Promise.all(
+      months.map((m) =>
+        fetch(`/calendar/api/events?month=${m.getMonth() + 1}&year=${m.getFullYear()}`).then((res) =>
+          res.ok ? res.json() : Promise.reject(new Error(`${res.status}`)),
+        ),
+      ),
+    )
+      .then((payloads: Array<{ events?: CatalystEvent[] }>) =>
+        setEvents(
+          payloads
+            .flatMap((p) => p.events || [])
+            .filter((e) => e.start.slice(0, 10) >= today)
+            .sort((a, b) => a.start.slice(0, 10).localeCompare(b.start.slice(0, 10)))
+            .slice(0, MAX_EVENTS),
+        ),
+      )
       .catch(() => setEvents([]))
       .finally(() => setLoading(false));
   }, [now]);

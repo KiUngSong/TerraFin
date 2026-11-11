@@ -539,6 +539,130 @@ select:focus-visible,
   border: 0;
 }
 
+/* NexTick Daily strip (panel 5): one line under the tape, opening the issue
+   in a right-hand drawer. */
+.tf-brief {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  height: 100%;
+  padding: 0 14px;
+  background: transparent;
+  border: 0;
+  color: var(--tf-text);
+  font-family: var(--tf-sans);
+  font-size: var(--tf-fs-base);
+  text-align: left;
+  cursor: pointer;
+  min-width: 0;
+}
+.tf-brief--empty { cursor: default; }
+.tf-brief:hover .tf-brief__headline { text-decoration: underline; }
+.tf-brief__eyebrow {
+  flex: 0 0 auto;
+  color: var(--tf-amber);
+  font-size: var(--tf-fs-xs);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.tf-brief__new {
+  flex: 0 0 auto;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--tf-amber);
+  color: var(--tf-bg);
+  font-size: var(--tf-fs-micro);
+  font-weight: 700;
+  text-transform: uppercase;
+}
+.tf-brief__date {
+  flex: 0 0 auto;
+  color: var(--tf-muted-strong);
+  font-size: var(--tf-fs-xs);
+  font-variant-numeric: tabular-nums;
+}
+.tf-brief__headline {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--tf-text-strong);
+  font-weight: 700;
+}
+.tf-brief__status {
+  color: var(--tf-muted);
+  font-size: var(--tf-fs-xs);
+}
+.tf-brief__meta {
+  flex: 0 0 auto;
+  display: inline-flex;
+  gap: 10px;
+  color: var(--tf-muted);
+  font-size: var(--tf-fs-xs);
+}
+.tf-brief__cta { color: var(--tf-amber); font-weight: 600; }
+
+.tf-brief-drawer {
+  position: fixed;
+  inset: 0;
+  z-index: 300;
+}
+.tf-brief-drawer__backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+}
+.tf-brief-drawer__panel {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  flex-direction: column;
+  width: min(720px, 100vw);
+  background: var(--tf-bg-pane);
+  border-left: 1px solid var(--tf-border);
+}
+.tf-brief-drawer__head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: var(--tf-pane-header-h);
+  padding: 0 8px 0 14px;
+  border-bottom: 1px solid var(--tf-border);
+  flex: 0 0 auto;
+}
+.tf-brief-drawer__link {
+  margin-left: auto;
+  color: var(--tf-amber);
+  font-size: var(--tf-fs-xs);
+  text-decoration: none;
+}
+.tf-brief-drawer__close {
+  width: var(--tf-tap-min);
+  height: var(--tf-tap-min);
+  background: transparent;
+  border: 0;
+  color: var(--tf-muted-strong);
+  font-size: var(--tf-fs-xl);
+  cursor: pointer;
+}
+.tf-brief-drawer__frame {
+  flex: 1 1 auto;
+  width: 100%;
+  border: 0;
+  background: #fff;
+}
+
+@media (max-width: 900px) {
+  .tf-brief { padding: 10px 12px; flex-wrap: wrap; row-gap: 4px; }
+  .tf-brief__headline { flex-basis: 100%; order: 1; white-space: normal; }
+  .tf-brief__meta { margin-left: auto; }
+}
+
 /* ============================================================
    Shell composition: funcbar + workspace + statusbar
    ============================================================ */

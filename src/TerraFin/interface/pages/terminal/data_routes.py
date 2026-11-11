@@ -5,6 +5,7 @@ from pydantic import BaseModel
 
 from TerraFin.data import get_data_factory
 from TerraFin.data.cache.registry import get_cache_manager, refresh_all_due
+from TerraFin.data.providers.web.nextick import latest_english_issue
 from TerraFin.data.watchlist_service import (
     WatchlistConfigurationError,
     WatchlistConflictError,
@@ -138,6 +139,17 @@ class FearGreedResponse(BaseModel):
     previous_close: int | None = None
     previous_1_week: int | None = None
     previous_1_month: int | None = None
+
+
+class NextickIssueResponse(BaseModel):
+    date: str
+    headline: str
+    url: str
+    publishedAt: str | None = None
+
+
+class NextickLatestResponse(BaseModel):
+    issue: NextickIssueResponse | None = None
 
 
 class CacheRefreshResponse(BaseModel):
@@ -551,6 +563,15 @@ def create_terminal_data_router() -> APIRouter:
     @router.get(f"{TERMINAL_API_PREFIX}/fear-greed", response_model=FearGreedResponse)
     def api_get_fear_greed():
         return FearGreedResponse.model_validate(data_factory.get_panel_data("fear_greed"))
+
+    @router.get(f"{TERMINAL_API_PREFIX}/nextick/latest", response_model=NextickLatestResponse)
+    def api_get_nextick_latest():
+        try:
+            return NextickLatestResponse(issue=latest_english_issue())
+        except Exception as exc:
+            raise HTTPException(
+                status_code=502, detail=f"NexTick Daily's manifest could not be read ({exc}). Try again in a minute."
+            ) from exc
 
     @router.get(f"{TERMINAL_API_PREFIX}/cache-status", response_model=CacheStatusResponse)
     def api_get_cache_status():
