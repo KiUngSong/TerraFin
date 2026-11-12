@@ -85,15 +85,15 @@ def test_create_internal_session_allows_hidden_guru_definitions(tmp_path) -> Non
 def test_existing_session_runtime_model_tracks_current_default_model(tmp_path) -> None:
     runtime = _runtime(transcript_root=tmp_path / "transcripts")
     runtime.default_runtime_model = TerraFinRuntimeModel(
-        model_ref="openai/gpt-4.1-mini",
+        model_ref="openai/gpt-6-luna",
         provider_id="openai",
         provider_label="OpenAI",
-        model_id="gpt-4.1-mini",
+        model_id="gpt-6-luna",
     )
 
     context = runtime.create_session(DEFAULT_HOSTED_AGENT_NAME, session_id="hosted:model-sync")
     record = runtime.get_session_record(context.session.session_id)
-    assert record.context.session.metadata["runtimeModel"]["modelRef"] == "openai/gpt-4.1-mini"
+    assert record.context.session.metadata["runtimeModel"]["modelRef"] == "openai/gpt-6-luna"
 
     runtime.default_runtime_model = TerraFinRuntimeModel(
         model_ref="google/gemini-3.1-pro-preview",

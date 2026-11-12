@@ -66,7 +66,7 @@ describe('buildTurnActivities', () => {
       ['valuation · MSFT', 'market_snapshot · MSFT'],
     ]);
     expect(summarizeTurn(turns[1])).toBe('Used 2 tools: valuation · MSFT, market_snapshot · MSFT');
-    expect(formatTurnFooter(turns[1], 'OpenAI / gpt-5')).toBe('Completed in 5s · 2 tools · OpenAI / gpt-5');
+    expect(formatTurnFooter(turns[1], 'OpenAI / gpt-6-luna')).toBe('Completed in 5s · 2 tools · OpenAI / gpt-6-luna');
   });
 
   it('shows a failed call by name and error, without claiming a capabilityCall', () => {
@@ -155,8 +155,8 @@ describe('turn endings and tokens', () => {
     ];
     const turns = buildTurnActivities(messages, [call(1, 'market_snapshot', 'AAPL')]);
     expect(turns[0].tokens).toEqual({ input: 12400, output: 380 });
-    expect(formatTurnFooter(turns[0], 'OpenAI / gpt-5')).toBe(
-      'Completed in 3s · 1 tool · ↑12.4K ↓380 tokens · OpenAI / gpt-5'
+    expect(formatTurnFooter(turns[0], 'OpenAI / gpt-6-luna')).toBe(
+      'Completed in 3s · 1 tool · ↑12.4K ↓380 tokens · OpenAI / gpt-6-luna'
     );
     expect(formatTurnFooter(turns[1], '', sessionTokens(messages))).toBe(
       'Completed in 2s · ↑900 ↓40 tokens · session ↑13.3K ↓420'

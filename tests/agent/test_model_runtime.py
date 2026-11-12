@@ -63,7 +63,7 @@ def test_provider_registry_parses_valid_model_refs() -> None:
 
 @pytest.mark.parametrize(
     "model_ref",
-    ["", "openai", " openai /gpt-4.1-mini ", "/gpt-4.1-mini", "openai/"],
+    ["", "openai", " openai /gpt-6-luna ", "/gpt-6-luna", "openai/"],
 )
 def test_provider_registry_rejects_invalid_model_refs(model_ref: str) -> None:
     registry = TerraFinModelProviderRegistry()
@@ -76,9 +76,9 @@ def test_provider_registry_rejects_invalid_model_refs(model_ref: str) -> None:
 def test_provider_registry_maps_legacy_openai_env_to_canonical_ref() -> None:
     registry = build_hosted_model_provider_registry()
 
-    resolved = registry.resolve_default_model_ref(env={"TERRAFIN_OPENAI_MODEL": "gpt-4.1-mini"})
+    resolved = registry.resolve_default_model_ref(env={"TERRAFIN_OPENAI_MODEL": "gpt-6-luna"})
 
-    assert resolved.model_ref == "openai/gpt-4.1-mini"
+    assert resolved.model_ref == "openai/gpt-6-luna"
     assert resolved.provider_id == "openai"
 
 
@@ -119,13 +119,13 @@ def test_a_saved_ref_that_is_not_a_removed_provider_keeps_its_own_error(tmp_path
 def test_saved_default_ref_for_removed_provider_names_the_stale_ref(tmp_path) -> None:
     registry = build_hosted_model_provider_registry()
     env = {"TERRAFIN_AGENT_MODELS_PATH": str(tmp_path / "agent-models.json")}
-    set_saved_default_model_ref("github-copilot/gpt-4o", env)
+    set_saved_default_model_ref("github-copilot/gpt-6-luna", env)
 
     with pytest.raises(TerraFinModelConfigError) as excinfo:
         registry.resolve_default_model_ref(env=env)
 
     message = str(excinfo.value)
-    assert "github-copilot/gpt-4o" in message
+    assert "github-copilot/gpt-6-luna" in message
     assert "terrafin-agent models use" in message
 
 
@@ -160,13 +160,13 @@ def test_routed_model_client_pins_runtime_model_to_session_metadata() -> None:
 
 def test_hosted_agent_loop_resyncs_saved_default_model_without_rebuild(monkeypatch, tmp_path) -> None:
     env = {"TERRAFIN_AGENT_MODELS_PATH": str(tmp_path / "agent-models.json")}
-    set_saved_default_model_ref("openai/gpt-4.1-mini", env)
+    set_saved_default_model_ref("openai/gpt-6-luna", env)
     monkeypatch.setenv("TERRAFIN_AGENT_MODELS_PATH", env["TERRAFIN_AGENT_MODELS_PATH"])
 
     reset_hosted_agent_loop()
     try:
         loop = get_hosted_agent_loop()
-        assert loop.model_client.default_model.model_ref == "openai/gpt-4.1-mini"
+        assert loop.model_client.default_model.model_ref == "openai/gpt-6-luna"
 
         set_saved_default_model_ref("google/gemini-3.1-pro-preview", env)
 

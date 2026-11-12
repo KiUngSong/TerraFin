@@ -481,10 +481,10 @@ class _FakeHostedLoop:
         self.tool_adapter = _FakeHostedToolAdapter(self.tools)
         self._conversations: dict[str, TerraFinHostedConversation] = {}
         runtime_model = {
-            "modelRef": "openai/gpt-4.1-mini",
+            "modelRef": "openai/gpt-6-luna",
             "providerId": "openai",
             "providerLabel": "OpenAI",
-            "modelId": "gpt-4.1-mini",
+            "modelId": "gpt-6-luna",
             "metadata": {},
         }
         self.model_client = SimpleNamespace(
@@ -767,7 +767,7 @@ def test_hosted_agent_runtime_routes(monkeypatch, lock_sandbox: str) -> None:
     catalog_payload = catalog.json()
     assert catalog_payload["agents"][0]["name"] == DEFAULT_HOSTED_AGENT_NAME
     assert catalog_payload["agents"][0]["tools"][0]["name"] == "market_snapshot"
-    assert catalog_payload["agents"][0]["runtimeModel"]["modelRef"] == "openai/gpt-4.1-mini"
+    assert catalog_payload["agents"][0]["runtimeModel"]["modelRef"] == "openai/gpt-6-luna"
     assert catalog_payload["agents"][0]["runtimeConfigured"] is True
     assert catalog_payload["agents"][0]["runtimeSetupMessage"] is None
 
@@ -790,7 +790,7 @@ def test_hosted_agent_runtime_routes(monkeypatch, lock_sandbox: str) -> None:
     session_resp = client.get("/agent/api/runtime/sessions/hosted:http-test")
     assert session_resp.status_code == 200
     assert session_resp.json()["sessionId"] == "hosted:http-test"
-    assert session_resp.json()["runtimeModel"]["modelId"] == "gpt-4.1-mini"
+    assert session_resp.json()["runtimeModel"]["modelId"] == "gpt-6-luna"
 
     sessions_resp = client.get("/agent/api/runtime/sessions")
     assert sessions_resp.status_code == 200
