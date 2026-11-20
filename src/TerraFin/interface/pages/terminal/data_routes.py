@@ -5,6 +5,7 @@ from pydantic import BaseModel
 
 from TerraFin.data import get_data_factory
 from TerraFin.data.cache.registry import get_cache_manager, refresh_all_due
+from TerraFin.data.providers.market.market_indicator import MARKET_INDICATOR_REGISTRY
 from TerraFin.data.providers.web.nextick import latest_english_issue
 from TerraFin.data.watchlist_service import (
     WatchlistConfigurationError,
@@ -90,6 +91,7 @@ class BreadthMetricResponse(BaseModel):
 
 class MarketBreadthResponse(BaseModel):
     metrics: list[BreadthMetricResponse]
+    description: str = ""
 
 
 class SectorTileResponse(BaseModel):
@@ -534,7 +536,10 @@ def create_terminal_data_router() -> APIRouter:
     @router.get(f"{TERMINAL_API_PREFIX}/market-breadth", response_model=MarketBreadthResponse)
     def api_get_market_breadth():
         metrics = data_factory.get_panel_data("market_breadth")
-        return MarketBreadthResponse(metrics=[BreadthMetricResponse.model_validate(metric) for metric in metrics])
+        return MarketBreadthResponse(
+            metrics=[BreadthMetricResponse.model_validate(metric) for metric in metrics],
+            description=MARKET_INDICATOR_REGISTRY["Net Breadth"].description,
+        )
 
     @router.get(f"{TERMINAL_API_PREFIX}/trailing-forward-pe-spread", response_model=TrailingForwardPeSpreadResponse)
     def api_get_trailing_forward_pe_spread():
@@ -542,10 +547,7 @@ def create_terminal_data_router() -> APIRouter:
         summary = payload.get("summary", {}) if isinstance(payload, dict) else {}
         coverage = payload.get("coverage", {}) if isinstance(payload, dict) else {}
         history = payload.get("history", []) if isinstance(payload, dict) else []
-        description = (
-            "Trailing P/E minus forward P/E, used as a rough proxy for how much "
-            "future earnings expectations diverge from trailing earnings."
-        )
+        description = MARKET_INDICATOR_REGISTRY["Trailing-Forward P/E Spread"].description
         return TrailingForwardPeSpreadResponse(
             date=str(payload.get("date", "")) if isinstance(payload, dict) else "",
             description=description,

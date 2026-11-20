@@ -109,7 +109,21 @@ def format_series_item(df: TimeSeriesDataFrame | None, default_id: str = "Primar
     zones = _serialize_zones(df)
     if zones:
         item["zones"] = zones
+    description = _registry_description(item["id"])
+    if description:
+        item["description"] = description  # feeds the legend info button, as custom series do
     return item
+
+
+def _registry_description(name: str) -> str:
+    from TerraFin.data.providers.economic import indicator_registry
+    from TerraFin.data.providers.market import MARKET_INDICATOR_REGISTRY
+
+    if name in MARKET_INDICATOR_REGISTRY:
+        return MARKET_INDICATOR_REGISTRY[name].description
+    if name in indicator_registry._indicators:
+        return indicator_registry._indicators[name].description
+    return ""
 
 
 def format_dataframe(df: TimeSeriesDataFrame | None) -> dict:

@@ -1,4 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import InfoHint from '../../dcf/InfoHint';
+import { EYEBROW_STYLE } from './stackStyles';
 
 interface BreadthMetric {
   label: string;
@@ -14,12 +16,16 @@ const num = (s: string | undefined): number | null => {
 
 const MarketBreadthCard: React.FC = () => {
   const [metrics, setMetrics] = useState<BreadthMetric[]>([]);
+  const [description, setDescription] = useState('');
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     fetch('/terminal/api/market-breadth')
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`${r.status}`))))
-      .then((p: { metrics?: BreadthMetric[] }) => setMetrics(p.metrics || []))
+      .then((p: { metrics?: BreadthMetric[]; description?: string }) => {
+        setMetrics(p.metrics || []);
+        setDescription(p.description || '');
+      })
       .catch(() => setMetrics([]))
       .finally(() => setLoading(false));
   }, []);
@@ -39,6 +45,11 @@ const MarketBreadthCard: React.FC = () => {
   }, [metrics]);
 
   return (
+    <>
+    <div style={{ ...EYEBROW_STYLE, display: 'flex', alignItems: 'center', gap: 6 }}>
+      Market Breadth
+      {description ? <InfoHint text={description} compact /> : null}
+    </div>
     <a
       href="/market-insights?ticker=Net%20Breadth"
       className="tf-kv tf-kv--link"
@@ -74,6 +85,7 @@ const MarketBreadthCard: React.FC = () => {
       ) : null}
       <div className="tf-kv__row tf-kv__row--span tf-kv__cta">Open Breadth chart →</div>
     </a>
+    </>
   );
 };
 

@@ -459,7 +459,7 @@ MARKET_INDICATOR_REGISTRY = {
         get_full_history_backfill=_fear_greed_full_history_backfill,
     ),
     "Net Breadth": MarketIndicator(
-        description="Daily S&P 500 net breadth: advancers minus decliners as a share of the basket.",
+        description="Share of S&P 500 members closing up. Above 55% = broad advance; below 45% = broad decline.",
         key="net-breadth",
         get_data=_fetch_net_breadth,
         get_recent_history=_net_breadth_recent_history,
@@ -473,7 +473,7 @@ MARKET_INDICATOR_REGISTRY = {
         get_full_history_backfill=_cape_full_history_backfill,
     ),
     "Trailing-Forward P/E Spread": MarketIndicator(
-        description="Trailing-forward P/E spread snapshot history for top market-cap companies.",
+        description="S&P 500 median of trailing minus forward P/E. Higher = more growth priced in; below 0 = earnings expected to fall.",
         key="trailing-forward-pe-spread",
         get_data=_fetch_trailing_forward_pe,
         get_recent_history=_trailing_forward_pe_recent_history,

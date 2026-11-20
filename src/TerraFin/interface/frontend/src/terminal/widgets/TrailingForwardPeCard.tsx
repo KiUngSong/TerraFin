@@ -1,4 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import InfoHint from '../../dcf/InfoHint';
+import { EYEBROW_STYLE } from './stackStyles';
 
 interface TrailingForwardPeHistoryPoint {
   date: string;
@@ -52,6 +54,11 @@ const TrailingForwardPeCard: React.FC = () => {
   }, [payload]);
 
   return (
+    <>
+    <div style={{ ...EYEBROW_STYLE, display: 'flex', alignItems: 'center', gap: 6 }}>
+      Trailing / Forward P/E
+      {payload?.description ? <InfoHint text={payload.description} compact /> : null}
+    </div>
     <a
       href="/market-insights?ticker=Trailing-Forward%20P%2FE%20Spread"
       className="tf-kv tf-kv--link"
@@ -99,6 +106,7 @@ const TrailingForwardPeCard: React.FC = () => {
       )}
       <div className="tf-kv__row tf-kv__row--span tf-kv__cta">Open P/E chart →</div>
     </a>
+    </>
   );
 };
 
