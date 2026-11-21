@@ -14,6 +14,15 @@ from TerraFin.analytics.analysis.patterns import breakout, meanrev
 from TerraFin.analytics.analysis.patterns._base import is_krx_ticker, weekly_bars
 
 
+# The regime gate reads live index data, so a down market would fail the detector tests; gate tests patch it themselves.
+@pytest.fixture(autouse=True)
+def _regime_unknown(monkeypatch):
+    from TerraFin.analytics.analysis.patterns import trend
+
+    for module in (breakout, trend):
+        monkeypatch.setattr(module, "venue_trend_ok", lambda ticker, period=50: None)
+
+
 def _frame(closes, *, start="2020-01-01", volume=1e6):
     idx = pd.date_range(start, periods=len(closes), freq="B")
     return pd.DataFrame(
